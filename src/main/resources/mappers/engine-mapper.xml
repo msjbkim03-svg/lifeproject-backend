@@ -42,6 +42,15 @@
 		WHERE ROWNUM = 1
 	</select>
 
+	<!-- C03 가족과 삶·같은 1초에 태어난 사람들: 나라·성별 이름 목록 (인생 번호로 늘 같은 이름을 고르게 이름순) -->
+	<select id="selectNameList" parameterType="map" resultType="string">
+		SELECT PERSON_NAME
+		FROM PERSON_NAME
+		WHERE COUNTRY_CODE = #{countryCode}
+		  AND GENDER = #{gender}
+		ORDER BY PERSON_NAME
+	</select>
+
 	<!-- C02: 당시 국가명 -->
 	<select id="selectHistName" parameterType="com.example.demo.engine.LifeDTO"
 		resultType="string">
@@ -341,6 +350,20 @@
 		VALUES (SEQ_LIFE_EVENT_LOG.NEXTVAL, #{lifeId}, #{age}, #{yearNo},
 		        #{eventId, jdbcType=VARCHAR}, #{choiceId, jdbcType=NUMERIC}, #{logText}, #{isAi})
 	</insert>
+
+	<!-- C03 이어하기: 지금까지의 인생 기록 (최근 나이부터, 같은 나이는 일어난 순서) -->
+	<select id="selectEventLogs" parameterType="int" resultType="com.example.demo.engine.EventLogDTO">
+		SELECT LIFE_ID   AS lifeId,
+		       AGE       AS age,
+		       YEAR_NO   AS yearNo,
+		       EVENT_ID  AS eventId,
+		       CHOICE_ID AS choiceId,
+		       LOG_TEXT  AS logText,
+		       IS_AI     AS isAi
+		FROM LIFE_EVENT_LOG
+		WHERE LIFE_ID = #{lifeId}
+		ORDER BY AGE DESC, LOG_ID ASC
+	</select>
 
 	<!-- 고르기를 기다리는 선택 이벤트의 상황 문장 (이어하기 때 선택 창 다시 띄우기) -->
 	<select id="selectPendingText" parameterType="com.example.demo.engine.LifeDTO" resultType="string">

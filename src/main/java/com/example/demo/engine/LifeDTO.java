@@ -61,6 +61,15 @@ public class LifeDTO {
 	private String regionCode;	// [화면용] 지금 사는 나라의 권역 (C08 마을 그림: EAST, SOUTHEAST, SOUTH, CENTRAL, WEST)
 	private boolean needDestination;	// [화면용] 이민 목적지 고르기 창 띄우기 (C10, '떠난다'를 고른 뒤)
 	private List<DestinationDTO> destinations;	// [화면용] 이민 목적지 후보 (윤아님 pickDestinations, 최대 5곳)
+	private List<ChoiceCostDTO> choiceCosts;	// [화면용] 선택지 중 큰돈 드는 것의 비용·대출 (C09, 모자라면 고를 수 없음)
+	private List<FamilyMemberDTO> family;	// [화면용] 가족과 삶 (어머니·아버지 이름·나이·직업, 형제자매, 배우자, 자녀)
+	private List<PeerDTO> peers;	// [화면용] 같은 1초에 태어난 사람들 4명
+	private List<MoneyLineDTO> moneyFlow;	// [화면용] 지난 1년 순자산 내역 (/next 응답에만)
+	private Long moneyDelta;	// [화면용] 지난 1년 순자산 변화 (달러)
+	private Double krwPerUsd;	// [화면용] 달러 → 한국 체감 원 (원작: 구매력 달러 × 850원)
+	private Double incomeRankCountry;	// [화면용] 소득 위치: 그 나라에서 0~1 (1에 가까울수록 상위)
+	private Double incomeRankAsia;	// [화면용] 소득 위치: 등록된 나라 전체에서 0~1 (출생아 수로 가중)
+	private Long spouseIncome;	// [화면용] 배우자 소득 (엔진은 그 나라 중위 소득을 버는 배우자로 봄)
 
 	public int getLifeId() {
 		return lifeId;
@@ -501,5 +510,77 @@ public class LifeDTO {
 
 	public void setDestinations(List<DestinationDTO> destinations) {
 		this.destinations = destinations;
+	}
+
+	public List<ChoiceCostDTO> getChoiceCosts() {
+		return choiceCosts;
+	}
+
+	public void setChoiceCosts(List<ChoiceCostDTO> choiceCosts) {
+		this.choiceCosts = choiceCosts;
+	}
+
+	public List<FamilyMemberDTO> getFamily() {
+		return family;
+	}
+
+	public void setFamily(List<FamilyMemberDTO> family) {
+		this.family = family;
+	}
+
+	public List<PeerDTO> getPeers() {
+		return peers;
+	}
+
+	public void setPeers(List<PeerDTO> peers) {
+		this.peers = peers;
+	}
+
+	public List<MoneyLineDTO> getMoneyFlow() {
+		return moneyFlow;
+	}
+
+	public void setMoneyFlow(List<MoneyLineDTO> moneyFlow) {
+		this.moneyFlow = moneyFlow;
+	}
+
+	public Long getMoneyDelta() {
+		return moneyDelta;
+	}
+
+	public void setMoneyDelta(Long moneyDelta) {
+		this.moneyDelta = moneyDelta;
+	}
+
+	public Double getKrwPerUsd() {
+		return krwPerUsd;
+	}
+
+	public void setKrwPerUsd(Double krwPerUsd) {
+		this.krwPerUsd = krwPerUsd;
+	}
+
+	public Double getIncomeRankCountry() {
+		return incomeRankCountry;
+	}
+
+	public void setIncomeRankCountry(Double incomeRankCountry) {
+		this.incomeRankCountry = incomeRankCountry;
+	}
+
+	public Double getIncomeRankAsia() {
+		return incomeRankAsia;
+	}
+
+	public void setIncomeRankAsia(Double incomeRankAsia) {
+		this.incomeRankAsia = incomeRankAsia;
+	}
+
+	public Long getSpouseIncome() {
+		return spouseIncome;
+	}
+
+	public void setSpouseIncome(Long spouseIncome) {
+		this.spouseIncome = spouseIncome;
 	}
 }
