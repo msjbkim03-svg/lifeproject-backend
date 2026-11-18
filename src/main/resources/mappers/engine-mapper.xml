@@ -442,6 +442,12 @@
 		resultType="com.example.demo.engine.RegionStatDTO">
 		SELECT * FROM (
 			SELECT r.ENROLL_ELEM   AS enrollElem,
+			       r.ENROLL_MIDDLE AS enrollMiddle,
+			       r.ENROLL_HIGH   AS enrollHigh,
+			       r.ENROLL_UNI    AS enrollUni,
+			       r.AGRI_RATE     AS agriRate,
+			       r.INDUSTRY_RATE AS industryRate,
+			       r.SERVICE_RATE  AS serviceRate
 			FROM REGION_STAT r
 			JOIN COUNTRY c ON r.REGION_CODE = c.REGION_CODE
 			WHERE c.COUNTRY_CODE = #{currentCountry}
