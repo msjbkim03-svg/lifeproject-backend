@@ -92,6 +92,29 @@ public class EngineController {
 		return ResponseEntity.ok(list);
 	}
 
+	// C03 인생 지도: 한 해씩 남긴 기록  GET /api/engine/years?lifeId=...&guestToken=...
+	@GetMapping("/api/engine/years")
+	public ResponseEntity<?> years(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		java.util.List<YearLogDTO> list = engineService.myYearLogs(lifeId, loginMemberId(auth), guestToken);
+		if (list == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		return ResponseEntity.ok(list);
+	}
+
+	// C03 나라 패널  GET /api/engine/country?lifeId=...&guestToken=...&view=cur|born
+	@GetMapping("/api/engine/country")
+	public ResponseEntity<?> country(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
+			@RequestParam(required = false) String view,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		CountryInfoDTO info = engineService.countryInfo(lifeId, loginMemberId(auth), guestToken, view);
+		if (info == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		return ResponseEntity.ok(info);
+	}
+
 	// C03 1년 진행  POST /api/engine/next  { lifeId, guestToken }
 	@PostMapping("/api/engine/next")
 	public ResponseEntity<?> nextYear(@RequestBody EngineRequestDTO req,

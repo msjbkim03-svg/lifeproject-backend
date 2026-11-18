@@ -610,6 +610,18 @@ public class EngineService {
 	// 진행 화면에 함께 보내는 값 (fillRegion 끝에서)
 	private void fillView(LifeDTO life, CountryStatDTO stat) {
 		life.setKrwPerUsd(krwPerUsd(stat));
+		// 태어난 해 기대수명 (원작 e0): 화면의 '1년 ≈ n초'·인생 지도 기대수명 칸에 씀
+		//   DB에서 다시 읽은 인생(1년 진행·이어하기)에는 이 값이 없어서 태어난 나라·연대 통계에서 채움
+		if (life.getLifeExpectancy() == null) {
+			for (CountryStatDTO c : birthList(life.getBirthYear() / 10 * 10)) {
+				if (c.getCountryCode().equals(life.getBirthCountry())) {
+					life.setLifeExpectancy(c.getLifeExpectancy());
+					life.setInfantMortality(c.getInfantMortality());
+					life.setGdpPerCapita(c.getGdpPerCapita());
+					break;
+				}
+			}
+		}
 		double med = medIncome(life.getCurrentCountry(), stat);
 		boolean partner = "Y".equals(life.getMarriedYn()) && life.getCurrentAge() < retireAge(life, stat);
 		life.setSpouseIncome(partner ? Math.round(med) : null);
@@ -1025,6 +1037,56 @@ public class EngineService {
 			return null;
 		}
 		return engineDao.selectEventLogs(lifeId);
+	}
+
+	// C03 인생 지도: 지금까지 한 해씩 남긴 기록 (칸에 마우스를 올리면 그해 행복·건강·순자산)
+	public List<YearLogDTO> myYearLogs(int lifeId, Integer memberId, String guestToken) {
+		if (loadMyLife(lifeId, memberId, guestToken) == null) {
+			return null;
+		}
+		return engineDao.selectYearLogs(lifeId);
+	}
+
+	// C03 나라 패널 (원작 나라 패널): 그해 사는 나라, view가 born이면 태어난 나라
+	//   통계는 그해와 가장 가까운 연대 값 (나라·연대마다 한 번 읽으면 서버 메모리에 보관)
+	private final Map<String, CountryInfoDTO> countryInfoCache = new ConcurrentHashMap<>();
+
+	public CountryInfoDTO countryInfo(int lifeId, Integer memberId, String guestToken, String view) {
+		LifeDTO life = loadMyLife(lifeId, memberId, guestToken);
+		if (life == null) {
+			return null;
+		}
+		String cc = "born".equals(view) ? life.getBirthCountry() : life.getCurrentCountry();
+		int year = life.getBirthYear() + life.getCurrentAge();
+		String key = cc + "_" + year / 10 * 10;
+		CountryInfoDTO info = countryInfoCache.get(key);
+		if (info == null) {
+			Map<String, Object> cond = new HashMap<>();
+			cond.put("countryCode", cc);
+			cond.put("year", year);
+			info = engineDao.selectCountryInfo(cond);
+			if (info == null) {
+				info = new CountryInfoDTO(); // 통계가 없는 나라: 이름 칸만 비워서 보냄
+				info.setCountryCode(cc);
+			}
+			// 권역 진학률·산업 비율 (그해와 가장 가까운 연대, selectRegionStat은 사는 나라 기준이라 나라만 바꿔서 물어봄)
+			LifeDTO at = new LifeDTO();
+			at.setCurrentCountry(cc);
+			at.setBirthYear(life.getBirthYear());
+			at.setCurrentAge(life.getCurrentAge());
+			RegionStatDTO r = engineDao.selectRegionStat(at);
+			if (r != null) {
+				info.setEnrollElem(r.getEnrollElem());
+				info.setEnrollMiddle(r.getEnrollMiddle());
+				info.setEnrollHigh(r.getEnrollHigh());
+				info.setEnrollUni(r.getEnrollUni());
+				info.setAgriRate(r.getAgriRate());
+				info.setIndustryRate(r.getIndustryRate());
+				info.setServiceRate(r.getServiceRate());
+			}
+			countryInfoCache.put(key, info);
+		}
+		return info;
 	}
 
 	public boolean isMyLife(int lifeId, Integer memberId, String guestToken) {

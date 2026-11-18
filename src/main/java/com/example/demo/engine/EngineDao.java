@@ -55,6 +55,8 @@ public interface EngineDao {
 	int insertEventLog(EventLogDTO log);
 	String selectPendingText(LifeDTO life);
 	List<EventLogDTO> selectEventLogs(int lifeId); // C03 이어하기 화면: 지금까지의 인생 기록
+	List<YearLogDTO> selectYearLogs(int lifeId); // C03 인생 지도: 한 해씩 남긴 기록
+	CountryInfoDTO selectCountryInfo(Map<String, Object> cond); // C03 나라 패널 (countryCode, year)
 	int countPendingChosen(LifeDTO life); // C10: 선택 이벤트에서 이미 '떠난다'를 골랐는지 (목적지 기다리는 중)
 
 	// C06 진학
