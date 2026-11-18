@@ -1,6 +1,7 @@
 package com.example.demo.engine;
 
 import java.util.List;
+import java.util.Map;
 
 import org.apache.ibatis.annotations.Mapper;
 
@@ -12,6 +13,7 @@ public interface EngineDao {
 	List<CountryStatDTO> selectBirthCountries(int decade);
 	String selectRandomName(LifeDTO life);
 	String selectHistName(LifeDTO life);
+	List<String> selectNameList(Map<String, Object> cond); // C03 가족·또래 이름 (나라·성별, 이름순)
 	int selectNextLifeId();
 	int abandonGuestLife(String guestToken);
 	int abandonMemberLife(int memberId);
@@ -52,6 +54,7 @@ public interface EngineDao {
 	// C09 이벤트 기록
 	int insertEventLog(EventLogDTO log);
 	String selectPendingText(LifeDTO life);
+	List<EventLogDTO> selectEventLogs(int lifeId); // C03 이어하기 화면: 지금까지의 인생 기록
 	int countPendingChosen(LifeDTO life); // C10: 선택 이벤트에서 이미 '떠난다'를 골랐는지 (목적지 기다리는 중)
 
 	// C06 진학

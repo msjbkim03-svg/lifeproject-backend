@@ -80,6 +80,18 @@ public class EngineController {
 		return ResponseEntity.ok(life);
 	}
 
+	// C03 이어하기: 지금까지의 인생 기록  GET /api/engine/logs?lifeId=...&guestToken=...
+	// (새로고침해도 진행 화면의 인생 기록이 비지 않게)
+	@GetMapping("/api/engine/logs")
+	public ResponseEntity<?> logs(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		java.util.List<EventLogDTO> list = engineService.myEventLogs(lifeId, loginMemberId(auth), guestToken);
+		if (list == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		return ResponseEntity.ok(list);
+	}
+
 	// C03 1년 진행  POST /api/engine/next  { lifeId, guestToken }
 	@PostMapping("/api/engine/next")
 	public ResponseEntity<?> nextYear(@RequestBody EngineRequestDTO req,
@@ -139,6 +151,11 @@ public class EngineController {
 		LifeDTO life = engineService.loadMyLife(req.getLifeId(), loginMemberId(auth), req.getGuestToken());
 		if (life == null) {
 			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		// 큰돈 드는 선택지인데 돈이 모자라면 (대출로도 안 되면) 고를 수 없음
+		String blocked = engineService.choiceBlocked(life, req.getChoiceId());
+		if (blocked != null) {
+			return ResponseEntity.badRequest().body(blocked);
 		}
 		life = engineService.chooseEvent(life, req.getChoiceId());
 		if (life == null) {
