@@ -244,6 +244,7 @@
 		resultType="com.example.demo.engine.CountryStatDTO">
 		SELECT * FROM (
 			SELECT s.COUNTRY_CODE     AS countryCode,
+			       c.NAME_KO          AS nameKo,
 			       c.REGION_CODE      AS regionCode,
 			       s.LIFE_EXPECTANCY  AS lifeExpectancy,
 			       s.INFANT_MORTALITY AS infantMortality,
@@ -350,6 +351,15 @@
 			  AND CHOICE_ID IS NULL
 			ORDER BY LOG_ID DESC
 		) WHERE ROWNUM = 1
+	</select>
+
+	<!-- C10: 기다리는 선택 이벤트를 작년 나이에 이미 골랐는지 (골랐는데 아직 기다리면 = 이민 목적지 고르는 중) -->
+	<select id="countPendingChosen" parameterType="com.example.demo.engine.LifeDTO" resultType="int">
+		SELECT COUNT(*) FROM LIFE_EVENT_LOG
+		WHERE LIFE_ID = #{lifeId}
+		  AND EVENT_ID = #{pendingEventId}
+		  AND CHOICE_ID IS NOT NULL
+		  AND AGE = #{currentAge} - 1
 	</select>
 
 	<!-- ================= C06 진학 ================= -->

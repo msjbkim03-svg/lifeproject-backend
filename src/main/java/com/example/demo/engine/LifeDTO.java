@@ -1,5 +1,6 @@
 package com.example.demo.engine;
 
+import com.example.demo.event.dto.DestinationDTO;
 import com.example.demo.event.dto.EventResultDTO;
 
 import java.util.List;
@@ -58,6 +59,8 @@ public class LifeDTO {
 	private boolean needChoice;	// [화면용] 선택 이벤트 창 띄우기 (C09)
 	private EventResultDTO pendingEvent;	// [화면용] 선택 이벤트 문장 + 선택지 (C09)
 	private String regionCode;	// [화면용] 지금 사는 나라의 권역 (C08 마을 그림: EAST, SOUTHEAST, SOUTH, CENTRAL, WEST)
+	private boolean needDestination;	// [화면용] 이민 목적지 고르기 창 띄우기 (C10, '떠난다'를 고른 뒤)
+	private List<DestinationDTO> destinations;	// [화면용] 이민 목적지 후보 (윤아님 pickDestinations, 최대 5곳)
 
 	public int getLifeId() {
 		return lifeId;
@@ -482,5 +485,21 @@ public class LifeDTO {
 
 	public void setPendingEvent(EventResultDTO pendingEvent) {
 		this.pendingEvent = pendingEvent;
+	}
+
+	public boolean isNeedDestination() {
+		return needDestination;
+	}
+
+	public void setNeedDestination(boolean needDestination) {
+		this.needDestination = needDestination;
+	}
+
+	public List<DestinationDTO> getDestinations() {
+		return destinations;
+	}
+
+	public void setDestinations(List<DestinationDTO> destinations) {
+		this.destinations = destinations;
 	}
 }

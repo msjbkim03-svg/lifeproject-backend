@@ -147,4 +147,21 @@ public class EngineController {
 		}
 		return ResponseEntity.ok(life);
 	}
+
+	// C10 이민 목적지 고르기  POST /api/engine/destination  { lifeId, countryCode, guestToken }
+	// '떠난다'를 고른 응답에 needDestination = true, destinations = 후보 나라 목록이 오면 그중 하나를 보냄
+	@PostMapping("/api/engine/destination")
+	public ResponseEntity<?> chooseDestination(@RequestBody EngineRequestDTO req,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		LifeDTO life = engineService.loadMyLife(req.getLifeId(), loginMemberId(auth), req.getGuestToken());
+		if (life == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		life = engineService.chooseDestination(life, req.getCountryCode());
+		if (life == null) {
+			return ResponseEntity.badRequest()
+					.body("지금 목적지를 고를 때가 아니거나, 후보에 없는 나라예요.");
+		}
+		return ResponseEntity.ok(life);
+	}
 }

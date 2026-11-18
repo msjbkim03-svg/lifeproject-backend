@@ -52,6 +52,7 @@ public interface EngineDao {
 	// C09 이벤트 기록
 	int insertEventLog(EventLogDTO log);
 	String selectPendingText(LifeDTO life);
+	int countPendingChosen(LifeDTO life); // C10: 선택 이벤트에서 이미 '떠난다'를 골랐는지 (목적지 기다리는 중)
 
 	// C06 진학
 	RegionStatDTO selectRegionStat(LifeDTO life);

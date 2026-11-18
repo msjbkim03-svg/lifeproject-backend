@@ -9,6 +9,7 @@ public class EngineRequestDTO {
 	private String focus;      // 집중 코드 (C04)
 	private String jobId;      // 직업 코드 (C06)
 	private int choiceId;      // 선택지 번호 (C09 선택 이벤트)
+	private String countryCode; // 이민 갈 나라 (C10 목적지 고르기)
 
 	public int getDecade() {
 		return decade;
@@ -56,5 +57,13 @@ public class EngineRequestDTO {
 
 	public void setChoiceId(int choiceId) {
 		this.choiceId = choiceId;
+	}
+
+	public String getCountryCode() {
+		return countryCode;
+	}
+
+	public void setCountryCode(String countryCode) {
+		this.countryCode = countryCode;
 	}
 }

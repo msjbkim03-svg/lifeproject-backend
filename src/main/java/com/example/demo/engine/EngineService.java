@@ -470,12 +470,16 @@ public class EngineService {
 	}
 
 	// [화면용] 지금 사는 나라의 권역 (C08 마을 그림 고르기, 이민하면 바뀜)
+	// 화면용: 지금 사는 나라의 권역(C08 마을)과 한글 이름 (이어하기·진행 응답에도 나라 이름이 나오게)
 	private void fillRegion(LifeDTO life) {
 		if (life == null) {
 			return;
 		}
 		CountryStatDTO s = yearStat(life);
 		life.setRegionCode(s == null ? null : s.getRegionCode());
+		if (s != null && s.getNameKo() != null) {
+			life.setCountryName(s.getNameKo());
+		}
 	}
 
 
@@ -582,6 +586,7 @@ public class EngineService {
 		}
 		restoreChoice(life); // 선택 이벤트를 아직 안 골랐으면 선택 창 다시 띄우기
 		if (life != null) {
+			life.setHistName(engineDao.selectHistName(life)); // 이어하기 화면용 당시 국가명
 			showOffers(life, yearStat(life)); // 직업을 아직 안 골랐으면 같은 제안으로 선택 창 다시 띄우기
 		}
 		fillRegion(life);
@@ -1577,6 +1582,9 @@ public class EngineService {
 		if (!life.getStatus().equals("PLAYING") || life.getPendingEventId() == null) {
 			return null; // 고를 선택이 없음
 		}
+		if (engineDao.countPendingChosen(life) > 0) {
+			return null; // 이미 '떠난다'를 골랐고 목적지를 기다리는 중 → /api/engine/destination 으로
+		}
 		// 같은 선택을 두 번 반영하지 않게 잠금 (버튼 연타 시 두 번째는 이미 골라져서 0줄 → 무시)
 		if (engineDao.lockPending(life) == 0) {
 			return null;
@@ -1590,6 +1598,19 @@ public class EngineService {
 
 		applyEvent(life, r, age, choiceId);
 		fixStats(life);
+
+		// C10 '떠난다'인데 갈 나라가 안 정해진 선택지 → 목적지 고르기 창 (선택 이벤트는 목적지를 고를 때까지 계속 기다림)
+		//   기다리는 동안 한 해 진행은 409로 막힘 (PENDING_EVENT_ID 그대로)
+		if (r.isNeedDestination() && r.getDestinations() != null && !r.getDestinations().isEmpty()) {
+			life.setNeedDestination(true);
+			life.setDestinations(r.getDestinations());
+			List<EventResultDTO> list = new ArrayList<>();
+			list.add(r);
+			life.setEvents(list);
+			engineDao.updateLifeYear(life);
+			fillRegion(life);
+			return life;
+		}
 		life.setPendingEventId(null);
 
 		// 고른 결과로 실직·조기 은퇴 등이 생기면 나이대·직업 제안을 바로 갱신 (다음 해까지 기다리지 않게)
@@ -1611,9 +1632,57 @@ public class EngineService {
 		return life;
 	}
 
+	// ================= C10 이민 목적지 고르기 =================
+	// '떠난다'를 고른 뒤 후보 나라 중 하나를 고르면: 구역 효과(윤아님 applyDestination) + 사는 나라 변경
+	@Transactional
+	public LifeDTO chooseDestination(LifeDTO life, String countryCode) {
+		if (!life.getStatus().equals("PLAYING") || life.getPendingEventId() == null || countryCode == null) {
+			return null;
+		}
+		if (engineDao.countPendingChosen(life) == 0) {
+			return null; // 아직 '떠난다'를 안 골랐음
+		}
+		if (engineDao.lockPending(life) == 0) {
+			return null; // 연타: 이미 처리됨
+		}
+		int age = life.getCurrentAge() - 1;
+		EventResultDTO r = eventService.applyDestination(life, countryCode, age, life.getPendingEventId());
+		if (r == null) {
+			return null; // 후보가 아닌 나라
+		}
+		applyEvent(life, r, age, null); // applyAction MIGRATE → 사는 나라 변경, 경험 MIGRATE_나라, 기록
+		fixStats(life);
+		life.setPendingEventId(null);
+
+		// 나라가 바뀌면 직업 제안도 새 나라 기준으로
+		String newStage = stageOf(life);
+		if (newStage != null && !newStage.equals(life.getStageCode())) {
+			life.setStageCode(newStage);
+			life.setFocusCode(null);
+			life.setNeedFocus(true);
+			life.setFocusOptions(focusOptions(newStage, life));
+		}
+		showOffers(life, yearStat(life));
+
+		List<EventResultDTO> list = new ArrayList<>();
+		list.add(r);
+		life.setEvents(list);
+
+		engineDao.updateLifeYear(life);
+		fillRegion(life);
+		return life;
+	}
+
 	// 이어하기·새로고침 때 선택 창 다시 띄우기
 	private void restoreChoice(LifeDTO life) {
 		if (life == null || life.getPendingEventId() == null) {
+			return;
+		}
+		// '떠난다'는 이미 골랐고 목적지만 남았으면 → 목적지 창 (후보는 다시 뽑음, 고를 때는 전체 후보 안에서 확인)
+		if (engineDao.countPendingChosen(life) > 0) {
+			life.setNeedDestination(true);
+			life.setDestinations(eventService.pickDestinations(life.getCurrentCountry(),
+					life.getBirthYear() + life.getCurrentAge() - 1));
 			return;
 		}
 		EventResultDTO e = new EventResultDTO();
