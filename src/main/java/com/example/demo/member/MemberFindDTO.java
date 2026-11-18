@@ -1,5 +1,7 @@
 package com.example.demo.member;
 
+// 아이디·비밀번호 찾기(M09) 화면에서 보낸 JSON 을 담는 상자
+// sendCode · checkCode · id · resetPw 가 같이 씀 (필요한 칸만 채워서 보냄)
 public class MemberFindDTO {
 	private String loginId;          // 비밀번호 찾기에서만 씀
 	private String email;            // 인증번호 받을 이메일

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="QuestJudge">
+
+	<!-- 인생의 회원 번호 (비회원이면 NULL) -->
+	<select id="selectLifeMember" parameterType="int" resultType="Integer">
+		SELECT MEMBER_ID FROM LIFE WHERE LIFE_ID = #{lifeId}
+	</select>
+
+	<!-- 달성했는데 아직 지급 안 한 퀘스트 → 지급 표시 (바뀐 행 수 = 줄 포인트) -->
+	<update id="markPointGiven" parameterType="int">
+		UPDATE LIFE_QUEST
+		   SET POINT_GIVEN = 'Y'
+		 WHERE LIFE_ID = #{lifeId}
+		   AND ACHIEVED = 'Y'
+		   AND POINT_GIVEN = 'N'
+	</update>
+
+	<!-- 회원 보유 포인트 증가 -->
+	<update id="addMemberPoint" parameterType="map">
+		UPDATE MEMBER SET POINT = POINT + #{amount} WHERE MEMBER_ID = #{memberId}
+	</update>
+
+	<!-- 포인트 내역 (사유 QUEST) -->
+	<insert id="insertPointHistory" parameterType="map">
+		INSERT INTO POINT_HISTORY (POINT_ID, MEMBER_ID, LIFE_ID, AMOUNT, REASON, CREATED_AT)
+		VALUES (SEQ_POINT_HISTORY.NEXTVAL, #{memberId}, #{lifeId}, #{amount}, 'QUEST', SYSDATE)
+	</insert>
+
+	<!-- 판정할 퀘스트: 이 인생이 고른 퀘스트 중 아직 판정 안 한 것 -->
+	<select id="selectJudgeTargets" parameterType="int" resultType="map">
+		SELECT Q.QUEST_ID, Q.QUEST_TYPE, Q.TARGET_VALUE
+		  FROM LIFE_QUEST LQ
+		  JOIN QUEST Q ON LQ.QUEST_ID = Q.QUEST_ID
+		 WHERE LQ.LIFE_ID = #{lifeId}
+		   AND LQ.ACHIEVED IS NULL
+	</select>
+
+	<!-- 판정에 쓸 인생 결과 -->
+	<select id="selectLifeResult" parameterType="int" resultType="map">
+		SELECT STATUS, BIRTH_YEAR, DEATH_AGE, EDU_LEVEL, SCHOOL_STATUS, BIRTH_COUNTRY, CURRENT_COUNTRY,
+		       CHILD_COUNT, AVG_INCOME, ASSETS, HAPPINESS
+		  FROM LIFE
+		 WHERE LIFE_ID = #{lifeId}
+	</select>
+
+	<!-- 나라·연대 통계 (기대수명, 1인당 GDP), 미래 연대는 그 나라 최근 연대 -->
+	<select id="selectStatForJudge" parameterType="map" resultType="map">
+		SELECT LIFE_EXPECTANCY, GDP_PER_CAPITA
+		  FROM COUNTRY_STAT
+		 WHERE COUNTRY_CODE = #{countryCode}
+		   AND DECADE = LEAST(#{decade}, (SELECT MAX(DECADE) FROM COUNTRY_STAT WHERE COUNTRY_CODE = #{countryCode}))
+	</select>
+
+	<!-- 판정 결과 저장 -->
+	<update id="updateAchieved" parameterType="map">
+		UPDATE LIFE_QUEST
+		   SET ACHIEVED = #{achieved}
+		 WHERE LIFE_ID = #{lifeId}
+		   AND QUEST_ID = #{questId}
+	</update>
+	
+</mapper>

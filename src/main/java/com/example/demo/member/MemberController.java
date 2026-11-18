@@ -37,10 +37,10 @@ public class MemberController {
 			if (error != null) {
 				return ResponseEntity.badRequest().body(Map.of("message", error)); // 400
 			}
-			return ResponseEntity.status(201).body(Map.of("message", "회원가입 완료")); // 201
+			return ResponseEntity.status(201).body(Map.of("message", "회원가입을 마쳤어요.")); // 201
 		} catch (DuplicateKeyException e) {
 			// 거의 동시에 같은 아이디로 가입한 경우 → DB UNIQUE 제약이 막아 줌
-			return ResponseEntity.status(409).body(Map.of("message", "이미 사용 중인 정보가 있습니다."));
+			return ResponseEntity.status(409).body(Map.of("message", "이미 사용 중인 정보가 있어요."));
 		}
 	}
 
@@ -70,7 +70,7 @@ public class MemberController {
 
 		if (member == null) {
 			return ResponseEntity.status(401)
-					.body(Map.of("message", "아이디 또는 비밀번호가 올바르지 않습니다."));
+					.body(Map.of("message", "아이디 또는 비밀번호가 맞지 않아요."));
 		}
 
 		// 이 브라우저에서 비회원으로 하던 인생이 있으면 회원 인생으로 전환
@@ -93,7 +93,7 @@ public class MemberController {
 
 		// 토큰은 맞는데 회원이 없거나 탈퇴한 경우
 		if (my == null) {
-			return ResponseEntity.status(404).body(Map.of("message", "회원 정보를 찾을 수 없습니다."));
+			return ResponseEntity.status(404).body(Map.of("message", "회원 정보를 찾을 수 없어요."));
 		}
 		return ResponseEntity.ok(my);
 	}
@@ -109,10 +109,10 @@ public class MemberController {
 				return ResponseEntity.badRequest().body(Map.of("message", error)); // 400
 			}
 			// 헤더에 보이는 닉네임을 바꿀 수 있게 새 닉네임을 돌려줌
-			return ResponseEntity.ok(Map.of("message", "저장했습니다.", "nickname", dto.getNickname()));
+			return ResponseEntity.ok(Map.of("message", "저장했어요.", "nickname", dto.getNickname()));
 		} catch (DuplicateKeyException e) {
 			// 거의 동시에 같은 닉네임·이메일로 바꾼 경우 → DB UNIQUE 제약이 막아 줌
-			return ResponseEntity.status(409).body(Map.of("message", "이미 사용 중인 닉네임 또는 이메일입니다."));
+			return ResponseEntity.status(409).body(Map.of("message", "이미 사용 중인 닉네임 또는 이메일이에요."));
 		}
 	}
 
@@ -134,39 +134,55 @@ public class MemberController {
 			@RequestBody MemberUpdateDTO dto) {
 		boolean ok = service.withdraw(Integer.parseInt(memberId), dto.getCurrentPassword());
 		if (!ok) {
-			return ResponseEntity.badRequest().body(Map.of("message", "비밀번호가 올바르지 않습니다."));
+			return ResponseEntity.badRequest().body(Map.of("message", "비밀번호가 맞지 않아요."));
 		}
-		return ResponseEntity.ok(Map.of("message", "탈퇴했습니다."));
+		return ResponseEntity.ok(Map.of("message", "탈퇴했어요."));
 	}
 	
-	
-	
+
+	// 아이디·비밀번호 찾기 - 인증번호 보내기 (M09)  POST /api/members/find/sendCode
+	// 보내는 JSON: { purpose, email, loginId }  (purpose: FIND_ID / RESET_PW, loginId 는 비밀번호 찾기만)
 	@PostMapping("/find/sendCode")
 	public ResponseEntity<?> sendCode(@RequestBody MemberFindDTO dto) {
 		String error = service.sendCode(dto);
 		if(error != null) {
 			return ResponseEntity.badRequest().body(Map.of("message",error));
 		}
-		return ResponseEntity.ok(Map.of("message", "입력한 정보가 맞다면 메일이 발송됩니다."));
+		return ResponseEntity.ok(Map.of("message", "입력한 정보가 맞다면 인증번호 메일을 보내 드려요."));
 	}
-	
+
+	// 아이디 찾기 - 아이디 확인 (M09)  POST /api/members/find/id
+	// 보내는 JSON: { email, code }  → 돌려주는 JSON: { loginId: "msj***" }
 	@PostMapping("/find/id")
 	public ResponseEntity<?> findId(@RequestBody MemberFindDTO dto) {
 		String maskedId = service.findId(dto.getEmail(), dto.getCode()); // 예: msj***
 		if (maskedId == null) {
-			return ResponseEntity.badRequest().body(Map.of("message", "인증번호가 올바르지 않거나 만료되었습니다."));
+			return ResponseEntity.badRequest().body(Map.of("message", "인증번호가 맞지 않거나 시간이 지났어요."));
 		}
 		return ResponseEntity.ok(Map.of("loginId", maskedId));
 	}
 
 
+	// 아이디·비밀번호 찾기 - 인증번호 확인 (M09)  POST /api/members/find/checkCode
+	// 보내는 JSON: { purpose, loginId, email, code }  (purpose: FIND_ID / RESET_PW, loginId 는 비밀번호 찾기만)
+	@PostMapping("/find/checkCode")
+	public ResponseEntity<?> checkCode(@RequestBody MemberFindDTO dto) {
+		String error = service.checkCode(dto);
+		if (error != null) {
+			return ResponseEntity.badRequest().body(Map.of("message", error));
+		}
+		return ResponseEntity.ok(Map.of("message", "인증되었어요."));
+	}
+
+	// 비밀번호 찾기 - 새 비밀번호 저장 (M09)  POST /api/members/find/resetPw
+	// 보내는 JSON: { loginId, email, code, newPassword, newPasswordCheck }
 	@PostMapping("/find/resetPw")
 	public ResponseEntity<?> resetPw(@RequestBody MemberFindDTO dto) {
 		String error = service.resetPassword(dto);
 		if (error != null) {
 			return ResponseEntity.badRequest().body(Map.of("message", error));
 		}
-		return ResponseEntity.ok(Map.of("message", "비밀번호를 변경했습니다."));
+		return ResponseEntity.ok(Map.of("message", "비밀번호를 바꿨어요."));
 	}
 	
 	

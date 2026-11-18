@@ -35,6 +35,13 @@ public class WebConfig implements WebMvcConfigurer {
 		// 탈퇴한 회원의 토큰 막기 (모든 /api 주소, 게임 API 포함)
 		// 토큰이 없으면(비회원) 그냥 통과 → 비회원 게임은 그대로 됨
 		registry.addInterceptor(activeMemberValidator)
-				.addPathPatterns("/api/**");
+				.addPathPatterns("/api/**")
+				// 로그인·가입·중복확인·아이디/비번 찾기는 빼기
+				// → 탈퇴한 토큰이 브라우저에 남아 있어도 다시 로그인·가입할 수 있게
+				.excludePathPatterns(
+						"/api/members",          // 회원가입
+						"/api/members/login",    // 로그인
+						"/api/members/check*",   // 중복 확인
+						"/api/members/find/**"); // 아이디·비번 찾기
 	}
 }

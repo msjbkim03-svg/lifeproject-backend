@@ -56,13 +56,13 @@ public class MemberService {
 			return "비밀번호는 영문·숫자·특수문자를 포함해 8~20자로 입력해 주세요.";
 		}
 		if (!dto.getPassword().equals(dto.getPasswordCheck())) {
-			return "비밀번호 확인이 일치하지 않습니다.";
+			return "비밀번호 확인이 맞지 않아요.";
 		}
 		if (dto.getNickname() == null || dto.getNickname().length() < 2 || dto.getNickname().length() > 10) {
 			return "닉네임은 2~10자로 입력해 주세요.";
 		}
 		if (dto.getEmail() == null || !dto.getEmail().matches("^[\\w.+-]+@[\\w-]+\\.[\\w.]+$")) {
-			return "이메일 형식이 올바르지 않습니다.";
+			return "이메일 형식이 맞지 않아요.";
 		}
 		// 전화번호: 010-1234-5678 처럼 와도 숫자만 남겨서 검사·저장
 		String phone = dto.getPhone() == null ? "" : dto.getPhone().replaceAll("[^0-9]", "");
@@ -76,9 +76,9 @@ public class MemberService {
 		}
 
 		// 2. 중복 검사
-		if (!isLoginIdAvailable(dto.getLoginId())) return "이미 사용 중인 아이디입니다.";
-		if (!isNicknameAvailable(dto.getNickname())) return "이미 사용 중인 닉네임입니다.";
-		if (!isEmailAvailable(dto.getEmail())) return "이미 사용 중인 이메일입니다.";
+		if (!isLoginIdAvailable(dto.getLoginId())) return "이미 사용 중인 아이디예요.";
+		if (!isNicknameAvailable(dto.getNickname())) return "이미 사용 중인 닉네임이에요.";
+		if (!isEmailAvailable(dto.getEmail())) return "이미 사용 중인 이메일이에요.";
 
 		// 3. 비밀번호를 BCrypt 로 바꿔서 담기 (원래 비밀번호는 저장 안 함)
 		dto.setPassword(encoder.encode(dto.getPassword()));
@@ -140,11 +140,11 @@ public class MemberService {
 
 		// 1. DB 에서 지금 내 정보 꺼내기 (비밀번호 비교용)
 		MemberDTO me = dao.selectById(memberId);
-		if (me == null || "WITHDRAWN".equals(me.getStatus())) return "회원 정보를 찾을 수 없습니다.";
+		if (me == null || "WITHDRAWN".equals(me.getStatus())) return "회원 정보를 찾을 수 없어요.";
 
 		// 2. 현재 비밀번호 확인 (BCrypt 비교)
 		if (dto.getCurrentPassword() == null || !encoder.matches(dto.getCurrentPassword(), me.getPassword())) {
-			return "현재 비밀번호가 올바르지 않습니다.";
+			return "현재 비밀번호가 맞지 않아요.";
 		}
 
 		// 3. 닉네임·이메일 형식 검사 (회원가입과 같은 규칙)
@@ -152,7 +152,7 @@ public class MemberService {
 			return "닉네임은 2~10자로 입력해 주세요.";
 		}
 		if (dto.getEmail() == null || !dto.getEmail().matches("^[\\w.+-]+@[\\w-]+\\.[\\w.]+$")) {
-			return "이메일 형식이 올바르지 않습니다.";
+			return "이메일 형식이 맞지 않아요.";
 		}
 		// 전화번호 (회원가입과 같은 규칙, 숫자만 남겨서 저장)
 		String phone = dto.getPhone() == null ? "" : dto.getPhone().replaceAll("[^0-9]", "");
@@ -162,8 +162,8 @@ public class MemberService {
 		dto.setPhone(phone);
 
 		// 4. 중복 검사 (나 자신은 빼고 셈 → 닉네임 그대로 두면 통과)
-		if (dao.countNicknameExceptMe(memberId, dto.getNickname()) > 0) return "이미 사용 중인 닉네임입니다.";
-		if (dao.countEmailExceptMe(memberId, dto.getEmail()) > 0) return "이미 사용 중인 이메일입니다.";
+		if (dao.countNicknameExceptMe(memberId, dto.getNickname()) > 0) return "이미 사용 중인 닉네임이에요.";
+		if (dao.countEmailExceptMe(memberId, dto.getEmail()) > 0) return "이미 사용 중인 이메일이에요.";
 
 		// 5. 새 비밀번호: 비워 두면 안 바꿈(null), 입력했으면 검사 후 BCrypt 로 바꿔서 담기
 		String newPw = dto.getNewPassword();
@@ -174,7 +174,7 @@ public class MemberService {
 				return "새 비밀번호는 영문·숫자·특수문자를 포함해 8~20자로 입력해 주세요.";
 			}
 			if (!newPw.equals(dto.getNewPasswordCheck())) {
-				return "새 비밀번호 확인이 일치하지 않습니다.";
+				return "새 비밀번호 확인이 맞지 않아요.";
 			}
 			dto.setNewPassword(encoder.encode(newPw));
 		}
@@ -182,7 +182,7 @@ public class MemberService {
 		// 6. 이메일을 바꿨으면 새 이메일로 받은 인증번호 확인 (안 바꿨으면 건너뜀)
 		if (!dto.getEmail().equals(me.getEmail())) {
 			if (!verifyCode(dto.getEmail(), "CHANGE_EMAIL", dto.getEmailCode())) {
-				return "이메일 인증번호가 올바르지 않거나 만료되었습니다.";
+				return "이메일 인증번호가 맞지 않거나 시간이 지났어요.";
 			}
 		}
 
@@ -211,10 +211,10 @@ public class MemberService {
 		// 1. 입력 검사
 		String purpose = dto.getPurpose();
 		if (!"FIND_ID".equals(purpose) && !"RESET_PW".equals(purpose)) {
-			return "잘못된 요청입니다.";
+			return "잘못된 요청이에요.";
 		}
 		if (dto.getEmail() == null || !dto.getEmail().matches("^[\\w.+-]+@[\\w-]+\\.[\\w.]+$")) {
-			return "이메일 형식이 올바르지 않습니다.";
+			return "이메일 형식이 맞지 않아요.";
 		}
 		if ("RESET_PW".equals(purpose) && (dto.getLoginId() == null || dto.getLoginId().isBlank())) {
 			return "아이디를 입력해 주세요.";
@@ -264,20 +264,44 @@ public class MemberService {
 	}
 
 	// ===== 아이디 찾기 (M09) =====
-	// 인증번호가 맞으면 일부 가린 아이디(msj***)를, 틀리면 null 을 돌려준다
+
 	@Transactional
 	public String findId(String email, String code) {
-		if (!verifyCode(email, "FIND_ID", code)) return null;
-
+		// 1. 이메일로 회원 찾기 (먼저 → 없으면 인증번호를 쓰지 않음)
 		MemberDTO member = dao.selectActiveByEmail(email);
 		if (member == null) return null;
+
+		// 2. 인증번호를 서버에서 다시 확인 (화면에서 확인했어도 한 번 더 → 이때 '사용함' 처리)
+		if (!verifyCode(email, "FIND_ID", code)) return null;
 
 		// 앞 3글자만 보여 주고 나머지는 *** (아이디는 4자 이상이라 안전)
 		return member.getLoginId().substring(0, 3) + "***";
 	}
 
+	// ===== 아이디·비밀번호 찾기 - 인증번호 먼저 확인 (M09) =====
+	// purpose: FIND_ID(아이디 찾기) 또는 RESET_PW(비밀번호 찾기)
+	// 번호를 '사용함'으로 바꾸지 않음 → 아이디 확인(findId)·비밀번호 변경(resetPw) 때 한 번 더 확인하고 그때 사용 처리
+	public String checkCode(MemberFindDTO dto) {
+		String fail = "인증번호가 맞지 않거나 시간이 지났어요.";
+		String purpose = dto.getPurpose();
+		if (!"FIND_ID".equals(purpose) && !"RESET_PW".equals(purpose)) return "잘못된 요청이에요.";
+		if (dto.getEmail() == null || dto.getCode() == null) return fail;
+
+		// 1. 맞는 회원인지 먼저 (안 맞아도 똑같은 문구 → 가입 여부 안 드러남)
+		//    아이디 찾기: 이메일만 / 비밀번호 찾기: 아이디 + 이메일
+		MemberDTO member = "FIND_ID".equals(purpose)
+				? dao.selectActiveByEmail(dto.getEmail())
+				: dao.selectActiveByLoginIdAndEmail(dto.getLoginId(), dto.getEmail());
+
+		// 2. 회원이 없거나 번호가 틀리면 틀린 횟수 +1 (5번 틀리면 그 번호는 못 씀)
+		if (member == null || dao.countValidAuth(dto.getEmail(), purpose, dto.getCode()) == 0) {
+			dao.increaseAuthFail(dto.getEmail(), purpose);
+			return fail;
+		}
+		return null; // 인증 성공
+	}
+
 	// ===== 비밀번호 재설정 (M09) =====
-	// 문제가 있으면 오류 문구를, 성공하면 null 을 돌려준다
 	@Transactional // 번호를 '사용함'으로 바꾸는 것과 비밀번호 저장 중 하나라도 실패하면 둘 다 취소
 	public String resetPassword(MemberFindDTO dto) {
 
@@ -287,16 +311,16 @@ public class MemberService {
 			return "비밀번호는 영문·숫자·특수문자를 포함해 8~20자로 입력해 주세요.";
 		}
 		if (!newPw.equals(dto.getNewPasswordCheck())) {
-			return "비밀번호 확인이 일치하지 않습니다.";
+			return "비밀번호 확인이 맞지 않아요.";
 		}
 
-		// 2. 인증번호를 서버에서 다시 확인 (이메일 + 인증번호를 함께 받음)
-		String fail = "인증번호가 올바르지 않거나 만료되었습니다.";
-		if (!verifyCode(dto.getEmail(), "RESET_PW", dto.getCode())) return fail;
-
-		// 3. 아이디와 이메일이 맞는 회원 찾기
+		// 2. 아이디와 이메일이 맞는 회원 찾기 (먼저 → 안 맞으면 인증번호를 쓰지 않음)
+		String fail = "인증번호가 맞지 않거나 시간이 지났어요.";
 		MemberDTO member = dao.selectActiveByLoginIdAndEmail(dto.getLoginId(), dto.getEmail());
 		if (member == null) return fail;
+
+		// 3. 인증번호를 서버에서 다시 확인 (화면에서 확인했어도 한 번 더 → 이때 '사용함' 처리)
+		if (!verifyCode(dto.getEmail(), "RESET_PW", dto.getCode())) return fail;
 
 		// 4. BCrypt 로 바꿔서 저장 (원래 비밀번호는 복원할 수 없음)
 		dao.updatePassword(member.getMemberId(), encoder.encode(newPw));
@@ -304,22 +328,21 @@ public class MemberService {
 	}
 
 	// ===== 이메일 변경 인증번호 보내기 (M05) =====
-	// 새 이메일로 6자리를 보냄. 문제가 있으면 오류 문구를, 성공하면 null 을 돌려준다
 	// (로그인한 본인만 쓰는 기능이라 오류를 그대로 알려 줘도 됨)
 	public String sendEmailChangeCode(int memberId, String newEmail) {
 
 		// 1. 형식 검사
 		if (newEmail == null || !newEmail.matches("^[\\w.+-]+@[\\w-]+\\.[\\w.]+$")) {
-			return "이메일 형식이 올바르지 않습니다.";
+			return "이메일 형식이 맞지 않아요.";
 		}
 
 		// 2. 지금 이메일과 같으면 인증할 필요 없음
 		MemberDTO me = dao.selectById(memberId);
-		if (me == null || "WITHDRAWN".equals(me.getStatus())) return "회원 정보를 찾을 수 없습니다.";
+		if (me == null || "WITHDRAWN".equals(me.getStatus())) return "회원 정보를 찾을 수 없어요.";
 		if (newEmail.equals(me.getEmail())) return "지금 쓰는 이메일이에요.";
 
 		// 3. 다른 회원이 쓰는 이메일이면 안 됨
-		if (dao.countEmailExceptMe(memberId, newEmail) > 0) return "이미 사용 중인 이메일입니다.";
+		if (dao.countEmailExceptMe(memberId, newEmail) > 0) return "이미 사용 중인 이메일이에요.";
 
 		// 4. 재발송은 1분 뒤부터
 		if (dao.countRecentAuth(newEmail, "CHANGE_EMAIL") > 0) {
@@ -333,7 +356,7 @@ public class MemberService {
 			sendCodeMail(newEmail, code, "CHANGE_EMAIL");
 		} catch (Exception e) {
 			e.printStackTrace();
-			return "메일을 보내지 못했습니다. 이메일 주소를 확인해 주세요.";
+			return "메일을 보내지 못했어요. 이메일 주소를 확인해 주세요.";
 		}
 		return null; // 성공
 	}
@@ -351,8 +374,6 @@ public class MemberService {
 	}
 
 	// ===== 인증번호 메일 HTML 만들기 (M09) =====
-	// 메일 프로그램(Gmail·네이버)은 CSS 변수·<style>·flex 를 잘 못 읽어서
-	// <table> + style="..." 로 만들고, 색도 design.css 값(#0a0f22, #f2d58c …)을 직접 씀
 	private String makeMailHtml(String code, String purpose) {
 		String title = switch (purpose) {
 			case "FIND_ID" -> "아이디 찾기";
