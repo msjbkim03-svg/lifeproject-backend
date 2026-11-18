@@ -80,6 +80,8 @@ final class EngineStory {
 	private static boolean focus(LifeDTO l, String f) { return f.equals(l.getFocusCode()); }
 	private static boolean hasMoney(LifeDTO l) { return l.getAssets() > 0 || l.getIncome() > 0; }
 	private static boolean level(LifeDTO l, String lv) { return enrolled(l) && lv.equals(l.getEduLevel()); }
+	// 학교 밖 아이: 막 졸업한 해(초등 졸업 무렵)는 빼기 - "졸업했다"와 "또래를 부러워했다"가 같은 해에 나오지 않게
+	private static boolean outOfSchool(LifeDTO l) { return !enrolled(l) && !("GRADUATED".equals(l.getSchoolStatus()) && l.getCurrentAge() <= 13); }
 
 	private static final Predicate<LifeDTO> ANY = l -> true;
 
@@ -147,9 +149,9 @@ final class EngineStory {
 			new Line("sch_award", 8, 17, 1, l -> enrolled(l) && l.getKnowledge() >= 75, "글짓기 대회에서 상을 받아 집에 상장을 들고 갔다."),
 			new Line("sch_vacation", 7, 15, 2, l -> rural(l), "방학이면 냇가에서 물고기를 잡으며 하루를 보냈다."),
 			new Line("sch_cousins", 7, 15, 2, ANY, "방학에 사촌들이 놀러 와 며칠 내내 붙어 지냈다."),
-			new Line("noschool_work", 6, 14, 3, l -> !enrolled(l) && rural(l), "학교 대신 밭에 나가 어른들 일을 거들었다."),
-			new Line("noschool_care", 6, 14, 3, l -> !enrolled(l), "어린 동생들을 돌보며 하루를 보냈다."),
-			new Line("noschool_envy", 7, 14, 2, l -> !enrolled(l), "책가방을 메고 가는 또래들을 오래 바라보았다."),
+			new Line("noschool_work", 6, 14, 3, l -> outOfSchool(l) && rural(l), "학교 대신 밭에 나가 어른들 일을 거들었다."),
+			new Line("noschool_care", 6, 14, 3, l -> outOfSchool(l), "어린 동생들을 돌보며 하루를 보냈다."),
+			new Line("noschool_envy", 7, 14, 2, l -> outOfSchool(l), "책가방을 메고 가는 또래들을 오래 바라보았다."),
 			new Line("noschool_street", 9, 15, 2, l -> !enrolled(l) && !rural(l) && poor(l), "시장 골목에서 물건을 날라 주고 몇 푼을 벌었다."),
 
 			// ── 십대 (12~19세) ──
