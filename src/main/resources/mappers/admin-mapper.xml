@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
-	"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.example.demo.admin.AdminDao">
 
 	<!-- ================= A04 관리자 메인 ================= -->
@@ -8,48 +7,56 @@
 
 	<!-- 관리자 확인 -->
 	<select id="selectRole" parameterType="int" resultType="string">
-		SELECT MEMBER_ROLE FROM MEMBER WHERE MEMBER_ID = #{memberId} AND STATUS = 'ACTIVE'
+		SELECT MEMBER_ROLE FROM MEMBER WHERE MEMBER_ID = #{memberId} AND STATUS
+		= 'ACTIVE'
 	</select>
 
 	<!-- 오늘 시작된 인생 수 -->
 	<select id="countTodayPlays" resultType="int">
 		SELECT (SELECT COUNT(*) FROM LIFE WHERE CREATED_AT &gt;= TRUNC(SYSDATE))
-		     + (SELECT COUNT(*) FROM GUEST_LIFE_STAT WHERE STARTED_AT &gt;= TRUNC(SYSDATE))
+		+ (SELECT COUNT(*) FROM GUEST_LIFE_STAT WHERE STARTED_AT &gt;=
+		TRUNC(SYSDATE))
 		FROM dual
 	</select>
 
 	<!-- 누적 인생 수 -->
 	<select id="countTotalPlays" resultType="int">
-		SELECT (SELECT COUNT(*) FROM LIFE) + (SELECT COUNT(*) FROM GUEST_LIFE_STAT) FROM dual
+		SELECT (SELECT COUNT(*) FROM LIFE) + (SELECT COUNT(*) FROM
+		GUEST_LIFE_STAT) FROM dual
 	</select>
 
 	<!-- 회원·비회원별 완료율: 완료율 = 끝까지 산 ÷ (끝까지 산 + 중간에 나간), 진행 중은 빼고 계산 -->
-	<select id="selectCompletion" resultType="com.example.demo.admin.CompletionDTO">
+	<select id="selectCompletion"
+		resultType="com.example.demo.admin.CompletionDTO">
 		SELECT START_TYPE AS startType,
-		       COUNT(*) AS total,
-		       SUM(CASE WHEN STATUS = 'ENDED' THEN 1 ELSE 0 END)     AS ended,
-		       SUM(CASE WHEN STATUS = 'ABANDONED' THEN 1 ELSE 0 END) AS abandoned,
-		       SUM(CASE WHEN STATUS = 'PLAYING' THEN 1 ELSE 0 END)   AS playing,
-		       NVL(ROUND(SUM(CASE WHEN STATUS = 'ENDED' THEN 1 ELSE 0 END) * 100
-		           / NULLIF(SUM(CASE WHEN STATUS IN ('ENDED', 'ABANDONED') THEN 1 ELSE 0 END), 0), 1), 0) AS endedRate,
-		       NVL(ROUND(SUM(CASE WHEN STATUS = 'ABANDONED' THEN 1 ELSE 0 END) * 100
-		           / NULLIF(SUM(CASE WHEN STATUS IN ('ENDED', 'ABANDONED') THEN 1 ELSE 0 END), 0), 1), 0) AS abandonedRate
+		COUNT(*) AS total,
+		SUM(CASE WHEN STATUS = 'ENDED' THEN 1 ELSE 0 END) AS ended,
+		SUM(CASE WHEN STATUS = 'ABANDONED' THEN 1 ELSE 0 END) AS abandoned,
+		SUM(CASE WHEN STATUS = 'PLAYING' THEN 1 ELSE 0 END) AS playing,
+		NVL(ROUND(SUM(CASE WHEN STATUS = 'ENDED' THEN 1 ELSE 0 END) * 100
+		/ NULLIF(SUM(CASE WHEN STATUS IN ('ENDED', 'ABANDONED') THEN 1 ELSE 0
+		END), 0), 1), 0) AS endedRate,
+		NVL(ROUND(SUM(CASE WHEN STATUS = 'ABANDONED' THEN 1 ELSE 0 END) * 100
+		/ NULLIF(SUM(CASE WHEN STATUS IN ('ENDED', 'ABANDONED') THEN 1 ELSE 0
+		END), 0), 1), 0) AS abandonedRate
 		FROM (
-			SELECT START_TYPE, STATUS FROM LIFE
-			UNION ALL
-			SELECT 'GUEST', STATUS FROM GUEST_LIFE_STAT
+		SELECT START_TYPE, STATUS FROM LIFE
+		UNION ALL
+		SELECT 'GUEST', STATUS FROM GUEST_LIFE_STAT
 		)
 		GROUP BY START_TYPE
 		ORDER BY START_TYPE DESC
 	</select>
 
 	<!-- 퀘스트별 달성률 (판정이 끝난 것만: ACHIEVED 가 Y 또는 N) -->
-	<select id="selectQuestRates" resultType="com.example.demo.admin.QuestRateDTO">
-		SELECT q.QUEST_ID   AS questId,
-		       q.QUEST_NAME AS questName,
-		       COUNT(lq.ACHIEVED) AS picked,
-		       SUM(CASE WHEN lq.ACHIEVED = 'Y' THEN 1 ELSE 0 END) AS achieved,
-		       NVL(ROUND(SUM(CASE WHEN lq.ACHIEVED = 'Y' THEN 1 ELSE 0 END) * 100 / NULLIF(COUNT(lq.ACHIEVED), 0), 1), 0) AS rate
+	<select id="selectQuestRates"
+		resultType="com.example.demo.admin.QuestRateDTO">
+		SELECT q.QUEST_ID AS questId,
+		q.QUEST_NAME AS questName,
+		COUNT(lq.ACHIEVED) AS picked,
+		SUM(CASE WHEN lq.ACHIEVED = 'Y' THEN 1 ELSE 0 END) AS achieved,
+		NVL(ROUND(SUM(CASE WHEN lq.ACHIEVED = 'Y' THEN 1 ELSE 0 END) * 100 /
+		NULLIF(COUNT(lq.ACHIEVED), 0), 1), 0) AS rate
 		FROM QUEST q
 		LEFT JOIN LIFE_QUEST lq ON lq.QUEST_ID = q.QUEST_ID
 		GROUP BY q.QUEST_ID, q.QUEST_NAME
@@ -57,38 +64,44 @@
 	</select>
 
 	<!-- 특성별 레벨 분포 (탈퇴하지 않은 회원) -->
-	<select id="selectTraitLevels" resultType="com.example.demo.admin.TraitLevelDTO">
-		SELECT t.TRAIT_ID   AS traitId,
-		       t.TRAIT_NAME AS traitName,
-		       NVL(ROUND(AVG(mt.TRAIT_LEVEL), 2), 0) AS avgLevel,
-		       SUM(CASE WHEN mt.TRAIT_LEVEL = 1 THEN 1 ELSE 0 END) AS lv1,
-		       SUM(CASE WHEN mt.TRAIT_LEVEL = 2 THEN 1 ELSE 0 END) AS lv2,
-		       SUM(CASE WHEN mt.TRAIT_LEVEL = 3 THEN 1 ELSE 0 END) AS lv3,
-		       SUM(CASE WHEN mt.TRAIT_LEVEL = 4 THEN 1 ELSE 0 END) AS lv4,
-		       SUM(CASE WHEN mt.TRAIT_LEVEL = 5 THEN 1 ELSE 0 END) AS lv5
+	<select id="selectTraitLevels"
+		resultType="com.example.demo.admin.TraitLevelDTO">
+		SELECT t.TRAIT_ID AS traitId,
+		t.TRAIT_NAME AS traitName,
+		NVL(ROUND(AVG(mt.TRAIT_LEVEL), 2), 0) AS avgLevel,
+		SUM(CASE WHEN mt.TRAIT_LEVEL = 1 THEN 1 ELSE 0 END) AS lv1,
+		SUM(CASE WHEN mt.TRAIT_LEVEL = 2 THEN 1 ELSE 0 END) AS lv2,
+		SUM(CASE WHEN mt.TRAIT_LEVEL = 3 THEN 1 ELSE 0 END) AS lv3,
+		SUM(CASE WHEN mt.TRAIT_LEVEL = 4 THEN 1 ELSE 0 END) AS lv4,
+		SUM(CASE WHEN mt.TRAIT_LEVEL = 5 THEN 1 ELSE 0 END) AS lv5
 		FROM TRAIT t
 		LEFT JOIN MEMBER_TRAIT mt ON mt.TRAIT_ID = t.TRAIT_ID
-		     AND mt.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER WHERE STATUS = 'ACTIVE')
+		AND mt.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER WHERE STATUS =
+		'ACTIVE')
 		GROUP BY t.TRAIT_ID, t.TRAIT_NAME
 		ORDER BY t.TRAIT_ID
 	</select>
 
 	<!-- 나라별 게임 평균 수명 vs 실제 기대수명
 	     실제 기대수명은 그 인생들이 태어난 연대의 COUNTRY_STAT 값을 평균 (태어난 시대가 달라도 공정하게 비교) -->
-	<select id="selectCountryLife" resultType="com.example.demo.admin.CountryLifeDTO">
+	<select id="selectCountryLife"
+		resultType="com.example.demo.admin.CountryLifeDTO">
 		SELECT c.COUNTRY_CODE AS countryCode,
-		       c.NAME_KO      AS countryName,
-		       COUNT(x.DEATH_AGE) AS lives,
-		       NVL(ROUND(AVG(x.DEATH_AGE), 1), 0) AS avgDeathAge,
-		       ROUND(AVG(s.LIFE_EXPECTANCY), 1)   AS realLifeExpectancy
+		c.NAME_KO AS countryName,
+		COUNT(x.DEATH_AGE) AS lives,
+		NVL(ROUND(AVG(x.DEATH_AGE), 1), 0) AS avgDeathAge,
+		ROUND(AVG(s.LIFE_EXPECTANCY), 1) AS realLifeExpectancy
 		FROM COUNTRY c
 		LEFT JOIN (
-			SELECT BIRTH_COUNTRY, BIRTH_YEAR, DEATH_AGE FROM LIFE WHERE STATUS = 'ENDED' AND DEATH_AGE IS NOT NULL
-			UNION ALL
-			SELECT BIRTH_COUNTRY, BIRTH_YEAR, DEATH_AGE FROM GUEST_LIFE_STAT WHERE STATUS = 'ENDED' AND DEATH_AGE IS NOT NULL
+		SELECT BIRTH_COUNTRY, BIRTH_YEAR, DEATH_AGE FROM LIFE WHERE STATUS =
+		'ENDED' AND DEATH_AGE IS NOT NULL
+		UNION ALL
+		SELECT BIRTH_COUNTRY, BIRTH_YEAR, DEATH_AGE FROM GUEST_LIFE_STAT WHERE
+		STATUS = 'ENDED' AND DEATH_AGE IS NOT NULL
 		) x ON x.BIRTH_COUNTRY = c.COUNTRY_CODE
 		LEFT JOIN COUNTRY_STAT s ON s.COUNTRY_CODE = x.BIRTH_COUNTRY
-		                        AND s.DECADE = TRUNC(x.BIRTH_YEAR / 10) * 10
+		AND s.DECADE = TRUNC(x.BIRTH_YEAR / 10) * 10
+		WHERE c.IS_ACTIVE = 'Y'
 		GROUP BY c.COUNTRY_CODE, c.NAME_KO
 		ORDER BY lives DESC, c.COUNTRY_CODE
 	</select>

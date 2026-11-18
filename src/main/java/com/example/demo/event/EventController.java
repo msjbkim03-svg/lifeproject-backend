@@ -1,7 +1,9 @@
 package com.example.demo.event;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,7 +43,7 @@ public class EventController {
 		List<String> expIds = new ArrayList<>(); // 테스트: 아직 겪은 일 없음
 		List<EventResultDTO> result = new ArrayList<>();
 
-		for (EventTemplateDTO t : eServ.rollTemplates(age, year, country, gender)) {
+		for (EventTemplateDTO t : eServ.rollTemplates(age, year, country, gender, null)) {
 			GameEventDTO e = eServ.pickEvent(t, age, gender, wealth, expIds);
 			if (e != null) {
 				result.add(eServ.buildResult(t, e, name, age, year, country));
@@ -71,12 +73,13 @@ public class EventController {
 	// 테스트: 선택지 고르기 (최종 전에 삭제)
 	@GetMapping("/test/choice")
 	public EventResultDTO testChoice(@RequestParam int choiceId, @RequestParam int age, @RequestParam int birthYear,
-			@RequestParam String country, @RequestParam String name) {
+			@RequestParam String country, @RequestParam(defaultValue = "0") int lifeId, @RequestParam String name) {
 		LifeDTO life = new LifeDTO();
 		life.setCurrentAge(age);
 		life.setBirthYear(birthYear);
 		life.setCurrentCountry(country);
 		life.setName(name);
+		life.setLifeId(lifeId);
 		return eServ.applyChoice(life, choiceId, age);
 	}
 
@@ -109,5 +112,24 @@ public class EventController {
 		life.setBirthYear(birthYear);
 		life.setName(name);
 		return eServ.applyDestination(life, dest, age, eventId);
+	}
+
+	// 테스트: 인생의 특성 효과 (최종 전에 삭제)
+	@GetMapping("/test/trait")
+	public Map<String, Double> testTrait(@RequestParam int lifeId) {
+		return eServ.getTraitEffects(lifeId);
+	}
+
+	// 테스트: 템플릿별 최종 확률 (특성 적용 확인용, 최종 전에 삭제)
+	@GetMapping("/test/prob")
+	public Map<String, Double> testProb(@RequestParam int age, @RequestParam int year, @RequestParam String country,
+			@RequestParam String gender, @RequestParam(defaultValue = "0") int lifeId) {
+		Map<String, Object> stat = eDAO.selectCountryStat(country, year / 10 * 10);
+		Map<String, Double> traits = eServ.getTraitEffects(lifeId);
+		Map<String, Double> result = new LinkedHashMap<>();
+		for (EventTemplateDTO t : eServ.getTemplates()) {
+			result.put(t.getTemplateId(), eServ.finalProbability(t, age, stat, country, gender, traits));
+		}
+		return result;
 	}
 }
