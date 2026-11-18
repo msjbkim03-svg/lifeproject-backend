@@ -160,6 +160,17 @@ public class MemberController {
 	}
 
 
+	// 비밀번호 찾기 - 인증번호 확인 (M09)  POST /api/members/find/checkCode
+	// 보내는 JSON: { loginId, email, code }
+	@PostMapping("/find/checkCode")
+	public ResponseEntity<?> checkCode(@RequestBody MemberFindDTO dto) {
+		String error = service.checkResetCode(dto);
+		if (error != null) {
+			return ResponseEntity.badRequest().body(Map.of("message", error));
+		}
+		return ResponseEntity.ok(Map.of("message", "인증되었습니다."));
+	}
+
 	@PostMapping("/find/resetPw")
 	public ResponseEntity<?> resetPw(@RequestBody MemberFindDTO dto) {
 		String error = service.resetPassword(dto);

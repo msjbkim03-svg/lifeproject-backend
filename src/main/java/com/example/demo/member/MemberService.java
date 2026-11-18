@@ -276,6 +276,24 @@ public class MemberService {
 		return member.getLoginId().substring(0, 3) + "***";
 	}
 
+	// ===== 비밀번호 찾기 - 인증번호 먼저 확인 (M09) =====
+	// 맞으면 null, 틀리면 오류 문구
+	// 번호를 '사용함'으로 바꾸지 않음 → 비밀번호를 바꿀 때(resetPw) 한 번 더 확인하고 그때 사용 처리
+	public String checkResetCode(MemberFindDTO dto) {
+		String fail = "인증번호가 올바르지 않거나 만료되었습니다.";
+		if (dto.getEmail() == null || dto.getCode() == null) return fail;
+
+		// 1. 아이디·이메일이 맞는 회원인지 먼저 (안 맞아도 똑같은 문구 → 가입 여부 안 드러남)
+		MemberDTO member = dao.selectActiveByLoginIdAndEmail(dto.getLoginId(), dto.getEmail());
+
+		// 2. 회원이 없거나 번호가 틀리면 틀린 횟수 +1 (5번 틀리면 그 번호는 못 씀)
+		if (member == null || dao.countValidAuth(dto.getEmail(), "RESET_PW", dto.getCode()) == 0) {
+			dao.increaseAuthFail(dto.getEmail(), "RESET_PW");
+			return fail;
+		}
+		return null; // 인증 성공
+	}
+
 	// ===== 비밀번호 재설정 (M09) =====
 	// 문제가 있으면 오류 문구를, 성공하면 null 을 돌려준다
 	@Transactional // 번호를 '사용함'으로 바꾸는 것과 비밀번호 저장 중 하나라도 실패하면 둘 다 취소
@@ -290,13 +308,13 @@ public class MemberService {
 			return "비밀번호 확인이 일치하지 않습니다.";
 		}
 
-		// 2. 인증번호를 서버에서 다시 확인 (이메일 + 인증번호를 함께 받음)
+		// 2. 아이디와 이메일이 맞는 회원 찾기 (먼저 → 안 맞으면 인증번호를 쓰지 않음)
 		String fail = "인증번호가 올바르지 않거나 만료되었습니다.";
-		if (!verifyCode(dto.getEmail(), "RESET_PW", dto.getCode())) return fail;
-
-		// 3. 아이디와 이메일이 맞는 회원 찾기
 		MemberDTO member = dao.selectActiveByLoginIdAndEmail(dto.getLoginId(), dto.getEmail());
 		if (member == null) return fail;
+
+		// 3. 인증번호를 서버에서 다시 확인 (화면에서 확인했어도 한 번 더 → 이때 '사용함' 처리)
+		if (!verifyCode(dto.getEmail(), "RESET_PW", dto.getCode())) return fail;
 
 		// 4. BCrypt 로 바꿔서 저장 (원래 비밀번호는 복원할 수 없음)
 		dao.updatePassword(member.getMemberId(), encoder.encode(newPw));
