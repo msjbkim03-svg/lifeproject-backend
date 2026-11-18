@@ -89,4 +89,12 @@
 		 ORDER BY NVL(S.GDP_PER_CAPITA, 0) DESC
 	</select>
 	
+	<!-- 인생의 특성 효과 (C13): 시작할 때 고정한 레벨(LIFE_TRAIT) → 레벨별 효과 값 -->
+	<select id="selectLifeTraitEffects" parameterType="int" resultType="map">
+		SELECT T.TRAIT_ID, E.EFFECT_VALUE
+		  FROM LIFE_TRAIT T
+		  JOIN TRAIT_LEVEL_EFFECT E ON T.TRAIT_ID = E.TRAIT_ID AND T.TRAIT_LEVEL = E.LEVEL_NO
+		 WHERE T.LIFE_ID = #{lifeId}
+	</select>
+	
 </mapper>

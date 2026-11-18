@@ -87,4 +87,9 @@ public class EventDAO {
 		return mybatis.selectList("Event.selectMigrateCandidates", param);
 	}
 
+	// 인생의 특성 효과 (TRAIT_ID, EFFECT_VALUE)
+	public List<Map<String, Object>> selectLifeTraitEffects(int lifeId) {
+		return mybatis.selectList("Event.selectLifeTraitEffects", lifeId);
+	}
+
 }
