@@ -365,6 +365,56 @@
 		ORDER BY AGE DESC, LOG_ID ASC
 	</select>
 
+	<!-- C03 인생 지도: 지금까지 한 해씩 남긴 기록 (나이순) -->
+	<select id="selectYearLogs" parameterType="int" resultType="com.example.demo.engine.YearLogDTO">
+		SELECT AGE          AS age,
+		       YEAR_NO      AS yearNo,
+		       COUNTRY_CODE AS countryCode,
+		       HEALTH       AS health,
+		       HAPPINESS    AS happiness,
+		       KNOWLEDGE    AS knowledge,
+		       RELATION     AS relation,
+		       FOCUS_CODE   AS focusCode,
+		       JOB_ID       AS jobId,
+		       NVL(INCOME, 0) AS income,
+		       NVL(ASSETS, 0) AS assets
+		FROM LIFE_YEAR_LOG
+		WHERE LIFE_ID = #{lifeId}
+		ORDER BY AGE
+	</select>
+
+	<!-- C03 나라 패널: 그해와 가장 가까운 연대의 나라 통계 + 권역 이름 + 출처 (권역 진학률·산업 비율은 selectRegionStat)
+	     cond: countryCode, year -->
+	<select id="selectCountryInfo" parameterType="map" resultType="com.example.demo.engine.CountryInfoDTO">
+		SELECT * FROM (
+			SELECT s.COUNTRY_CODE       AS countryCode,
+			       c.NAME_KO            AS nameKo,
+			       g.REGION_NAME        AS regionName,
+			       s.DECADE             AS decade,
+			       s.POPULATION         AS population,
+			       s.BIRTHS             AS births,
+			       s.DEATHS             AS deaths,
+			       s.LIFE_EXPECTANCY    AS lifeExpectancy,
+			       s.INFANT_MORTALITY   AS infantMortality,
+			       s.U5_MORTALITY       AS u5Mortality,
+			       s.GDP_PER_CAPITA     AS gdpPerCapita,
+			       s.URBAN_RATE         AS urbanRate,
+			       s.SEX_RATIO_BIRTH    AS sexRatioBirth,
+			       s.TFR                AS tfr,
+			       s.UNEMPLOYMENT_RATE  AS unemploymentRate,
+			       s.NET_MIGRATION_RATE AS netMigrationRate,
+			       s.IS_ESTIMATED       AS isEstimated,
+			       d.TITLE              AS sourceTitle
+			FROM COUNTRY_STAT s
+			JOIN COUNTRY c ON s.COUNTRY_CODE = c.COUNTRY_CODE
+			LEFT JOIN REGION g ON g.REGION_CODE = c.REGION_CODE
+			LEFT JOIN DATA_SOURCE d ON d.SOURCE_ID = s.SOURCE_ID
+			WHERE s.COUNTRY_CODE = #{countryCode}
+			ORDER BY ABS(s.DECADE - TRUNC(#{year} / 10) * 10)
+		)
+		WHERE ROWNUM = 1
+	</select>
+
 	<!-- 고르기를 기다리는 선택 이벤트의 상황 문장 (이어하기 때 선택 창 다시 띄우기) -->
 	<select id="selectPendingText" parameterType="com.example.demo.engine.LifeDTO" resultType="string">
 		SELECT LOG_TEXT FROM (
@@ -392,12 +442,6 @@
 		resultType="com.example.demo.engine.RegionStatDTO">
 		SELECT * FROM (
 			SELECT r.ENROLL_ELEM   AS enrollElem,
-			       r.ENROLL_MIDDLE AS enrollMiddle,
-			       r.ENROLL_HIGH   AS enrollHigh,
-			       r.ENROLL_UNI    AS enrollUni,
-			       r.AGRI_RATE     AS agriRate,
-			       r.INDUSTRY_RATE AS industryRate,
-			       r.SERVICE_RATE  AS serviceRate
 			FROM REGION_STAT r
 			JOIN COUNTRY c ON r.REGION_CODE = c.REGION_CODE
 			WHERE c.COUNTRY_CODE = #{currentCountry}
