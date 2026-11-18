@@ -866,10 +866,49 @@ public class EngineService {
 		} else if (age >= 18) {
 			out.add(new FamilyMemberDTO("배우자", null, null, "없음", true));
 		}
+		// 자녀: 한 명씩 아들·딸, 이름(성 쓰는 나라는 아버지 성), 나이 (태어난 해는 CHILD 이벤트 기록에서)
 		if (life.getChildCount() > 0) {
-			out.add(new FamilyMemberDTO("자녀", null, null, life.getChildCount() + "명", true));
+			List<Integer> births = engineDao.selectChildBirthAges(life.getLifeId());
+			java.util.SplittableRandom r = new java.util.SplittableRandom(life.getLifeId() * 104729L + 7);
+			// 이름은 태어난 나라(집안) 이름으로: 이민 간 뒤에도 부모 집안 이름을 따름 (배우자 이름도 같은 나라에서 정해짐)
+			String cc = life.getBirthCountry();
+			String dadName = "M".equals(life.getGender()) ? life.getName() : f.spouse;
+			for (int i = 0; i < life.getChildCount(); i++) {
+				String sex = r.nextDouble() < 0.51 ? "M" : "F";
+				String nm = pickName(cc, sex, r);
+				if (nm != null && dadName != null) {
+					if (SURNAME_CC.contains(cc)) {
+						nm = joinName(splitName(dadName)[0], splitName(nm)[1], nm); // 한·중·일 …: 아버지 성 + 이름
+					} else if (dadName.indexOf(' ') > 0 && nm.indexOf(' ') > 0) {
+						// 띄어 쓰는 이름 (아랍·서양 …): 아이 이름 + 아버지 집안 이름 (형제끼리 같은 집안 이름)
+						nm = nm.substring(0, nm.indexOf(' ')) + dadName.substring(dadName.lastIndexOf(' '));
+					}
+				}
+				Integer born = births != null && i < births.size() ? births.get(i) : null;
+				Integer ka = born == null ? null : Math.max(0, age - born - 1); // 그해 기록 나이 = 태어난 해의 내 나이
+				out.add(new FamilyMemberDTO("M".equals(sex) ? "아들" : "딸", nm, ka, childLine(ka), true));
+			}
 		}
 		return out;
+	}
+
+	private static String childLine(Integer a) {
+		if (a == null) {
+			return "";
+		}
+		if (a < 1) {
+			return "갓난아기";
+		}
+		if (a < 7) {
+			return "아기";
+		}
+		if (a < 13) {
+			return "어린이";
+		}
+		if (a < 19) {
+			return "청소년";
+		}
+		return a < 30 ? "청년" : "어른";
 	}
 
 	private FamilyMemberDTO parentRow(String role, String name, int at, int die, String job, boolean gone, int myAge) {
@@ -1218,6 +1257,10 @@ public class EngineService {
 		// ⑤ 인생·역사 이벤트 (C09, C10): 윤아님 rollYear로 올해 일어난 일을 뽑고 → 효과·상태를 인생에 반영
 		eventStep(life);
 
+		// ⑤-2 돈 쓰기·투자 (C06-3): 모은 돈 굴리기 + 가진 물건 유지비
+		investStep(life, stat);
+		fixStats(life);
+
 		// ⑥ 사망 판정 (C07): 올해(현재 나이)를 못 넘기면 사망
 		//    역사 이벤트의 deathAdd(전쟁·기근 등)는 올해 사망 확률에 더함 (윤아님 EventResultDTO.deathAdd)
 		double histAdd = 0;
@@ -1303,6 +1346,13 @@ public class EngineService {
 			life.setFocusCode(null);
 			life.setNeedFocus(true);
 			life.setFocusOptions(focusOptions(life.getStageCode(), life));
+		}
+
+		// 선택 이벤트 비용은 나이가 바뀐 뒤 기준으로 다시 계산 (고를 때 chooseEvent·choiceBlocked가 보는 나이·연대와 같게)
+		//   예전엔 이벤트를 뽑을 때(나이 +1 전) 계산해서, 연대가 바뀌는 해(2009→2010)엔 중위 소득이 달라져
+		//   화면엔 고를 수 있다고 나온 가게 차리기가 고르면 "돈이 모자라요"로 막혔음
+		if (life.isNeedChoice() && life.getPendingEvent() != null) {
+			life.setChoiceCosts(costsOf(life, life.getPendingEvent().getChoices(), life.getPendingEvent().getLogText()));
 		}
 
 		// 4. 저장 + 그해 기록
@@ -1434,6 +1484,434 @@ public class EngineService {
 		engineDao.updateFocus(life);
 		fillRegion(life);
 		return life;
+	}
+
+	// ================= C06-3 돈 쓰기·투자 (원작 '돈 쓰기 · 투자') =================
+	// 원작 구조를 따라 우리 엔진 값으로 새로 만듦: 여유 자금 굴리기(8가지) + 물건 사기 + 돈 쓰기(여행·용돈 …)
+	//   - 투자 방식은 LIFE.INVEST_TYPE, 가진 물건은 LIFE.OWNS(쉼표 목록)에 저장
+	//   - 해마다 investStep: 순자산이 0보다 많으면 그 방식의 수익률(평균 + 출렁임)만큼 불거나 줄어듦
+	//   - 원작 장기 실질 수익률: 예금 1~1.5%, 채권 2%, 반반 3.5%, 주식 5%(±17%), 부동산 3.5%, 종목 사고팔기는 대부분 지수보다 못함
+	//   - 돈 쓰기는 한 해 한 번씩 (서버 메모리에 그 나이 기록, 재시작하면 다시 할 수 있음)
+
+	private static final String[] INV_IDS = { "CASH", "DEPOSIT", "BOND", "MIX", "STOCK", "WORLD", "PROPERTY", "TRADE" };
+	private static final Map<String, String> INV_NAME = Map.of(
+			"CASH", "집에 둔 현금", "DEPOSIT", "예금", "BOND", "채권", "MIX", "주식·채권 반반 펀드",
+			"STOCK", "주식 (지수)", "WORLD", "해외 지수 (세계 주식)", "PROPERTY", "부동산 펀드", "TRADE", "종목 골라 사고팔기");
+	private static final Map<String, String> INV_DESC = Map.of(
+			"CASH", "이자 없음",
+			"DEPOSIT", "물가 빼고 연 1~1.5%, 거의 안 출렁여요",
+			"BOND", "평균 2% 안팎, 출렁임 작음",
+			"MIX", "평균 3.5%, 출렁임 중간",
+			"STOCK", "평균 5%, 해마다 ±17% 출렁여요",
+			"WORLD", "평균 5%, 수수료가 조금 더 들고 환율 따라서도 출렁여요",
+			"PROPERTY", "평균 3.5%, 출렁임 중간",
+			"TRADE", "자주 사고팔면 수수료·세금 때문에 대부분 지수보다 덜 벌어요. 크게 버는 사람도 드물게 있어요");
+
+	// 물건: 코드, 이름, 값(구매력 달러), 살 수 있는 나이, 나온 해, 행복
+	private static final Object[][] ITEMS = {
+			{ "PHONE", "스마트폰", 200, 13, 2010, 5 },
+			{ "CELL", "휴대전화", 250, 13, 1995, 3 },
+			{ "BIKE", "자전거", 150, 10, 1900, 3 },
+			{ "MOTO", "오토바이", 1300, 18, 1960, 7 },
+			{ "CAR", "자동차", 16000, 20, 1950, 8 },
+			{ "TV", "텔레비전·냉장고", 600, 18, 1965, 5 },
+			{ "PC", "컴퓨터·노트북", 700, 15, 1990, 4 },
+	};
+	private static final Map<String, String> OWN_NAME = Map.of(
+			"PHONE", "스마트폰", "CELL", "휴대전화", "BIKE", "자전거", "MOTO", "오토바이", "CAR", "자동차",
+			"TV", "텔레비전·냉장고", "PC", "컴퓨터·노트북", "HOUSE", "내 집");
+
+	// 돈 쓰기를 올해 이미 했는지 (lifeId → 항목 → 나이)
+	private final Map<Integer, Map<String, Integer>> doneThisYear = new ConcurrentHashMap<>();
+
+	private boolean bankOK(LifeDTO life) {
+		int year = life.getBirthYear() + life.getCurrentAge();
+		return year >= 1990 || "Y".equals(life.getIsUrban()) || life.getWealthClass() >= 3;
+	}
+
+	private boolean marketOK(LifeDTO life, CountryStatDTO stat) {
+		int year = life.getBirthYear() + life.getCurrentAge();
+		return year >= 1975 && gdpOf(stat) >= 4000;
+	}
+
+	// 지금 나라·연도에서 고를 수 있는 투자 방식인지 (안 되면 이유)
+	private String investWhy(LifeDTO life, CountryStatDTO stat, String id) {
+		if ("CASH".equals(id)) {
+			return null;
+		}
+		if (!bankOK(life)) {
+			return "은행 계좌가 없어 모은 돈은 집에 현금으로 두고 있어요";
+		}
+		if ("DEPOSIT".equals(id)) {
+			return null;
+		}
+		if (!marketOK(life, stat)) {
+			return "이 나라·이 시절엔 보통 사람이 사고팔 수 있는 증권시장이 사실상 없어요";
+		}
+		if ("WORLD".equals(id) && life.getBirthYear() + life.getCurrentAge() < 1995) {
+			return "1995년쯤부터 해외 지수 펀드를 살 수 있어요";
+		}
+		return null;
+	}
+
+	// 실제로 쓰는 투자 방식 (고른 게 지금은 안 되면 예금 또는 현금)
+	private String investNow(LifeDTO life, CountryStatDTO stat) {
+		String t = life.getInvestType();
+		if (t != null && investWhy(life, stat, t) == null) {
+			return t;
+		}
+		return bankOK(life) ? "DEPOSIT" : "CASH";
+	}
+
+	// 한 해 수익률 (원작처럼 평균 + 정규분포 출렁임)
+	private double investReturn(String t) {
+		double z = random.nextGaussian();
+		switch (t) {
+		case "DEPOSIT":
+			return 0.012 + 0.004 * z;
+		case "BOND":
+			return clamp(0.02 + 0.04 * z, -0.15, 0.2);
+		case "MIX":
+			return clamp(0.035 + 0.09 * z, -0.3, 0.35);
+		case "STOCK":
+			return clamp(0.05 + 0.17 * z, -0.5, 0.6);
+		case "WORLD":
+			return clamp(0.045 + 0.15 * z + 0.07 * random.nextGaussian(), -0.5, 0.6);
+		case "PROPERTY":
+			return clamp(0.035 + 0.1 * z, -0.3, 0.35);
+		case "TRADE":
+			return clamp(0.05 + 0.17 * z - 0.055 + 0.25 * random.nextGaussian(), -0.9, 2);
+		default:
+			return 0;
+		}
+	}
+
+	private static java.util.LinkedHashSet<String> ownSet(LifeDTO life) {
+		java.util.LinkedHashSet<String> s = new java.util.LinkedHashSet<>();
+		if (life.getOwns() != null) {
+			for (String o : life.getOwns().split(",")) {
+				if (!o.isBlank()) {
+					s.add(o.trim());
+				}
+			}
+		}
+		return s;
+	}
+
+	// ⑤-2 해마다: 모은 돈 굴리기 + 가진 물건 유지비·효과 (eventStep 뒤, 사망 판정 전)
+	private void investStep(LifeDTO life, CountryStatDTO stat) {
+		int age = life.getCurrentAge();
+		java.util.Set<String> owns = ownSet(life);
+		double med = medIncome(life.getCurrentCountry(), stat);
+		if (owns.contains("CAR")) {
+			double c = med * 0.04;
+			life.setAssets(life.getAssets() - Math.round(c));
+			book(life, "자동차 유지비", -c);
+		}
+		if (owns.contains("MOTO")) {
+			double c = med * 0.01;
+			life.setAssets(life.getAssets() - Math.round(c));
+			book(life, "오토바이 유지비", -c);
+		}
+		if (owns.contains("BIKE") && age < 70) {
+			life.setHealth(life.getHealth() + 0.4); // 타고 다니면 건강 조금
+		}
+		if (life.getAssets() <= 0 || age < 15) {
+			return;
+		}
+		String t = investNow(life, stat);
+		double r = investReturn(t);
+		double gain = life.getAssets() * r;
+		if (Math.round(gain) == 0) {
+			return;
+		}
+		life.setAssets(life.getAssets() + Math.round(gain));
+		book(life, "DEPOSIT".equals(t) ? "예금 이자" : INV_NAME.get(t) + (gain >= 0 ? " 수익" : " 손실"), gain);
+		String note = null;
+		int pct = (int) Math.round(Math.abs(r) * 100);
+		if (r <= -0.18) {
+			note = "시장이 크게 떨어져 " + INV_NAME.get(t) + "에 맡긴 돈의 " + pct + "%가 사라졌다. (" + wonSigned(life, gain) + ")";
+		} else if (r >= 0.25) {
+			note = INV_NAME.get(t) + "이(가) 크게 올라 맡긴 돈이 " + pct + "% 불었다. (" + wonSigned(life, gain) + ")";
+		}
+		if (note != null) {
+			saveEventLog(life, age, null, null, note);
+			List<EventResultDTO> ev = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
+			ev.add(noteEvent(note));
+			life.setEvents(ev);
+		}
+	}
+
+	// 돈 쓰기·투자 창 목록
+	public ShopDTO shop(LifeDTO life) {
+		CountryStatDTO stat = yearStat(life);
+		double med = medIncome(life.getCurrentCountry(), stat);
+		int age = life.getCurrentAge();
+		int year = life.getBirthYear() + age;
+		long cash = Math.max(0, life.getAssets());
+		java.util.Set<String> owns = ownSet(life);
+		Map<String, Integer> did = doneThisYear.getOrDefault(life.getLifeId(), Map.of());
+
+		List<ShopItemDTO> items = new ArrayList<>();
+		// 물건 사기
+		for (Object[] it : ITEMS) {
+			String id = (String) it[0];
+			int minAge = (Integer) it[3];
+			int from = (Integer) it[4];
+			if (age < minAge || year < from) {
+				continue;
+			}
+			if ("CELL".equals(id) && (owns.contains("PHONE") || year >= 2015)) {
+				continue; // 스마트폰 시대엔 휴대전화 대신 스마트폰
+			}
+			if ("MOTO".equals(id) && owns.contains("CAR")) {
+				continue;
+			}
+			long price = Math.round(((Integer) it[2]) * priceK(stat));
+			String desc = "행복 +" + it[5];
+			if ("CAR".equals(id)) {
+				desc = desc + " · 해마다 유지비가 들어요";
+			} else if ("BIKE".equals(id)) {
+				desc = desc + " · 타고 다니면 건강 ↑";
+			} else if ("PC".equals(id)) {
+				desc = desc + " · 지식 +2";
+			} else if ("MOTO".equals(id)) {
+				desc = desc + " · 유지비가 조금 들어요";
+			}
+			ShopItemDTO d = new ShopItemDTO("BUY_" + id, "BUY", (String) it[1], desc, price);
+			d.setDone(owns.contains(id));
+			if (d.isDone()) {
+				d.setOk(false);
+				d.setWhy("이미 가지고 있어요");
+			} else if (cash < price) {
+				d.setOk(false);
+				d.setWhy("돈이 모자라요");
+			}
+			items.add(d);
+		}
+		// 내 집 마련: 집값의 20%가 있으면 나머지는 대출 (이자는 갚는 동안 모두 합쳐 25%)
+		if (age >= 26) {
+			long price = Math.round(med * 5 * ("Y".equals(life.getIsUrban()) ? 1.4 : 0.7));
+			ShopItemDTO d = new ShopItemDTO("BUY_HOUSE", "BUY", "내 집 마련", "행복 +10 · 집값의 20%가 있으면 나머지는 대출", price);
+			d.setDone(owns.contains("HOUSE"));
+			if (d.isDone()) {
+				d.setOk(false);
+				d.setWhy("이미 내 집이 있어요");
+			} else if (cash < price * 0.2) {
+				d.setOk(false);
+				d.setWhy("계약금(집값의 20%)이 모자라요");
+			} else if (age >= 65 && cash < price) {
+				d.setOk(false);
+				d.setWhy("이 나이에는 대출이 어려워 집값 전부가 필요해요");
+			}
+			items.add(d);
+		}
+		// 돈 쓰기 (한 해 한 번)
+		addDo(items, did, age, cash, "DO_TRIP", "국내 여행", "행복 +4 · 관계 +1", med * 0.04, age >= 15);
+		addDo(items, did, age, cash, "DO_ABROAD", "해외 여행", "행복 +7 · 지식 +1", med * 0.2, age >= 18 && year >= 1989);
+		addDo(items, did, age, cash, "DO_PARENTS", "부모님 용돈·병원비", "관계 +5 · 행복 +2", med * 0.06,
+				age >= 20 && !"N".equals(life.getParentAlive()));
+		addDo(items, did, age, cash, "DO_PARTY", "친구들에게 한턱내기", "관계 +3 · 행복 +1", med * 0.015, age >= 15);
+		addDo(items, did, age, cash, "DO_KIDS", "자녀 학원·과외", "아이 공부에 보태요 · 관계 +2", med * 0.1,
+				life.getChildCount() > 0 && age >= 28);
+		addDo(items, did, age, cash, "DO_CHECKUP", "건강검진", "건강 +3", med * 0.02, age >= 30);
+		addDo(items, did, age, cash, "DO_COURSE", "강좌·학원 등록", "지식 +4", med * 0.05, age >= 15);
+		addDo(items, did, age, cash, "DO_REMODEL", "집 수리·인테리어", "행복 +5", med * 0.25, owns.contains("HOUSE"));
+
+		// 여유 자금 굴리기
+		String now = investNow(life, stat);
+		List<ShopItemDTO> inv = new ArrayList<>();
+		for (String id : INV_IDS) {
+			ShopItemDTO d = new ShopItemDTO("INV_" + id, "INVEST", INV_NAME.get(id), INV_DESC.get(id), 0);
+			String why = investWhy(life, stat, id);
+			d.setOk(why == null);
+			d.setWhy(why);
+			d.setDone(id.equals(now));
+			inv.add(d);
+		}
+
+		ShopDTO out = new ShopDTO();
+		out.setItems(items);
+		out.setInvests(inv);
+		out.setInvestType(now);
+		out.setOwns(String.join(",", owns));
+		out.setAssets(life.getAssets());
+		out.setCash(cash);
+		out.setHealth(life.getHealth());
+		out.setHappiness(life.getHappiness());
+		out.setKnowledge(life.getKnowledge());
+		out.setRelation(life.getRelation());
+		out.setKrwPerUsd(krwPerUsd(stat));
+		return out;
+	}
+
+	private void addDo(List<ShopItemDTO> items, Map<String, Integer> did, int age, long cash, String id, String name,
+			String desc, double cost, boolean show) {
+		if (!show) {
+			return;
+		}
+		ShopItemDTO d = new ShopItemDTO(id, "DO", name, desc, Math.max(1, Math.round(cost)));
+		Integer at = did.get(id);
+		d.setDone(at != null && at == age);
+		if (d.isDone()) {
+			d.setOk(false);
+			d.setWhy("올해는 이미 했어요");
+		} else if (cash < d.getPrice()) {
+			d.setOk(false);
+			d.setWhy("돈이 모자라요");
+		}
+		items.add(d);
+	}
+
+	// 물건값 나라 보정: 잘사는 나라일수록 조금 비쌈 (구매력 달러 기준이라 크게는 안 다름)
+	private double priceK(CountryStatDTO stat) {
+		return clamp(Math.pow(Math.max(gdpOf(stat), 500) / 15000, 0.15), 0.7, 1.3);
+	}
+
+	// 사기·하기 (logAge: 화면이 보고 있는 나이, 서버 나이와 한 살 차이까지만)
+	//   돌려주는 문구는 인생 기록에도 남김. 못 하면 null + 이유는 shopBlocked
+	@Transactional
+	public ShopDTO buy(LifeDTO life, String itemId, Integer logAge) {
+		if (!"PLAYING".equals(life.getStatus()) || itemId == null) {
+			return null;
+		}
+		ShopItemDTO it = null;
+		ShopDTO list = shop(life);
+		for (ShopItemDTO d : list.getItems()) {
+			if (d.getId().equals(itemId)) {
+				it = d;
+			}
+		}
+		if (it == null || !it.isOk()) {
+			return null;
+		}
+		int age = logAge == null ? life.getCurrentAge() : Math.max(life.getCurrentAge() - 1, Math.min(life.getCurrentAge(), logAge));
+		java.util.LinkedHashSet<String> owns = ownSet(life);
+		String text;
+		if ("BUY_HOUSE".equals(itemId)) {
+			long price = it.getPrice();
+			long cash = Math.max(0, life.getAssets());
+			long loan = Math.max(0, price - cash);
+			long interest = Math.round(loan * 0.25);
+			life.setAssets(life.getAssets() - interest); // 집값은 재산으로 남고(현금 → 집) 이자만 나감
+			life.setHappiness(life.getHappiness() + 10);
+			owns.add("HOUSE");
+			text = "내 집을 마련했다. (집값 " + won(life, price) + (loan > 0 ? ", 대출 " + won(life, loan) + " · 이자 약 " + won(life, interest) : "") + ")";
+		} else if (it.getKind().equals("BUY")) {
+			String code = itemId.substring(4);
+			life.setAssets(life.getAssets() - it.getPrice());
+			for (Object[] row : ITEMS) {
+				if (row[0].equals(code)) {
+					life.setHappiness(life.getHappiness() + (Integer) row[5]);
+				}
+			}
+			if ("PC".equals(code)) {
+				life.setKnowledge(life.getKnowledge() + 2);
+			}
+			if ("PHONE".equals(code)) {
+				owns.remove("CELL");
+			}
+			owns.add(code);
+			text = OWN_NAME.get(code) + josa(OWN_NAME.get(code)) + " 샀다. (−" + won(life, it.getPrice()) + ")";
+		} else {
+			life.setAssets(life.getAssets() - it.getPrice());
+			switch (itemId) {
+			case "DO_TRIP":
+				life.setHappiness(life.getHappiness() + 4);
+				life.setRelation(life.getRelation() + 1);
+				text = "국내 여행을 다녀왔다.";
+				break;
+			case "DO_ABROAD":
+				life.setHappiness(life.getHappiness() + 7);
+				life.setKnowledge(life.getKnowledge() + 1);
+				text = "해외여행을 다녀왔다.";
+				break;
+			case "DO_PARENTS":
+				life.setRelation(life.getRelation() + 5);
+				life.setHappiness(life.getHappiness() + 2);
+				text = "부모님께 용돈과 병원비를 드렸다.";
+				break;
+			case "DO_PARTY":
+				life.setRelation(life.getRelation() + 3);
+				life.setHappiness(life.getHappiness() + 1);
+				text = "친구들에게 한턱냈다.";
+				break;
+			case "DO_KIDS":
+				life.setRelation(life.getRelation() + 2);
+				text = "아이를 학원에 보냈다.";
+				break;
+			case "DO_CHECKUP":
+				life.setHealth(life.getHealth() + 3);
+				text = "건강검진을 받았다.";
+				break;
+			case "DO_COURSE":
+				life.setKnowledge(life.getKnowledge() + 4);
+				text = "강좌에 등록해 배웠다.";
+				break;
+			case "DO_REMODEL":
+				life.setHappiness(life.getHappiness() + 5);
+				text = "집을 고치고 꾸몄다.";
+				break;
+			default:
+				return null;
+			}
+			text = text + " (−" + won(life, it.getPrice()) + ")";
+			doneThisYear.computeIfAbsent(life.getLifeId(), k -> new ConcurrentHashMap<>()).put(itemId, life.getCurrentAge());
+		}
+		if (doneThisYear.size() > 20000) {
+			doneThisYear.clear();
+		}
+		life.setOwns(String.join(",", owns));
+		fixStats(life);
+		engineDao.updateShop(life);
+		saveEventLog(life, age, null, null, text);
+		ShopDTO out = shop(life);
+		out.setMessage(text);
+		out.setLogAge(age);
+		return out;
+	}
+
+	// 못 산 이유 (컨트롤러 400 문구)
+	public String shopBlocked(LifeDTO life, String itemId) {
+		for (ShopItemDTO d : shop(life).getItems()) {
+			if (d.getId().equals(itemId)) {
+				return d.isOk() ? "지금은 할 수 없어요." : d.getWhy() + ".";
+			}
+		}
+		return "지금 고를 수 없는 항목이에요.";
+	}
+
+	// 여유 자금 굴리기 방식 바꾸기
+	@Transactional
+	public ShopDTO invest(LifeDTO life, String type, Integer logAge) {
+		if (!"PLAYING".equals(life.getStatus()) || type == null || !INV_NAME.containsKey(type)) {
+			return null;
+		}
+		CountryStatDTO stat = yearStat(life);
+		if (investWhy(life, stat, type) != null) {
+			return null;
+		}
+		int age = logAge == null ? life.getCurrentAge() : Math.max(life.getCurrentAge() - 1, Math.min(life.getCurrentAge(), logAge));
+		life.setInvestType(type);
+		engineDao.updateShop(life);
+		String text = "모은 돈을 " + INV_NAME.get(type) + "에 맡기기로 했다.";
+		saveEventLog(life, age, null, null, text);
+		ShopDTO out = shop(life);
+		out.setMessage(text);
+		out.setLogAge(age);
+		return out;
+	}
+
+	// 을/를
+	private static String josa(String w) {
+		if (w == null || w.isEmpty()) {
+			return "을";
+		}
+		char c = w.charAt(w.length() - 1);
+		if (c < 0xAC00 || c > 0xD7A3) {
+			return "을";
+		}
+		return (c - 0xAC00) % 28 == 0 ? "를" : "을";
 	}
 
 	// ================= C06-2 직업 선택 =================

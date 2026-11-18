@@ -151,6 +151,8 @@
 		       STAGE_CODE      AS stageCode,
 		       FOCUS_CODE      AS focusCode,
 		       PENDING_EVENT_ID AS pendingEventId,
+		       INVEST_TYPE     AS investType,
+		       OWNS            AS owns,
 		       STATUS          AS status
 		FROM LIFE
 		WHERE LIFE_ID = #{lifeId}
@@ -192,6 +194,8 @@
 		       STAGE_CODE      AS stageCode,
 		       FOCUS_CODE      AS focusCode,
 		       PENDING_EVENT_ID AS pendingEventId,
+		       INVEST_TYPE     AS investType,
+		       OWNS            AS owns,
 		       STATUS          AS status
 		FROM LIFE
 		WHERE STATUS = 'PLAYING'
@@ -281,6 +285,23 @@
 		WHERE LIFE_ID = #{lifeId}
 	</update>
 
+	<!-- ================= C06-3 돈 쓰기·투자 ================= -->
+
+	<!-- 사기·하기·투자 방식 바꾸기 뒤 저장 (돈·능력치·투자 방식·가진 물건만) -->
+	<update id="updateShop" parameterType="com.example.demo.engine.LifeDTO">
+		UPDATE LIFE
+		SET HEALTH         = #{health},
+		    HAPPINESS      = #{happiness},
+		    KNOWLEDGE      = #{knowledge},
+		    RELATION       = #{relation},
+		    ASSETS         = #{assets},
+		    INVEST_TYPE    = #{investType, jdbcType=VARCHAR},
+		    OWNS           = #{owns, jdbcType=VARCHAR},
+		    LAST_PLAYED_AT = SYSDATE
+		WHERE LIFE_ID = #{lifeId}
+		  AND STATUS = 'PLAYING'
+	</update>
+
 	<!-- ================= C04 집중 선택 ================= -->
 
 	<update id="updateFocus" parameterType="com.example.demo.engine.LifeDTO">
@@ -352,6 +373,23 @@
 	</insert>
 
 	<!-- C03 이어하기: 지금까지의 인생 기록 (최근 나이부터, 같은 나이는 일어난 순서) -->
+	<!-- C03 가족과 삶: 아이가 태어난 해의 내 나이 (결과가 CHILD 인 이벤트 기록, 일어난 순)
+	     선택 이벤트는 고른 선택지의 결과, 일반 이벤트는 템플릿 결과로 판단 (읽기만, 윤아님 테이블)
+	     Oracle 11g: ON 안에 서브쿼리 없이 -->
+	<select id="selectChildBirthAges" parameterType="int" resultType="int">
+		SELECT l.AGE
+		FROM LIFE_EVENT_LOG l
+		LEFT JOIN EVENT_CHOICE c ON c.CHOICE_ID = l.CHOICE_ID
+		LEFT JOIN GAME_EVENT g ON g.EVENT_ID = l.EVENT_ID
+		LEFT JOIN EVENT_TEMPLATE t ON t.TEMPLATE_ID = g.TEMPLATE_ID
+		WHERE l.LIFE_ID = #{lifeId}
+		  AND l.EVENT_ID IS NOT NULL
+		  AND ((l.CHOICE_ID IS NOT NULL AND c.RESULT_ACTION = 'CHILD')
+		    OR (l.CHOICE_ID IS NULL AND t.RESULT_ACTION = 'CHILD'
+		        AND NOT EXISTS (SELECT 1 FROM EVENT_CHOICE x WHERE x.EVENT_ID = l.EVENT_ID)))  <!-- 선택 이벤트의 '고르기 전' 줄은 빼기 -->
+		ORDER BY l.AGE, l.LOG_ID
+	</select>
+
 	<select id="selectEventLogs" parameterType="int" resultType="com.example.demo.engine.EventLogDTO">
 		SELECT LIFE_ID   AS lifeId,
 		       AGE       AS age,

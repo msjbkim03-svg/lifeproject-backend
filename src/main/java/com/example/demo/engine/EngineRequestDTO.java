@@ -10,6 +10,9 @@ public class EngineRequestDTO {
 	private String jobId;      // 직업 코드 (C06)
 	private int choiceId;      // 선택지 번호 (C09 선택 이벤트)
 	private String countryCode; // 이민 갈 나라 (C10 목적지 고르기)
+	private String itemId;     // 돈 쓰기 항목 (C06-3: BUY_CAR, DO_TRIP …)
+	private String investType; // 여유 자금 굴리기 방식 (C06-3: DEPOSIT, STOCK …)
+	private Integer atAge;     // 화면이 보고 있는 나이 (C06-3 기록 나이)
 
 	public int getDecade() {
 		return decade;
@@ -65,5 +68,29 @@ public class EngineRequestDTO {
 
 	public void setCountryCode(String countryCode) {
 		this.countryCode = countryCode;
+	}
+
+	public String getItemId() {
+		return itemId;
+	}
+
+	public void setItemId(String itemId) {
+		this.itemId = itemId;
+	}
+
+	public String getInvestType() {
+		return investType;
+	}
+
+	public void setInvestType(String investType) {
+		this.investType = investType;
+	}
+
+	public Integer getAtAge() {
+		return atAge;
+	}
+
+	public void setAtAge(Integer atAge) {
+		this.atAge = atAge;
 	}
 }

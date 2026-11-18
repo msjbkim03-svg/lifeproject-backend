@@ -151,6 +151,47 @@ public class EngineController {
 		return ResponseEntity.ok(life);
 	}
 
+	// C06-3 돈 쓰기·투자 창  GET /api/engine/shop?lifeId=...&guestToken=...
+	@GetMapping("/api/engine/shop")
+	public ResponseEntity<?> shop(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		LifeDTO life = engineService.loadMyLife(lifeId, loginMemberId(auth), guestToken);
+		if (life == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		return ResponseEntity.ok(engineService.shop(life));
+	}
+
+	// C06-3 사기·하기  POST /api/engine/shop  { lifeId, itemId, atAge, guestToken }
+	@PostMapping("/api/engine/shop")
+	public ResponseEntity<?> buy(@RequestBody EngineRequestDTO req,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		LifeDTO life = engineService.loadMyLife(req.getLifeId(), loginMemberId(auth), req.getGuestToken());
+		if (life == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		ShopDTO out = engineService.buy(life, req.getItemId(), req.getAtAge());
+		if (out == null) {
+			return ResponseEntity.badRequest().body(engineService.shopBlocked(life, req.getItemId()));
+		}
+		return ResponseEntity.ok(out);
+	}
+
+	// C06-3 여유 자금 굴리기 방식  POST /api/engine/invest  { lifeId, investType, atAge, guestToken }
+	@PostMapping("/api/engine/invest")
+	public ResponseEntity<?> invest(@RequestBody EngineRequestDTO req,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		LifeDTO life = engineService.loadMyLife(req.getLifeId(), loginMemberId(auth), req.getGuestToken());
+		if (life == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		ShopDTO out = engineService.invest(life, req.getInvestType(), req.getAtAge());
+		if (out == null) {
+			return ResponseEntity.badRequest().body("지금 고를 수 없는 투자 방식이에요.");
+		}
+		return ResponseEntity.ok(out);
+	}
+
 	// C06 직업 선택  POST /api/engine/job  { lifeId, jobId, guestToken }
 	@PostMapping("/api/engine/job")
 	public ResponseEntity<?> chooseJob(@RequestBody EngineRequestDTO req,
