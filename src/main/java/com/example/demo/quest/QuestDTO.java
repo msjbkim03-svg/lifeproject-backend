@@ -4,9 +4,9 @@ package com.example.demo.quest;
 public class QuestDTO {
 
 	private int questId;        // 퀘스트 번호
-	private String questName;   // 퀘스트명 (예: 80세까지 살기)
+	private String questName;   // 퀘스트명 (예: 100세 장수하기)
 	private String questType;   // 판정 종류 (AGE, EDU, MIGRATE …) - C12 판정에 사용
-	private String targetValue; // 고정 목표값 (예: 80, UNI)
+	private String targetValue; // 고정 목표값 (예: 100, UNI)
 	private String description; // 설명
 
 	public int getQuestId() { return questId; }
