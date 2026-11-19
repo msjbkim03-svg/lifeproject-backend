@@ -53,6 +53,7 @@ public interface EngineDao {
 	// C13 특성: 태어날 때 회원 특성 레벨 복사, 학업 능력 효과값
 	int insertLifeTraits(LifeDTO life);
 	Double selectStudyEffect(int lifeId);
+	List<TraitViewDTO> selectLifeTraits(int lifeId); // C13 특성 칸 (진행 화면)
 
 	// C09 이벤트 기록
 	int insertEventLog(EventLogDTO log);

@@ -103,6 +103,18 @@ public class EngineController {
 		return ResponseEntity.ok(list);
 	}
 
+	// C13 특성 칸 (진행 화면)  GET /api/engine/traits?lifeId=...&guestToken=...
+	//   { traits: [{ traitId, level, effect }], temper: '호기심 많은' | null (2세에 고른 기질) }
+	@GetMapping("/api/engine/traits")
+	public ResponseEntity<?> traits(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		java.util.Map<String, Object> out = engineService.myTraits(lifeId, loginMemberId(auth), guestToken);
+		if (out == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		return ResponseEntity.ok(out);
+	}
+
 	// C03 나라 패널  GET /api/engine/country?lifeId=...&guestToken=...&view=cur|born
 	@GetMapping("/api/engine/country")
 	public ResponseEntity<?> country(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
