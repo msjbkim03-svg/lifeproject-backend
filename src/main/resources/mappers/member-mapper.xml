@@ -29,7 +29,7 @@
 		INSERT INTO MEMBER (MEMBER_ID, LOGIN_ID, PASSWORD, NICKNAME, EMAIL,
 		                    PHONE, PRIVACY_AGREED, PRIVACY_AGREED_AT)
 		VALUES (#{memberId}, #{loginId}, #{password}, #{nickname}, #{email},
-		        #{phone}, #{privacyAgreed}, SYSDATE)
+		        #{phone, jdbcType=VARCHAR}, #{privacyAgreed}, SYSDATE)
 	</insert>
 
 	<!-- M01: TRAIT 테이블의 특성 4종을 모두 Lv.1 로 넣기 -->
