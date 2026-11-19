@@ -294,19 +294,16 @@ public class EventService {
 		r.setEffIncomeRate(round3(nz(c.getEffIncomeRate())));
 		double wealth = round3(nz(c.getEffWealthRate()));
 
-		// 3. 투자: 성공률 = 기본 50% × (1 + 투자 특성 효과) → Lv.1 50% ~ Lv.5 70%
-		// 성공: 재산 + / 실패: 재산 −, 소득 증가 없음, 행복 감소
-		if ("INVEST".equals(c.getResultAction())) {
-			double successRate = 0.5 * (1 + getTraitEffect(life.getLifeId(), "INVEST")); // C13 투자 특성
-			if (Math.random() < successRate) {
-				text = text + " 투자는 성공적이었다.";
-			} else {
-				wealth = -wealth; // 성공했을 때만큼 손해
-				text = text + " 하지만 투자는 실패해 손해를 봤다.";
-				r.setEffIncomeRate(0); // 실패하면 소득 증가 없음
-				r.setEffHappiness(-Math.abs(r.getEffHappiness()) - 3); // 행복 감소 (-3은 설계값, 테스트 후 조정)
+		// 3. 성공·실패가 있는 선택지 (투자·치료·참여·상담): SUCCESS_RATE로 판정
+		if (c.getSuccessRate() != null) {
+			String group = actionGroup(c.getResultAction()); // TREAT_HOSPITAL → TREAT
+			double rate = Math.min(c.getSuccessRate() * traitRate(group, life.getLifeId()), 0.95);
+			boolean success = Math.random() < rate;
+			text = text + (success ? SUCCESS_TEXT.get(group)[0] : SUCCESS_TEXT.get(group)[1]);
+			if (!success) {
+				wealth = applyFail(group, r, wealth); // 종류별 실패 효과
 			}
-			r.setResultAction(null); // 투자는 엔진에서 따로 처리할 상태 변화 없음
+			r.setResultAction(afterAction(c.getResultAction(), success)); // 엔진에 보낼 상태 변화
 		} else {
 			r.setResultAction(c.getResultAction()); // MARRY, MIGRATE 등
 
@@ -316,11 +313,65 @@ public class EventService {
 				r.setDestinations(pickDestinations(life.getCurrentCountry(), year));
 			}
 		}
+
 		r.setEffWealthRate(wealth);
 		r.setMigrateTo(c.getMigrateTo());
 		r.setLogText(text);
 
 		return r;
+	}
+
+	// ===== 성공·실패 선택지 (투자·치료·참여·상담) =====
+
+	// 종류별 결과 문장 [성공, 실패]
+	private static final Map<String, String[]> SUCCESS_TEXT = Map.of("INVEST",
+			new String[] { " 투자는 성공적이었다.", " 하지만 투자는 실패해 손해를 봤다." }, "PROTEST",
+			new String[] { " 함께한 사람들과 변화를 이끌어 냈다.", " 하지만 진압 과정에서 크게 다쳤다." }, "ENLIST",
+			new String[] { " 무사히 살아 돌아왔다.", " 하지만 전투 중 크게 다쳤다." });
+
+	// 결과 종류 묶기: TREAT_HOSPITAL, TREAT_HOME, TREAT_LOAN → TREAT
+	private String actionGroup(String action) {
+		return action != null && action.startsWith("TREAT_") ? "TREAT" : action;
+	}
+
+	// 특성 배율: 투자 → 투자 특성 (Lv.5 × 1.4), 치료 → 질병 특성 (Lv.5 × 1.4), 나머지 1
+	private double traitRate(String group, int lifeId) {
+		if ("INVEST".equals(group))
+			return 1 + getTraitEffect(lifeId, "INVEST");
+		if ("TREAT".equals(group))
+			return 1 - getTraitEffect(lifeId, "DISEASE"); // 질병 효과는 음수라 빼면 커짐
+		return 1.0;
+	}
+
+	// 실패 효과 (설계값), 바뀐 재산 값을 돌려줌
+	private double applyFail(String group, EventResultDTO r, double wealth) {
+		switch (group) {
+		case "INVEST": // 성공했을 때만큼 손해, 소득 증가 없음, 행복 감소
+			r.setEffIncomeRate(0);
+			r.setEffHappiness(-Math.abs(r.getEffHappiness()) - 3);
+			return -wealth;
+		case "PROTEST": // 진압으로 부상
+			r.setEffHealth(-10);
+			r.setEffHappiness(-6);
+			r.setEffKnowledge(0);
+			r.setEffRelation(0);
+			r.setDeathAdd(0.02);
+			r.setDeathCause("시위 진압");
+			return wealth;
+		case "ENLIST": // 전쟁 피해(선택지 효과)에 전투 중 중상을 더함, 명예(관계)는 그대로
+			r.setEffHealth(r.getEffHealth() - 15);
+			r.setEffHappiness(r.getEffHappiness() - 5);
+			r.setDeathAdd(0.05);
+			r.setDeathCause("전쟁");
+			return wealth;
+		default:
+			return wealth;
+		}
+	}
+
+	// 판정 후 엔진에 보낼 상태 변화
+	private String afterAction(String action, boolean success) {
+		return null; // 투자는 상태 변화 없음 (치료·상담은 다음 단계에서 추가)
 	}
 
 	// ===== 이민 목적지 (C10) =====
@@ -422,7 +473,12 @@ public class EventService {
 		r.setAiNarrate("Y".equals(e.getAiNarrate()));
 		r.setChoice("Y".equals(e.getIsChoice()));
 		if (r.isChoice()) {
-			r.setChoices(eDAO.selectChoices(e.getEventId()));
+			List<EventChoiceDTO> choices = eDAO.selectChoices(e.getEventId());
+			if (canChoose(choices, age)) {
+				r.setChoices(choices);
+			} else {
+				r.setChoice(false); // 선택할 나이가 아니면 일반 역사 이벤트로 (예: 3살에게 참전을 묻지 않음)
+			}
 		}
 
 		// 1. 문장: 검수된 게임 문구, 없으면 제목
@@ -458,6 +514,17 @@ public class EventService {
 		r.setEffIncomeRate(0);
 
 		return r;
+	}
+
+	// 선택 가능 나이: 시위 15세 이상, 참전·징집 18~45세, 나머지(피란 등)는 나이 제한 없음
+	private boolean canChoose(List<EventChoiceDTO> choices, int age) {
+		for (EventChoiceDTO c : choices) {
+			if ("PROTEST".equals(c.getResultAction()) && age < 15)
+				return false;
+			if ("ENLIST".equals(c.getResultAction()) && (age < 18 || age > 45))
+				return false;
+		}
+		return true;
 	}
 
 	// ===== 특성 효과 (C13) =====
