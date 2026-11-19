@@ -15,6 +15,7 @@ public class EventChoiceDTO {
 	private Double effWealthRate; // 자산 변화율
 	private String resultAction; // MARRY, MIGRATE, INVEST 등
 	private String migrateTo; // 이민 목적지
+	private Double successRate; // 성공 확률 (투자·치료·참여·상담), 성공·실패 없는 선택지는 null
 
 	public Integer getChoiceId() {
 		return choiceId;
@@ -118,5 +119,13 @@ public class EventChoiceDTO {
 
 	public void setMigrateTo(String migrateTo) {
 		this.migrateTo = migrateTo;
+	}
+
+	public Double getSuccessRate() {
+		return successRate;
+	}
+
+	public void setSuccessRate(Double successRate) {
+		this.successRate = successRate;
 	}
 }
