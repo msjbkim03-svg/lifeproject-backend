@@ -103,6 +103,18 @@ public class EngineController {
 		return ResponseEntity.ok(list);
 	}
 
+	// C13 특성 칸 (진행 화면)  GET /api/engine/traits?lifeId=...&guestToken=...
+	//   { traits: [{ traitId, level, effect }], temper: '호기심 많은' | null (2세에 고른 기질) }
+	@GetMapping("/api/engine/traits")
+	public ResponseEntity<?> traits(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		java.util.Map<String, Object> out = engineService.myTraits(lifeId, loginMemberId(auth), guestToken);
+		if (out == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		return ResponseEntity.ok(out);
+	}
+
 	// C03 나라 패널  GET /api/engine/country?lifeId=...&guestToken=...&view=cur|born
 	@GetMapping("/api/engine/country")
 	public ResponseEntity<?> country(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
@@ -149,6 +161,47 @@ public class EngineController {
 					.body("지금 나이대에서 고를 수 없는 집중이거나, 진행 중인 인생이 아니에요.");
 		}
 		return ResponseEntity.ok(life);
+	}
+
+	// C06-3 돈 쓰기·투자 창  GET /api/engine/shop?lifeId=...&guestToken=...
+	@GetMapping("/api/engine/shop")
+	public ResponseEntity<?> shop(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		LifeDTO life = engineService.loadMyLife(lifeId, loginMemberId(auth), guestToken);
+		if (life == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		return ResponseEntity.ok(engineService.shop(life));
+	}
+
+	// C06-3 사기·하기  POST /api/engine/shop  { lifeId, itemId, atAge, guestToken }
+	@PostMapping("/api/engine/shop")
+	public ResponseEntity<?> buy(@RequestBody EngineRequestDTO req,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		LifeDTO life = engineService.loadMyLife(req.getLifeId(), loginMemberId(auth), req.getGuestToken());
+		if (life == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		ShopDTO out = engineService.buy(life, req.getItemId(), req.getAtAge());
+		if (out == null) {
+			return ResponseEntity.badRequest().body(engineService.shopBlocked(life, req.getItemId()));
+		}
+		return ResponseEntity.ok(out);
+	}
+
+	// C06-3 여유 자금 굴리기 방식  POST /api/engine/invest  { lifeId, investType, atAge, guestToken }
+	@PostMapping("/api/engine/invest")
+	public ResponseEntity<?> invest(@RequestBody EngineRequestDTO req,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		LifeDTO life = engineService.loadMyLife(req.getLifeId(), loginMemberId(auth), req.getGuestToken());
+		if (life == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		ShopDTO out = engineService.invest(life, req.getInvestType(), req.getAtAge());
+		if (out == null) {
+			return ResponseEntity.badRequest().body("지금 고를 수 없는 투자 방식이에요.");
+		}
+		return ResponseEntity.ok(out);
 	}
 
 	// C06 직업 선택  POST /api/engine/job  { lifeId, jobId, guestToken }

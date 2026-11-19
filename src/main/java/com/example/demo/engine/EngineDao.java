@@ -34,6 +34,9 @@ public interface EngineDao {
 	Long selectAvgIncome(LifeDTO life);
 	Double selectPoorerPct(LifeDTO life);
 
+	// C06-3 돈 쓰기·투자: 돈·능력치·투자 방식·가진 물건 저장
+	int updateShop(LifeDTO life);
+
 	// C04 집중 선택
 	int updateFocus(LifeDTO life);
 
@@ -50,11 +53,13 @@ public interface EngineDao {
 	// C13 특성: 태어날 때 회원 특성 레벨 복사, 학업 능력 효과값
 	int insertLifeTraits(LifeDTO life);
 	Double selectStudyEffect(int lifeId);
+	List<TraitViewDTO> selectLifeTraits(int lifeId); // C13 특성 칸 (진행 화면)
 
 	// C09 이벤트 기록
 	int insertEventLog(EventLogDTO log);
 	String selectPendingText(LifeDTO life);
 	List<EventLogDTO> selectEventLogs(int lifeId); // C03 이어하기 화면: 지금까지의 인생 기록
+	List<Integer> selectChildBirthAges(int lifeId); // C03 가족: 아이가 태어난 해의 내 나이 (CHILD 이벤트 기록)
 	List<YearLogDTO> selectYearLogs(int lifeId); // C03 인생 지도: 한 해씩 남긴 기록
 	CountryInfoDTO selectCountryInfo(Map<String, Object> cond); // C03 나라 패널 (countryCode, year)
 	int countPendingChosen(LifeDTO life); // C10: 선택 이벤트에서 이미 '떠난다'를 골랐는지 (목적지 기다리는 중)
