@@ -23,14 +23,15 @@ public class WebConfig implements WebMvcConfigurer {
 	@Override
 	public void addInterceptors(InterceptorRegistry registry) {
 		registry.addInterceptor(loginValidator)
-				// 회원 전용 주소 (마이페이지·정보 수정·탈퇴 등은 /api/members/... 아래에 만들 예정)
+				// 회원 전용 주소 (마이페이지·정보 수정·탈퇴·특성 강화 등 /api/members/... 아래)
 				.addPathPatterns("/api/members/**", "/api/quests/**") // 퀘스트(C01)도 회원만
 				// 로그인 없이 써야 하는 주소는 빼기
 				.excludePathPatterns(
 						"/api/members",          // 회원가입
 						"/api/members/login",    // 로그인
-						"/api/members/check*",
-						"/api/members/find/**"); // 아이디·닉네임·이메일 중복 확인
+						"/api/members/oauth/**", // 소셜 로그인 (카카오)
+						"/api/members/check*",   // 아이디·닉네임·이메일 중복 확인
+						"/api/members/find/**"); // 아이디·비번 찾기
 
 		// 탈퇴한 회원의 토큰 막기 (모든 /api 주소, 게임 API 포함)
 		// 토큰이 없으면(비회원) 그냥 통과 → 비회원 게임은 그대로 됨
@@ -42,6 +43,7 @@ public class WebConfig implements WebMvcConfigurer {
 						"/api/members",          // 회원가입
 						"/api/members/login",    // 로그인
 						"/api/members/check*",   // 중복 확인
+						"/api/members/oauth/**", // 소셜 로그인
 						"/api/members/find/**"); // 아이디·비번 찾기
 	}
 }

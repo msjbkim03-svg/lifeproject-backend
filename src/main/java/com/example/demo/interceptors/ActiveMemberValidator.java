@@ -11,7 +11,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 // 탈퇴한 회원의 토큰을 막는 문지기 (모든 /api 주소)
-// 토큰은 1시간 동안 유효해서, 탈퇴한 뒤에도 남은 토큰으로 게임 API 등을 부를 수 있었음
+// 토큰은 24시간 동안 유효해서, 탈퇴한 뒤에도 남은 토큰으로 게임 API 등을 부를 수 있었음
 // → 토큰이 있으면 DB에서 회원 상태를 확인해서 ACTIVE 가 아니면 401
 // ※ 토큰이 없거나(비회원) 잘못된 토큰이면 여기서는 그냥 통과 (원래 처리 그대로)
 @Component
