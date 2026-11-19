@@ -354,6 +354,17 @@
 		LEFT JOIN MEMBER_TRAIT M ON M.TRAIT_ID = T.TRAIT_ID AND M.MEMBER_ID = #{memberId, jdbcType=NUMERIC}
 	</insert>
 
+	<!-- C13 특성 칸 (진행 화면): 이 인생의 특성 레벨과 효과값 (효과 표에 없으면 null) -->
+	<select id="selectLifeTraits" parameterType="int" resultType="com.example.demo.engine.TraitViewDTO">
+		SELECT L.TRAIT_ID     AS traitId,
+		       L.TRAIT_LEVEL  AS "level",
+		       E.EFFECT_VALUE AS effect
+		FROM LIFE_TRAIT L
+		LEFT JOIN TRAIT_LEVEL_EFFECT E ON E.TRAIT_ID = L.TRAIT_ID AND E.LEVEL_NO = L.TRAIT_LEVEL
+		WHERE L.LIFE_ID = #{lifeId}
+		ORDER BY L.TRAIT_ID
+	</select>
+
 	<!-- C13: 이 인생의 학업 능력(STUDY) 효과값 = 타고난 재능 보너스 (효과 표에 값이 없으면 (레벨-1)×0.25) -->
 	<select id="selectStudyEffect" parameterType="int" resultType="double">
 		SELECT NVL(E.EFFECT_VALUE, (L.TRAIT_LEVEL - 1) * 0.25)

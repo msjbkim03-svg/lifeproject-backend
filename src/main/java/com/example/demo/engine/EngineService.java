@@ -806,7 +806,8 @@ public class EngineService {
 		// 배우자: 남자는 2~4살 아래, 여자는 2~4살 위인 사람과 (원작 평균)
 		String sg = "M".equals(life.getGender()) ? "F" : "M";
 		f.spouseGap = ("M".equals(life.getGender()) ? -1 : 1) * (1 + r.nextInt(4));
-		f.spouse = pickName(life.getCurrentCountry(), sg, r);
+		// 태어난 나라 이름으로 (사는 나라로 하면 이민 뒤 서버를 다시 켤 때마다 배우자 이름이 바뀌었음)
+		f.spouse = pickName(life.getBirthCountry(), sg, r);
 		f.spouseJob = parentJob(r, Math.max(2, life.getWealthClass()), urban, by + 25, false);
 
 		famCache.put(life.getLifeId(), f);
@@ -1229,6 +1230,10 @@ public class EngineService {
 		if (!life.getStatus().equals("PLAYING")) {
 			return null;
 		}
+		// 엔진 선택지(C06-4)를 아직 안 골랐으면 진행 안 함 (화면은 409 → 다시 불러오기 → 선택 창이 다시 뜸)
+		if (engineChoiceWaiting(life)) {
+			return null;
+		}
 		// 같은 해를 두 번 진행하지 않게 이 인생 줄을 잠금 (버튼 연타·자동 진행이 겹쳐도 한 번만 진행)
 		//   먼저 온 요청이 끝날 때까지 기다렸다가, 나이가 이미 바뀌었으면 0줄 → 진행 안 함
 		if (engineDao.lockLifeYear(life) == 0) {
@@ -1353,7 +1358,11 @@ public class EngineService {
 		//   화면엔 고를 수 있다고 나온 가게 차리기가 고르면 "돈이 모자라요"로 막혔음
 		if (life.isNeedChoice() && life.getPendingEvent() != null) {
 			life.setChoiceCosts(costsOf(life, life.getPendingEvent().getChoices(), life.getPendingEvent().getLogText()));
+			hideUnaffordable(life); // 돈·신용이 모자라 고를 수 없는 선택지는 아예 빼고 보여 줌
 		}
+
+		// 윤아님 선택 이벤트·직업 제안이 없는 해엔 엔진 선택지 (C06-4: 기질·어린 시절·주말·사람 사이)
+		rollEngineChoice(life, lived);
 
 		// 4. 저장 + 그해 기록
 		engineDao.updateLifeYear(life);
@@ -1648,8 +1657,10 @@ public class EngineService {
 		double med = medIncome(life.getCurrentCountry(), stat);
 		int age = life.getCurrentAge();
 		int year = life.getBirthYear() + age;
-		long cash = Math.max(0, life.getAssets());
 		java.util.Set<String> owns = ownSet(life);
+		long housePrice = Math.round(med * 5 * ("Y".equals(life.getIsUrban()) ? 1.4 : 0.7));
+		// 쓸 수 있는 돈: 순자산에서 집에 묶인 계약금(집값의 20%)은 빼고 (집을 사도 그 돈을 또 쓰지 못하게)
+		long cash = Math.max(0, life.getAssets() - (owns.contains("HOUSE") ? Math.round(housePrice * 0.2) : 0));
 		Map<String, Integer> did = doneThisYear.getOrDefault(life.getLifeId(), Map.of());
 
 		List<ShopItemDTO> items = new ArrayList<>();
@@ -1691,7 +1702,7 @@ public class EngineService {
 		}
 		// 내 집 마련: 집값의 20%가 있으면 나머지는 대출 (이자는 갚는 동안 모두 합쳐 25%)
 		if (age >= 26) {
-			long price = Math.round(med * 5 * ("Y".equals(life.getIsUrban()) ? 1.4 : 0.7));
+			long price = housePrice;
 			ShopItemDTO d = new ShopItemDTO("BUY_HOUSE", "BUY", "내 집 마련", "행복 +10 · 집값의 20%가 있으면 나머지는 대출", price);
 			d.setDone(owns.contains("HOUSE"));
 			if (d.isDone()) {
@@ -1703,6 +1714,10 @@ public class EngineService {
 			} else if (age >= 65 && cash < price) {
 				d.setOk(false);
 				d.setWhy("이 나이에는 대출이 어려워 집값 전부가 필요해요");
+			} else if (cash < price && price - cash > Math.max(0,
+					Math.max(life.getIncome(), spouseIncomeOf(life)) * 5 - Math.max(0, -life.getAssets()))) {
+				d.setOk(false); // 신용 관리: 빚 합계가 벌이의 5배를 넘으면 대출이 안 나옴 (이벤트 집 사기와 같은 기준)
+				d.setWhy("벌이에 비해 대출이 너무 커서 은행이 빌려주지 않아요");
 			}
 			items.add(d);
 		}
@@ -1790,7 +1805,7 @@ public class EngineService {
 		String text;
 		if ("BUY_HOUSE".equals(itemId)) {
 			long price = it.getPrice();
-			long cash = Math.max(0, life.getAssets());
+			long cash = list.getCash(); // 쓸 수 있는 돈 (shop 과 같은 기준)
 			long loan = Math.max(0, price - cash);
 			long interest = Math.round(loan * 0.25);
 			life.setAssets(life.getAssets() - interest); // 집값은 재산으로 남고(현금 → 집) 이자만 나감
@@ -2467,8 +2482,54 @@ public class EngineService {
 			return;
 		}
 
+		// 1-2. 가게(자영업 사장)는 몇 해에 걸쳐 버티거나 접음 (원작 bizStart · BIZ_Y1)
+		bizYear(life, stat);
+
 		// 2. 15세 이상, 학교 안 다니고, 일자리가 없으면 매년 직업 3개 제안
 		showOffers(life, stat);
+	}
+
+	// 원작: 새 가게의 약 29%는 첫해를 못 넘기고, 그 뒤로도 해마다 몇 %씩 문을 닫음 (5년 안에 절반쯤)
+	//   운영 연수(jobYears, moneyStep 에서 +1)가 적을수록 닫을 확률이 높음. 드물게 크게 자리를 잡아 벌이가 늘어남
+	//   접으면 가게 살림을 헐값에 정리하는 손해(중위 소득 × 1.5 × 45%)가 나고, 다음 해부터 다시 일자리를 구함
+	private void bizYear(LifeDTO life, CountryStatDTO stat) {
+		if (!"EMPLOYED".equals(life.getJobStatus()) || !"JOB_OWNER".equals(life.getJobId())) {
+			return;
+		}
+		int y = life.getJobYears(); // 방금 지난 해까지 운영한 햇수
+		if (y > 8) {
+			return; // 8년 넘게 버틴 가게는 자리를 잡은 것으로 봄
+		}
+		int lived = life.getCurrentAge() - 1;
+		double close = y <= 1 ? 0.25 : y <= 3 ? 0.12 : 0.07;
+		if (random.nextDouble() < close) {
+			double med = medIncome(life.getCurrentCountry(), stat);
+			long loss = Math.round(med * 1.5 * 0.45);
+			life.setAssets(life.getAssets() - loss);
+			book(life, "가게 정리 손해", -loss);
+			life.setJobStatus("UNEMPLOYED");
+			life.setJobYears(0);
+			life.setHappiness(life.getHappiness() - 6);
+			String text = (y <= 1 ? "손님이 생각만큼 오지 않아 문을 연 지 얼마 안 된 가게를 접었다."
+					: "몇 해를 버텼지만 결국 가게를 접었다.") + " 남은 물건을 헐값에 정리했다. (−" + won(life, loss) + ")";
+			saveEventLog(life, lived, null, null, text);
+			addYearNote(life, text);
+			return;
+		}
+		if (y <= 5 && random.nextDouble() < 0.05 && life.getIncomeRate() != null) {
+			life.setIncomeRate(life.getIncomeRate() * 1.6);
+			life.setHappiness(life.getHappiness() + 8);
+			String text = "단골이 늘면서 가게가 크게 자리를 잡았다! 일손을 더 두게 되었다.";
+			saveEventLog(life, lived, null, null, text);
+			addYearNote(life, text);
+		}
+	}
+
+	// 그해 화면 기록에 한 줄 더하기 (jobStep 처럼 이벤트 뒤에 생긴 일)
+	private void addYearNote(LifeDTO life, String text) {
+		List<EventResultDTO> list = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
+		list.add(noteEvent(text));
+		life.setEvents(list);
 	}
 
 	// 직업을 제안받을 수 있는 상태인지: 15세 이상, 학교 안 다니고, 일자리 없고, 은퇴 나이 전
@@ -2859,6 +2920,9 @@ public class EngineService {
 	// 선택 이벤트는 작년(나이+1 하기 전)에 일어났으므로 그 나이로 기록
 	@Transactional
 	public LifeDTO chooseEvent(LifeDTO life, int choiceId) {
+		if (choiceId < 0) {
+			return chooseEngine(life, choiceId); // 엔진 선택지 (C06-4, 음수 번호)
+		}
 		if (!life.getStatus().equals("PLAYING") || life.getPendingEventId() == null) {
 			return null; // 고를 선택이 없음
 		}
@@ -2880,6 +2944,31 @@ public class EngineService {
 		//   투자 결과(윤아님 applyChoice의 성공·실패)는 넣은 돈 × 변화율로 반영
 		ChoiceCostDTO cost = costOf(life, eventDao.selectChoice(choiceId), engineDao.selectPendingText(life));
 		long moneyChange = 0;
+		boolean openBiz = false;
+		if (cost != null && "BUSINESS".equals(cost.getKind())) {
+			if (!cost.isOk()) {
+				return null;
+			}
+			// 가게는 고른 해에 바로 성패가 갈리지 않음 (원작 bizStart): 문을 열어 자영업 사장이 되고,
+			//   잘될지 접을지는 몇 해에 걸쳐 jobStep(bizYear)에서 정해짐. 윤아님 결과의 성공·실패(소득·재산 변화)는 쓰지 않음
+			//   드는 돈 가운데 40%는 인테리어·권리금처럼 못 돌려받는 돈 (나머지는 가게 살림으로 남음, 원작 사업체 가치)
+			openBiz = true;
+			moneyChange = -Math.round(cost.getCost() * 0.4) - cost.getInterest();
+			r.setEffWealthRate(0);
+			r.setEffIncomeRate(0);
+			// 윤아님 결과의 성공·실패 능력치도 쓰지 않음: 문을 연 설렘만 (원작 bizStart eff h +4)
+			r.setEffHealth(0);
+			r.setEffHappiness(4);
+			r.setEffKnowledge(0);
+			r.setEffRelation(0);
+			r.setResultAction(null);
+			String note = cost.getLabel() + " " + won(life, cost.getCost()) + "을 들여 가게를 열었다";
+			if (cost.getLoan() > 0) {
+				note = note + " (대출 " + won(life, cost.getLoan()) + " · 이자 약 " + won(life, cost.getInterest()) + ")";
+			}
+			r.setLogText(note + ". 잘될지는 몇 해 지나 봐야 안다.");
+			cost = null; // 아래 일반 비용 처리는 건너뜀 (돈은 moneyChange 로)
+		}
 		if (cost != null) {
 			if (!cost.isOk()) {
 				return null; // 돈이 모자람 (컨트롤러가 먼저 막지만 한 번 더)
@@ -2906,13 +2995,15 @@ public class EngineService {
 		life.setAssets(life.getAssets() + moneyChange);
 		if (cost != null) {
 			book(life, cost.getLabel() + (moneyChange >= 0 ? " (불어난 돈)" : " (잃은 돈·이자)"), moneyChange);
+		} else if (openBiz) {
+			book(life, "가게 차리는 비용", moneyChange);
 		}
 		closeBook(life, startAssets);
 		fixStats(life);
 		life.setChoiceCosts(null);
 		List<EventResultDTO> extra = new ArrayList<>();
-		if ("LE_INVEST_BUSINESS".equals(r.getEventId()) && r.getEffIncomeRate() > 0) {
-			startBusiness(life, age, extra); // 가게 차리기 성공 → 자영업 사장
+		if (openBiz) {
+			startBusiness(life, age, extra); // 가게를 열면 자영업 사장 (성패는 몇 해 뒤에)
 		}
 
 		// C10 '떠난다'인데 갈 나라가 안 정해진 선택지 → 목적지 고르기 창 (선택 이벤트는 목적지를 고를 때까지 계속 기다림)
@@ -3052,9 +3143,14 @@ public class EngineService {
 		d.setLabel(label);
 		d.setCost(Math.round(cost));
 		d.setMine(Math.round(cash));
+		// 대출은 신용 한도 안에서만 (원작 creditLimit): 이미 빚이 많거나 벌이가 없으면 못 빌림
+		//   집은 집을 담보로 빌리지만, 갚을 벌이가 있어야 함 (빚 합계가 벌이의 5배까지)
+		double room = "HOUSE".equals(kind)
+				? Math.max(0, Math.max(life.getIncome(), spouseIncomeOf(life)) * 5 - Math.max(0, -life.getAssets()))
+				: creditRoom(life, stat, med);
 		if (cash >= cost) {
 			d.setOk(true);
-		} else if (down < 1 && cash >= cost * down && age18(life)) {
+		} else if (down < 1 && cash >= cost * down && age18(life) && cost - cash <= room) {
 			d.setOk(true);
 			d.setLoan(Math.round(cost - cash));
 			d.setInterest(Math.round((cost - cash) * rate));
@@ -3098,7 +3194,11 @@ public class EngineService {
 
 	// 이어하기·새로고침 때 선택 창 다시 띄우기
 	private void restoreChoice(LifeDTO life) {
-		if (life == null || life.getPendingEventId() == null) {
+		if (life == null) {
+			return;
+		}
+		if (life.getPendingEventId() == null) {
+			restoreEngineChoice(life); // 엔진 선택지 (서버 메모리에 기다리는 게 있으면)
 			return;
 		}
 		// '떠난다'는 이미 골랐고 목적지만 남았으면 → 목적지 창 (후보는 다시 뽑음, 고를 때는 전체 후보 안에서 확인)
@@ -3116,6 +3216,7 @@ public class EngineService {
 		life.setNeedChoice(true);
 		life.setPendingEvent(e);
 		life.setChoiceCosts(costsOf(life, e.getChoices(), e.getLogText()));
+		hideUnaffordable(life);
 	}
 
 	// 장례비 (어른이고 벌이나 재산이 있을 때만, 중위 소득 × 비율 × 내 벌이 보정)
@@ -3140,14 +3241,27 @@ public class EngineService {
 		case "MARRY": // 결혼
 			life.setMarriedYn("Y");
 			// 원작 살림: 배우자가 가져온 돈 + / 결혼식 비용 − (중위 소득 기준, 내 벌이에 따라 0.6~1.8배)
+			// 원작 marry(): 결혼식 비용 = 중위 소득 × 0.4 (남아시아는 혼례가 커서 × 1.2)
+			//   부모님이 살아 계시고 45세 전이면 형편(1~5)에 따라 5·20·40·60·80%를 보태 주심 (중위 소득의 3%가 안 되면 없음)
 			if (age >= 18) {
-				double med = medIncome(life.getCurrentCountry(), yearStat(life));
-				double k = clamp(Math.pow(Math.max(life.getIncome(), 1) / med, 0.3), 0.6, 1.8);
+				CountryStatDTO wst = yearStat(life);
+				double med = medIncome(life.getCurrentCountry(), wst);
 				long brought = Math.round(med * (0.2 + random.nextDouble() * 0.3));
-				long wedding = Math.round(med * 0.3 * k);
-				life.setAssets(life.getAssets() + brought - wedding);
+				long wedding = Math.round(med * ("sa".equals(groupOf(life.getCurrentCountry(), wst)) ? 1.2 : 0.4));
+				long help = 0;
+				if (!"N".equals(life.getParentAlive()) && age < 45) {
+					double[] share = { 0.05, 0.2, 0.4, 0.6, 0.8 };
+					help = Math.round(wedding * share[Math.max(1, Math.min(5, life.getWealthClass())) - 1]);
+					if (help < med * 0.03) {
+						help = 0;
+					}
+				}
+				life.setAssets(life.getAssets() + brought - wedding + help);
 				book(life, "배우자가 가져온 돈", brought);
 				book(life, "결혼식 비용", -wedding);
+				if (help > 0) {
+					book(life, "부모님이 보태 준 혼례 비용", help);
+				}
 			}
 			break;
 		case "CHILD": // 자녀 +1
@@ -3323,5 +3437,342 @@ public class EngineService {
 			}
 			life.setIncomeTopPct(Math.round(top * 10) / 10.0);
 		}
+	}
+	// ================= C06-4 엔진 선택지 (원작 temper · SMALL · HUM) =================
+	// 윤아님 선택 이벤트·직업 제안이 없는 해에 엔진이 그해 처지에 맞는 작은 선택을 띄움 (목록은 EngineChoice)
+	//   - 2세: 기질 고르기 (한 번) → 특성 칸에 '기질'로 표시
+	//   - 7~15세: 2년 넘게 비면 35% (원작 아이 SMALL + 진학 결정 몫까지 합쳐 조금 자주)
+	//   - 16~64세: 4년 넘게 비면 15%, 65세부터 5년 넘게 비면 8%
+	//   - 사람 사이(HUM): 16세부터 6년 넘게 비면 30%, 한 인생에 4번까지 (원작 HUM_GAP 6 · HUM_MAX 4)
+	// 기다리는 선택은 DB에 저장하지 않고 서버 메모리에만 둠 (PENDING_EVENT_ID 는 윤아님 이벤트 전용)
+	//   → 새로고침하면 다시 뜨고, 서버를 다시 켜면 그 선택은 없던 일이 됨
+	// 이미 겪은 선택·기질은 인생 기록의 결과 문장으로 다시 찾음 (서버를 다시 켜도 같은 선택이 또 나오지 않게)
+	private static class EngState {
+		final Map<String, Integer> done = new HashMap<>();
+		Integer lastSmall;
+		Integer lastHum;
+		int humCount;
+		String temper;
+		EngPend pend;
+	}
+
+	private static class EngPend {
+		int decIdx;
+		int age;
+		EventResultDTO view;
+	}
+
+	private final Map<Integer, EngState> engStates = new ConcurrentHashMap<>();
+
+	private EngState engState(LifeDTO life) {
+		EngState s = engStates.get(life.getLifeId());
+		if (s != null) {
+			return s;
+		}
+		if (engStates.size() > 20000) {
+			engStates.clear();
+		}
+		s = new EngState();
+		List<EventLogDTO> logs = engineDao.selectEventLogs(life.getLifeId());
+		if (logs != null) {
+			for (EventLogDTO g : logs) {
+				if (g.getEventId() != null || g.getLogText() == null) {
+					continue;
+				}
+				String t = g.getLogText();
+				for (EngineChoice.Dec d : EngineChoice.ALL) {
+					for (EngineChoice.Opt o : d.opts) {
+						for (String res : o.results) {
+							if (t.startsWith(res)) {
+								markEngineDone(s, d, g.getAge());
+								if (o.temper != null) {
+									s.temper = o.temper;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		engStates.put(life.getLifeId(), s);
+		return s;
+	}
+
+	private void markEngineDone(EngState s, EngineChoice.Dec d, int age) {
+		s.done.merge(d.key, 1, Integer::sum);
+		s.done.put(d.key + "@", age); // 마지막으로 고른 나이
+		if (EngineChoice.HUM.equals(d.group)) {
+			s.humCount++;
+			s.lastHum = s.lastHum == null ? age : Math.max(s.lastHum, age);
+		} else if (!EngineChoice.TEMPER.equals(d.group)) {
+			s.lastSmall = s.lastSmall == null ? age : Math.max(s.lastSmall, age);
+		}
+	}
+
+	// 이 선택을 지금 띄울 수 있는지 (나이·횟수·간격·처지)
+	private boolean engineOk(LifeDTO life, EngState s, EngineChoice.Dec d, int age) {
+		if (age < d.minAge || age > d.maxAge) {
+			return false;
+		}
+		int n = s.done.getOrDefault(d.key, 0);
+		if (n >= d.max) {
+			return false;
+		}
+		Integer at = s.done.get(d.key + "@");
+		if (at != null && age - at < d.gap) {
+			return false;
+		}
+		return d.ok.test(life);
+	}
+
+	// 그룹 안에서 띄울 수 있는 선택 하나를 무작위로 (없으면 -1)
+	private int pickEngine(LifeDTO life, EngState s, int age, String... groups) {
+		List<Integer> cand = new ArrayList<>();
+		for (int i = 0; i < EngineChoice.ALL.size(); i++) {
+			EngineChoice.Dec d = EngineChoice.ALL.get(i);
+			for (String g : groups) {
+				if (g.equals(d.group) && engineOk(life, s, d, age)) {
+					cand.add(i);
+				}
+			}
+		}
+		return cand.isEmpty() ? -1 : cand.get(random.nextInt(cand.size()));
+	}
+
+	// 한 해가 끝날 때 (nextYear 마지막): 다른 결정 창이 없으면 엔진 선택지를 굴림
+	private void rollEngineChoice(LifeDTO life, int lived) {
+		if (!"PLAYING".equals(life.getStatus()) || life.isNeedChoice() || life.isNeedJob() || life.isNeedDestination()
+				|| life.getPendingEventId() != null) {
+			return;
+		}
+		EngState s = engState(life);
+		if (s.pend != null) {
+			return;
+		}
+		int pick = -1;
+		if (lived == 2) {
+			pick = pickEngine(life, s, lived, EngineChoice.TEMPER);
+		}
+		if (pick < 0 && lived >= 16 && s.humCount < 4 && (s.lastHum == null || lived - s.lastHum >= 6)
+				&& random.nextDouble() < 0.3) {
+			pick = pickEngine(life, s, lived, EngineChoice.HUM);
+			if (pick >= 0) {
+				s.lastHum = lived; // 고르지 않고 넘어가도 간격은 셈
+			}
+		}
+		if (pick < 0 && lived >= 7) {
+			int gap = lived <= 15 ? 2 : lived < 65 ? 4 : 5;
+			double p = lived <= 15 ? 0.35 : lived < 65 ? 0.15 : 0.08;
+			if ((s.lastSmall == null || lived - s.lastSmall >= gap) && random.nextDouble() < p) {
+				pick = pickEngine(life, s, lived, EngineChoice.KID, EngineChoice.ADULT);
+				if (pick >= 0) {
+					s.lastSmall = lived;
+				}
+			}
+		}
+		if (pick >= 0) {
+			openEngineChoice(life, s, pick, lived);
+		}
+	}
+
+	// 선택 창 만들기: 윤아님 선택 이벤트와 같은 모양 (eventId ENG_키, eventType SMALL, 선택지 번호는 음수)
+	private void openEngineChoice(LifeDTO life, EngState s, int decIdx, int lived) {
+		EngineChoice.Dec d = EngineChoice.ALL.get(decIdx);
+		EventResultDTO e = new EventResultDTO();
+		e.setEventId("ENG_" + d.key);
+		e.setEventType("SMALL");
+		e.setTitle(d.title);
+		e.setChoice(true);
+		e.setLogText(d.bodies[random.nextInt(d.bodies.length)]);
+		boolean pays = engineCostPays(life, lived);
+		double med = medIncome(life.getCurrentCountry(), yearStat(life));
+		List<EventChoiceDTO> cs = new ArrayList<>();
+		for (int i = 0; i < d.opts.length; i++) {
+			EngineChoice.Opt o = d.opts[i];
+			if (o.show != null && !o.show.test(life)) {
+				continue;
+			}
+			EventChoiceDTO c = new EventChoiceDTO();
+			c.setChoiceId(EngineChoice.choiceId(decIdx, i));
+			c.setEventId(e.getEventId());
+			c.setChoiceOrder(cs.size() + 1);
+			c.setChoiceText(pays && o.cost > 0 ? o.label + " (약 " + won(life, med * o.cost) + ")" : o.label);
+			c.setEffHealth(o.hl);
+			c.setEffHappiness(o.h);
+			c.setEffKnowledge(o.kn);
+			c.setEffRelation(o.re);
+			cs.add(c);
+		}
+		if (cs.size() < 2) {
+			return; // 고를 게 하나뿐이면 띄우지 않음
+		}
+		e.setChoices(cs);
+		EngPend p = new EngPend();
+		p.decIdx = decIdx;
+		p.age = lived;
+		p.view = e;
+		s.pend = p;
+		life.setNeedChoice(true);
+		life.setPendingEvent(e);
+		life.setChoiceCosts(new ArrayList<>());
+	}
+
+	// 엔진 선택지의 돈은 어른이고 벌이나 재산이 있을 때만 냄 (아이·빈털터리는 시간만 씀)
+	private boolean engineCostPays(LifeDTO life, int age) {
+		return age >= 18 && (life.getIncome() > 0 || life.getAssets() > 0);
+	}
+
+	// 아직 안 고른 엔진 선택지가 있는지 (나이가 맞지 않는 오래된 것은 버림)
+	private boolean engineChoiceWaiting(LifeDTO life) {
+		EngState s = engStates.get(life.getLifeId());
+		if (s == null || s.pend == null) {
+			return false;
+		}
+		if (s.pend.age != life.getCurrentAge() - 1) {
+			s.pend = null;
+			return false;
+		}
+		return true;
+	}
+
+	// 이어하기·새로고침: 기다리는 엔진 선택지가 있으면 선택 창 다시 띄우기
+	private void restoreEngineChoice(LifeDTO life) {
+		if (!engineChoiceWaiting(life)) {
+			return;
+		}
+		EngState s = engStates.get(life.getLifeId());
+		life.setNeedChoice(true);
+		life.setPendingEvent(s.pend.view);
+		life.setChoiceCosts(new ArrayList<>());
+	}
+
+	// 엔진 선택지 고르기 (POST /api/engine/choice 에 음수 choiceId)
+	private LifeDTO chooseEngine(LifeDTO life, int choiceId) {
+		if (!"PLAYING".equals(life.getStatus()) || !engineChoiceWaiting(life)) {
+			return null;
+		}
+		EngState s = engStates.get(life.getLifeId());
+		EngPend p;
+		synchronized (s) {
+			p = s.pend;
+			if (p == null || p.decIdx != EngineChoice.decIdxOf(choiceId)) {
+				return null;
+			}
+			boolean offered = false;
+			for (EventChoiceDTO c : p.view.getChoices()) {
+				if (c.getChoiceId() != null && c.getChoiceId() == choiceId) {
+					offered = true;
+				}
+			}
+			if (!offered) {
+				return null;
+			}
+			s.pend = null; // 연타해도 한 번만
+		}
+		EngineChoice.Dec d = EngineChoice.ALL.get(p.decIdx);
+		EngineChoice.Opt o = d.opts[EngineChoice.optIdxOf(choiceId)];
+		int age = p.age;
+		long startAssets = life.getAssets();
+		life.setMoneyFlow(new ArrayList<>());
+
+		boolean bad = o.badP > 0 && random.nextDouble() < o.badP;
+		int[] eff = bad && o.badEff != null ? o.badEff : new int[] { o.h, o.hl, o.re, o.kn };
+		life.setHappiness(life.getHappiness() + eff[0]);
+		life.setHealth(life.getHealth() + eff[1]);
+		life.setRelation(life.getRelation() + eff[2]);
+		life.setKnowledge(life.getKnowledge() + eff[3]);
+		String text = o.results[bad && o.results.length > 1 ? 1 : 0];
+		if (o.cost > 0 && engineCostPays(life, age)) {
+			long pay = Math.round(medIncome(life.getCurrentCountry(), yearStat(life)) * o.cost);
+			if (pay > 0) {
+				life.setAssets(life.getAssets() - pay);
+				book(life, d.title, -pay);
+				text = text + " (−" + won(life, pay) + ")";
+			}
+		}
+		if (o.temper != null) {
+			s.temper = o.temper;
+		}
+		markEngineDone(s, d, age);
+		fixStats(life);
+		saveEventLog(life, age, null, null, text);
+		closeBook(life, startAssets);
+
+		life.setNeedChoice(false);
+		life.setPendingEvent(null);
+		life.setChoiceCosts(null);
+		List<EventResultDTO> list = new ArrayList<>();
+		list.add(noteEvent(text));
+		life.setEvents(list);
+		engineDao.updateLifeYear(life);
+		fillRegion(life);
+		return life;
+	}
+
+	// 돈·신용이 모자라 고를 수 없는 선택지는 화면에서 빼기 (고를 수 있는 게 하나도 안 남으면 그대로 둠)
+	private void hideUnaffordable(LifeDTO life) {
+		EventResultDTO e = life.getPendingEvent();
+		List<ChoiceCostDTO> costs = life.getChoiceCosts();
+		if (e == null || e.getChoices() == null || costs == null || costs.isEmpty()) {
+			return;
+		}
+		List<EventChoiceDTO> keep = new ArrayList<>();
+		List<ChoiceCostDTO> keepCost = new ArrayList<>();
+		for (EventChoiceDTO c : e.getChoices()) {
+			ChoiceCostDTO k = null;
+			for (ChoiceCostDTO x : costs) {
+				if (c.getChoiceId() != null && x.getChoiceId() == c.getChoiceId()) {
+					k = x;
+				}
+			}
+			if (k == null || k.isOk()) {
+				keep.add(c);
+				if (k != null) {
+					keepCost.add(k);
+				}
+			}
+		}
+		if (!keep.isEmpty() && keep.size() < e.getChoices().size()) {
+			e.setChoices(keep);
+			life.setChoiceCosts(keepCost);
+		}
+	}
+
+	// 원작 creditLimit: 빌릴 수 있는 돈 = 중위 소득 20% + 벌이(제도권 금융이면 전부, 아니면 30%) + 집값 80%
+	//   + 대학을 나왔고 제도권 금융이면 중위 소득 80% + 차가 있으면 차값 ($8,000) − 이미 진 빚
+	//   제도권 금융: 고소득·유럽 권역, 또는 1인당 GDP $15,000 넘는 나라에서 일하는 사람
+	//   (원작은 제도권 금융 나라면 가게 대출 한도가 없지만, 우리는 어디서나 한도를 둠: 빚이 많으면 더 못 빌림)
+	private double creditRoom(LifeDTO life, CountryStatDTO stat, double med) {
+		String g = groupOf(life.getCurrentCountry(), stat);
+		Double gdp = stat == null ? null : stat.getGdpPerCapita();
+		boolean formal = "hi".equals(g) || "eca".equals(g)
+				|| (gdp != null && gdp > 15000 && "EMPLOYED".equals(life.getJobStatus()));
+		double pay = Math.max(life.getIncome(), spouseIncomeOf(life));
+		String owns = life.getOwns() == null ? "" : life.getOwns();
+		double house = owns.contains("HOUSE") ? med * 5 * ("Y".equals(life.getIsUrban()) ? 1.4 : 0.7) : 0;
+		boolean uni = "UNI".equals(life.getEduLevel()) || "GRAD".equals(life.getEduLevel());
+		double limit = med * 0.2 + pay * (formal ? 1 : 0.3) + house * 0.8 + (formal && uni ? med * 0.8 : 0)
+				+ (owns.contains("CAR") ? 8000 : 0);
+		return Math.max(0, limit - Math.max(0, -life.getAssets()));
+	}
+
+	private double spouseIncomeOf(LifeDTO life) {
+		if (!"Y".equals(life.getMarriedYn())) {
+			return 0;
+		}
+		return life.getSpouseIncome() != null ? life.getSpouseIncome() : 0;
+	}
+
+	// ================= C13 특성 칸 (진행 화면) =================
+	// 이 인생의 특성 4종 레벨과 효과값 (LIFE_TRAIT, 효과 표에 값이 없으면 0) + 어릴 때 고른 기질
+	public Map<String, Object> myTraits(int lifeId, Integer memberId, String guestToken) {
+		LifeDTO life = loadMyLife(lifeId, memberId, guestToken);
+		if (life == null) {
+			return null;
+		}
+		Map<String, Object> out = new HashMap<>();
+		out.put("traits", engineDao.selectLifeTraits(lifeId));
+		out.put("temper", engState(life).temper);
+		return out;
 	}
 }
