@@ -35,6 +35,10 @@ public class MemberService {
 	@Value("${kakao.client.secret:}")
 	private String kakaoClientSecret;   // 카카오 콘솔에서 Client Secret 을 켰을 때만 (없으면 빈 값)
 
+	// 회원가입 로봇 확인 (reCAPTCHA) 비밀 키 - application-secret.properties 의 recaptcha.secret
+	@Value("${recaptcha.secret:}")
+	private String recaptchaSecret;
+
 	private RestClient restClient = RestClient.create(); // 카카오 서버에 요청 보내는 도구
 
 	public MemberService(MemberDAO dao, JavaMailSender mailSender,
@@ -95,6 +99,11 @@ public class MemberService {
 		if (!isNicknameAvailable(dto.getNickname())) return "이미 사용 중인 닉네임이에요.";
 		if (!isEmailAvailable(dto.getEmail())) return "이미 사용 중인 이메일이에요.";
 
+		// 2-1. 로봇 확인 (다른 검사를 다 통과한 뒤에 구글에 물어봄)
+		if (!verifyCaptcha(dto.getCaptchaToken())) {
+			return "로봇이 아닌지 다시 확인해 주세요.";
+		}
+
 		// 3. 비밀번호를 BCrypt 로 바꿔서 담기 (원래 비밀번호는 저장 안 함)
 		dto.setPassword(encoder.encode(dto.getPassword()));
 
@@ -105,6 +114,29 @@ public class MemberService {
 		dao.insertDefaultTraits(dto.getMemberId());
 
 		return null; // 성공
+	}
+
+	// 로봇 확인: 화면에서 받은 토큰을 구글에 보내서 진짜인지 물어봄
+	// POST https://www.google.com/recaptcha/api/siteverify (form: secret, response) → { success: true/false }
+	private boolean verifyCaptcha(String token) {
+		if (token == null || token.isBlank()) return false;
+
+		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+		form.add("secret", recaptchaSecret);
+		form.add("response", token);
+
+		try {
+			Map<?, ?> res = restClient.post()
+					.uri("https://www.google.com/recaptcha/api/siteverify")
+					.contentType(MediaType.APPLICATION_FORM_URLENCODED)
+					.body(form)
+					.retrieve()
+					.body(Map.class);
+			return res != null && Boolean.TRUE.equals(res.get("success"));
+		} catch (Exception e) {
+			// 구글 서버에 연결 못 함 → 통과시키지 않음
+			return false;
+		}
 	}
 
 	// ===== 로그인 (M02) =====

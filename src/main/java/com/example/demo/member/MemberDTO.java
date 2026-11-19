@@ -18,6 +18,7 @@ public class MemberDTO {
 	private Date joinDate;       // JOIN_DATE
 	private String phone;        // PHONE      전화번호 (숫자만 저장, v31)
 	private String privacyAgreed;// PRIVACY_AGREED 개인정보 활용 동의 Y / N (v31)
+	private String captchaToken; // 로봇 확인 토큰 (DB에는 없음, 회원가입 때 구글 확인용)
 
 	public int getMemberId() { return memberId; }
 	public void setMemberId(int memberId) { this.memberId = memberId; }
@@ -54,4 +55,7 @@ public class MemberDTO {
 
 	public String getPrivacyAgreed() { return privacyAgreed; }
 	public void setPrivacyAgreed(String privacyAgreed) { this.privacyAgreed = privacyAgreed; }
+
+	public String getCaptchaToken() { return captchaToken; }
+	public void setCaptchaToken(String captchaToken) { this.captchaToken = captchaToken; }
 }
