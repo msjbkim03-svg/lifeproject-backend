@@ -200,7 +200,7 @@ public class MemberService {
 					.body(Map.class);
 			return res == null ? null : (String) res.get("access_token");
 		} catch (Exception e) {
-			System.out.println("[카카오 토큰 실패] " + e.getMessage()); // code 를 두 번 썼거나 키·주소가 틀린 경우
+			// code 를 두 번 썼거나 키·주소가 틀린 경우 → null (컨트롤러가 401)
 			return null;
 		}
 	}
@@ -215,7 +215,7 @@ public class MemberService {
 					.retrieve()
 					.body(Map.class);
 		} catch (Exception e) {
-			System.out.println("[카카오 사용자 정보 실패] " + e.getMessage());
+			// 카카오 토큰이 잘못됐거나 카카오 서버 오류 → null (컨트롤러가 401)
 			return null;
 		}
 	}

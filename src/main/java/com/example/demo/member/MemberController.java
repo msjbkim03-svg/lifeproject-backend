@@ -85,22 +85,31 @@ public class MemberController {
 				"memberRole", member.getMemberRole(),
 				"guestConverted", converted));
 	}
-	
-	
+
+	// 카카오 로그인 (M02 소셜)  POST /api/members/oauth/kakao
+	// 보내는 JSON: { code, guestToken }  (code: 카카오가 /oauth/kakao?code=... 로 준 값)
+	// 돌려주는 JSON: 일반 로그인과 같음 { token, nickname, memberRole, guestConverted }
 	@PostMapping("/oauth/kakao")
-	public ResponseEntity<?> kakaoLogin(@RequestBody Map<String,String> body){
+	public ResponseEntity<?> kakaoLogin(@RequestBody Map<String, String> body) {
 		String code = body.get("code");
 		String guestToken = body.get("guestToken");
-		
+
 		MemberDTO member = service.kakaoLogin(code);
-		if(member == null) {
-			return ResponseEntity.status(401).body(Map.of("message","카카오 로그인에 실패했거나 탈퇴한 계정이에요"));
+		if (member == null) {
+			return ResponseEntity.status(401)
+					.body(Map.of("message", "카카오 로그인에 실패했거나 탈퇴한 계정이에요."));
 		}
-		
-		boolean converted = service.convertGuestLife(member.getMemberId(),guestToken);
-		
-		String token = jwtUtil.createToken(String.valueOf(member.getMemberId()),member.getMemberRole());
-		return ResponseEntity.ok(Map.of("token",token,"nickname",member.getNickname(),"memberRole",member.getMemberRole(),"guestConverted",converted));
+
+		// 이 브라우저에서 비회원으로 하던 인생이 있으면 회원 인생으로 전환
+		boolean converted = service.convertGuestLife(member.getMemberId(), guestToken);
+
+		String token = jwtUtil.createToken(String.valueOf(member.getMemberId()), member.getMemberRole());
+
+		return ResponseEntity.ok(Map.of(
+				"token", token,
+				"nickname", member.getNickname(),
+				"memberRole", member.getMemberRole(),
+				"guestConverted", converted));
 	}
 
 	// 마이페이지 (M04)  GET /api/members/me
