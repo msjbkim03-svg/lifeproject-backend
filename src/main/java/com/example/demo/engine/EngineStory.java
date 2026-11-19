@@ -79,6 +79,13 @@ final class EngineStory {
 	private static boolean rich(LifeDTO l) { return l.getWealthClass() >= 4; }
 	private static boolean focus(LifeDTO l, String f) { return f.equals(l.getFocusCode()); }
 	private static boolean hasMoney(LifeDTO l) { return l.getAssets() > 0 || l.getIncome() > 0; }
+	private static boolean owns(LifeDTO l, String id) { return l.getOwns() != null && l.getOwns().contains(id); }
+
+	// 이 인생에 이 줄(시대 물건 등)이 이미 나왔는지 (엔진 선택지: 휴대폰이 생긴 사람만 '잠들기 전 휴대폰')
+	public static boolean had(int lifeId, String id) {
+		Set<String> s = ONCE.get(lifeId);
+		return s != null && s.contains(id);
+	}
 	private static boolean level(LifeDTO l, String lv) { return enrolled(l) && lv.equals(l.getEduLevel()); }
 	// 학교 밖 아이: 막 졸업한 해(초등 졸업 무렵)는 빼기 - "졸업했다"와 "또래를 부러워했다"가 같은 해에 나오지 않게
 	private static boolean outOfSchool(LifeDTO l) { return !enrolled(l) && !("GRADUATED".equals(l.getSchoolStatus()) && l.getCurrentAge() <= 13); }
@@ -179,8 +186,9 @@ final class EngineStory {
 			new Line("era_phone", 15, 80, 2, l -> !rural(l) && l.getWealthClass() >= 3, "집에 전화가 놓였다. 벨이 울리면 서로 받겠다고 뛰어갔다.", 0, 1980),
 			new Line("era_pc", 10, 60, 2, l -> l.getWealthClass() >= 3 && !rural(l), "내 컴퓨터가 생겼다. 밤늦도록 화면 앞을 떠나지 않았다.", 0, 1995),
 			new Line("era_net", 10, 70, 2, ANY, "처음으로 인터넷에 접속했다. 세상이 넓어졌다.", 0, 2002),
-			new Line("era_mobile", 13, 75, 2, ANY, "처음으로 휴대전화가 생겼다.", 0, 2005),
-			new Line("era_smart", 10, 80, 3, ANY, "첫 스마트폰이 생겼다. 손에서 놓을 줄을 몰랐다.", 0, 2013),
+			// 휴대전화는 스마트폰이 흔해지기 전(2013년 전)까지만, 돈 쓰기로 이미 산 사람은 빼고
+			new Line("era_mobile", 13, 75, 2, l -> l.getBirthYear() + l.getCurrentAge() < 2013 && !owns(l, "CELL") && !owns(l, "PHONE"), "처음으로 휴대전화가 생겼다.", 0, 2005),
+			new Line("era_smart", 10, 80, 3, l -> !owns(l, "PHONE"), "첫 스마트폰이 생겼다. 손에서 놓을 줄을 몰랐다.", 0, 2013),
 			new Line("era_video", 20, 90, 2, ANY, "멀리 사는 가족과 영상 통화로 얼굴을 보며 이야기했다.", 0, 2016),
 
 			// ── 대학생 ──
