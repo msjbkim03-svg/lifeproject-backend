@@ -1622,6 +1622,27 @@ public class EngineService {
 			life.setAssets(life.getAssets() - Math.round(c));
 			book(life, "오토바이 유지비", -c);
 		}
+		// 유지비는 돈이 없어도 냄 (모자라면 빚). 빚이 중위 소득의 절반을 넘게 쌓였는데 차·오토바이가 있으면 팔아서 빚을 줄임
+		//   중고값 = 지금 새것 값의 35% (오토바이 40%), 판 해엔 행복 −4
+		if (life.getAssets() < -med * 0.5 && (owns.contains("CAR") || owns.contains("MOTO"))) {
+			String id = owns.contains("CAR") ? "CAR" : "MOTO";
+			long resale = 0;
+			for (Object[] it : ITEMS) {
+				if (id.equals(it[0])) {
+					resale = Math.round(((Integer) it[2]) * priceK(stat) * ("CAR".equals(id) ? 0.35 : 0.4));
+				}
+			}
+			owns.remove(id);
+			life.setOwns(String.join(",", owns));
+			life.setAssets(life.getAssets() + resale);
+			life.setHappiness(life.getHappiness() - 4);
+			book(life, OWN_NAME.get(id) + " 판 돈", resale);
+			String note = "빚이 불어나 " + OWN_NAME.get(id) + "를 팔았다. 손에 쥔 돈은 " + won(life, resale) + "뿐이었다.";
+			saveEventLog(life, age, null, null, note);
+			List<EventResultDTO> ev = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
+			ev.add(noteEvent(note));
+			life.setEvents(ev);
+		}
 		if (owns.contains("BIKE") && age < 70) {
 			life.setHealth(life.getHealth() + 0.4); // 타고 다니면 건강 조금
 		}
@@ -2221,9 +2242,12 @@ public class EngineService {
 
 	// ================= C06-1 학교 (진학·졸업·중퇴) =================
 
-	// 학교 단계: 초등 6년 → 중등 3년 → 고등 3년 → 대학 4년 → 대학원 2년 (6세 입학, 모든 나라 같은 기간)
+	// 학교 단계: 초등 6년 → 중등 3년 → 고등 3년 → 대학 4년 → 대학원 2년 (모든 나라 같은 기간)
+	//   startAges 는 '새 나이'로 판정: 7이면 6살을 마치며 입학 → 인생 기록(지난 해 나이)에는 6세 입학으로 보임
+	//   그래서 기록에는 초등 6세 입학 · 중학교 12세 · 고등학교 15세 진학 · 18세 졸업 · 대학 22세 졸업 (한국 만 나이와 같음)
+	//   (예전 6·12·15·18·22 는 기록이 한 살씩 빨라 '17세 고등학교 졸업'으로 보였음)
 	private String[] levels = { "ELEM", "MIDDLE", "HIGH", "UNI", "GRAD" };
-	private int[] startAges = { 6, 12, 15, 18, 22 };
+	private int[] startAges = { 7, 13, 16, 19, 23 };
 	private int[] years = { 6, 3, 3, 4, 2 };
 
 	// 학력 코드 → 몇 번째 단계인지 (NONE은 -1)
@@ -2261,16 +2285,38 @@ public class EngineService {
 			}
 		}
 
-		// 2. 진학: 아직 입학 전(6세)이거나, 졸업한 해에 다음 단계 입학 나이면 판정
+		// 2. 진학: 아직 입학 전이거나, 졸업한 해에 다음 단계 입학 나이면 판정
+		//   중학교·고등학교·대학(next 1~3)은 붙으면 그해 끝에 갈지 말지 직접 고름 (C06-4 진학 선택, 원작 school2·school3·college)
+		//   못 붙으면 중·고등학교는 "형편이 어려워 못 갔다" 한 줄
+		//   기다리던 진학 선택을 서버 재시작으로 잃었으면 (기록에 그 단계 결과가 없으면) 한 해 늦게 다시 판정
 		int next = idx + 1;
 		boolean canEnter = (idx == -1 && status == null) || "GRADUATED".equals(status);
-		if (canEnter && next < levels.length && age == startAges[next]) {
+		boolean choose = next >= 1 && next <= 3;
+		boolean onTime = next < levels.length && age == startAges[next];
+		boolean late = choose && age == startAges[next] + 1 && !schoolDecided(life, next);
+		if (canEnter && (onTime || late)) {
 			if (random.nextDouble() < enrollRate(life, stat, next)) {
+				if (choose) {
+					engState(life).schoolNext = next; // 그해 끝(rollEngineChoice)에서 선택 창
+					return;
+				}
 				life.setEduLevel(levels[next]);
 				life.setSchoolStatus("ENROLLED");
 				life.setDropReason(null);
+			} else if (choose) {
+				EngineChoice.Dec d = EngineChoice.byKey("SCHOOL_" + levels[next]);
+				markEngineDone(engState(life), d, age - 1);
+				if (d.failText != null) {
+					saveEventLog(life, age - 1, null, null, d.failText);
+					addYearNote(life, d.failText);
+				}
 			}
 		}
+	}
+
+	// 이 단계 진학을 이미 정했는지 (골랐거나 못 붙었거나: 인생 기록 문장으로 확인)
+	private boolean schoolDecided(LifeDTO life, int next) {
+		return engState(life).done.containsKey("SCHOOL_" + levels[next]);
 	}
 
 	// 원작 odds: 확률 p를 배율 k만큼 "승산"으로 키우거나 줄임 (확률을 그냥 곱하면 1을 넘으니 승산으로 곱함)
@@ -2543,6 +2589,10 @@ public class EngineService {
 	private void showOffers(LifeDTO life, CountryStatDTO stat) {
 		if (!canGetJob(life, stat)) {
 			return;
+		}
+		EngState es = engStates.get(life.getLifeId());
+		if (es != null && es.schoolNext != null) {
+			return; // 진학할지 고르는 해 (고른 뒤 안 가면 chooseEngine 에서 제안)
 		}
 		List<JobDTO> offers = offerJobs(life);
 		if (!offers.isEmpty()) {
@@ -3454,6 +3504,7 @@ public class EngineService {
 		int humCount;
 		String temper;
 		EngPend pend;
+		Integer schoolNext; // 이번 해 붙은 진학 단계 (그해 끝에 선택 창)
 	}
 
 	private static class EngPend {
@@ -3481,6 +3532,9 @@ public class EngineService {
 				}
 				String t = g.getLogText();
 				for (EngineChoice.Dec d : EngineChoice.ALL) {
+					if (d.failText != null && t.startsWith(d.failText)) {
+						markEngineDone(s, d, g.getAge());
+					}
 					for (EngineChoice.Opt o : d.opts) {
 						for (String res : o.results) {
 							if (t.startsWith(res)) {
@@ -3504,7 +3558,7 @@ public class EngineService {
 		if (EngineChoice.HUM.equals(d.group)) {
 			s.humCount++;
 			s.lastHum = s.lastHum == null ? age : Math.max(s.lastHum, age);
-		} else if (!EngineChoice.TEMPER.equals(d.group)) {
+		} else if (EngineChoice.KID.equals(d.group) || EngineChoice.ADULT.equals(d.group)) {
 			s.lastSmall = s.lastSmall == null ? age : Math.max(s.lastSmall, age);
 		}
 	}
@@ -3541,11 +3595,32 @@ public class EngineService {
 
 	// 한 해가 끝날 때 (nextYear 마지막): 다른 결정 창이 없으면 엔진 선택지를 굴림
 	private void rollEngineChoice(LifeDTO life, int lived) {
+		EngState s = engState(life);
+		if (s.schoolNext != null) {
+			// 진학 선택 (붙은 해): 다른 결정 창이 이미 떠 있으면 예전처럼 바로 진학
+			int nx = s.schoolNext;
+			s.schoolNext = null;
+			int di = EngineChoice.indexOf("SCHOOL_" + levels[nx]);
+			if (s.pend == null && !life.isNeedChoice() && !life.isNeedDestination() && life.getPendingEventId() == null) {
+				openEngineChoice(life, s, di, lived);
+				if (s.pend != null) {
+					return;
+				}
+			}
+			life.setEduLevel(levels[nx]);
+			life.setSchoolStatus("ENROLLED");
+			life.setDropReason(null);
+			EngineChoice.Dec d = EngineChoice.ALL.get(di);
+			markEngineDone(s, d, lived);
+			String t = d.opts[0].results[0];
+			saveEventLog(life, lived, null, null, t);
+			addYearNote(life, t);
+			return;
+		}
 		if (!"PLAYING".equals(life.getStatus()) || life.isNeedChoice() || life.isNeedJob() || life.isNeedDestination()
 				|| life.getPendingEventId() != null) {
 			return;
 		}
-		EngState s = engState(life);
 		if (s.pend != null) {
 			return;
 		}
@@ -3693,6 +3768,14 @@ public class EngineService {
 		if (o.temper != null) {
 			s.temper = o.temper;
 		}
+		if (o.act != null && d.key.startsWith("SCHOOL_")) {
+			int nx = java.util.Arrays.asList(levels).indexOf(d.key.substring("SCHOOL_".length()));
+			if ("ENROLL".equals(o.act) && nx >= 0) {
+				life.setEduLevel(levels[nx]);
+				life.setSchoolStatus("ENROLLED");
+				life.setDropReason(null);
+			}
+		}
 		markEngineDone(s, d, age);
 		fixStats(life);
 		saveEventLog(life, age, null, null, text);
@@ -3704,6 +3787,9 @@ public class EngineService {
 		List<EventResultDTO> list = new ArrayList<>();
 		list.add(noteEvent(text));
 		life.setEvents(list);
+		if ("QUIT".equals(o.act)) {
+			showOffers(life, yearStat(life)); // 학교 대신 일을 고르면 바로 일자리 제안 (15세부터)
+		}
 		engineDao.updateLifeYear(life);
 		fillRegion(life);
 		return life;

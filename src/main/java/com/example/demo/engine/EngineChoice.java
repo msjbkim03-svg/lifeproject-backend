@@ -10,6 +10,8 @@ import java.util.function.Predicate;
 //   - 어린 시절 (7~15세): 방과 후 · 주운 지갑 · 명절 용돈 · 시험 전날 · 친구와 다툼 · 장래 희망
 //   - 어른 (16세~): 주말 · 휴가 · 동창회 · 부모님께 연락 · 혼자 사는 저녁 · 봉사 · 잠들기 전 휴대폰
 //   - 사람 사이 (16세~, 원작 HUM): 쓰러진 사람 · 놀림받는 동료 · 옆집 아이 · 이웃 돕기 모금
+//   - 진학 (원작 school2 · school3 · college): 중학교·고등학교·대학에 붙은 해에 갈지 말지 직접 고름
+//     (붙었는지는 엔진 진학 확률로 먼저 정하고, 붙었을 때만 창이 뜸. 못 붙으면 failText 한 줄)
 // 효과 숫자: h 행복, hl 건강, re 관계, kn 지식 (원작 eff 와 같은 크기)
 // cost: 중위 소득 × 비율 (어른이고 벌이·재산이 있을 때만 냄, 문장 끝에 금액을 붙임)
 // 결과 문장은 선택지마다 다르게 → 서버를 다시 켜도 인생 기록 문장으로 이미 겪은 선택을 다시 찾을 수 있음
@@ -19,6 +21,7 @@ public class EngineChoice {
 	public static final String KID = "KID";
 	public static final String ADULT = "ADULT";
 	public static final String HUM = "HUM";
+	public static final String SCHOOL = "SCHOOL"; // 무작위로 뽑지 않음 (schoolStep 이 붙었을 때만 띄움)
 
 	// 선택지 하나
 	public static class Opt {
@@ -30,6 +33,7 @@ public class EngineChoice {
 		public final int[] badEff;     // results[1]일 때 효과 {h, hl, re, kn}
 		public final String temper;    // 기질 선택지면 기질 이름
 		public final Predicate<LifeDTO> show; // 이 선택지를 보여 줄 조건 (null 이면 항상)
+		public String act;                    // 진학 선택: ENROLL 간다 / QUIT 안 간다
 
 		Opt(String label, int h, int hl, int re, int kn, double cost, String result) {
 			this(label, h, hl, re, kn, cost, new String[] { result }, 0, null, null, null);
@@ -53,6 +57,11 @@ public class EngineChoice {
 		Opt when(Predicate<LifeDTO> p) {
 			return new Opt(label, h, hl, re, kn, cost, results, badP, badEff, temper, p);
 		}
+
+		Opt act(String a) {
+			this.act = a;
+			return this;
+		}
 	}
 
 	// 선택 하나
@@ -66,6 +75,7 @@ public class EngineChoice {
 		public final String title;
 		public final String[] bodies;
 		public final Opt[] opts;
+		public String failText; // 진학 선택: 붙지 못했을 때 기록 한 줄
 
 		Dec(String key, String group, int minAge, int maxAge, int max, int gap, Predicate<LifeDTO> ok, String title,
 				String[] bodies, Opt... opts) {
@@ -105,6 +115,12 @@ public class EngineChoice {
 
 	static int year(LifeDTO l) {
 		return l.getBirthYear() + l.getCurrentAge();
+	}
+
+	static boolean hasPhone(LifeDTO l) {
+		String o = l.getOwns() == null ? "" : l.getOwns();
+		return o.contains("PHONE") || o.contains("CELL") || EngineStory.had(l.getLifeId(), "era_smart")
+				|| EngineStory.had(l.getLifeId(), "era_mobile");
 	}
 
 	static boolean schooled(LifeDTO l) {
@@ -157,10 +173,11 @@ public class EngineChoice {
 				new Opt("아직 모르겠다", 0, 0, 0, 0, 0, "한참을 고민하다 '아직 모르겠다'고 솔직하게 적었다.")));
 
 		// ---------- 어른 (원작 SMALL) ----------
-		ALL.add(new Dec("PHONE", ADULT, 13, 60, 1, 99, l -> year(l) >= 2012, "잠들기 전 휴대폰",
+		// 휴대폰이 있는 사람만 (돈 쓰기로 산 휴대폰, 또는 인생 기록에 '휴대전화·스마트폰이 생겼다'가 나온 사람)
+		ALL.add(new Dec("PHONE", ADULT, 13, 60, 1, 99, l -> year(l) >= 2012 && hasPhone(l), "잠들기 전 휴대폰",
 				new String[] { "누워서 휴대폰을 보다 보면 어느새 새벽이에요." },
-				new Opt("잠들기 전에는 휴대폰을 내려놓는다", 0, 2, 0, 1, 0, "휴대폰을 침대 밖에 두고 잤다. 아침이 한결 가벼웠다."),
-				new Opt("그냥 둔다, 이게 쉬는 시간이다", 1, -1, 0, 0, 0, "오늘도 영상 몇 개만 더 보다가 늦게 잠들었다.")));
+				new Opt("휴대폰을 멀리 두고 일찍 잔다", 0, 2, 0, 1, 0, "휴대폰을 침대 밖에 두고 잤다. 아침이 한결 가벼웠다."),
+				new Opt("계속 본다, 이게 쉬는 시간이다", 1, -1, 0, 0, 0, "오늘도 영상 몇 개만 더 보다가 늦게 잠들었다.")));
 		ALL.add(new Dec("WEEKEND", ADULT, 18, 75, 2, 8, l -> true, "모처럼 쉬는 주말",
 				new String[] { "아무 약속도 없는 주말이에요. 무엇을 할까요?", "늦잠을 자고 일어나니 창밖이 맑아요." },
 				new Opt("오랜만에 친구들을 만난다", 2, 0, 3, 0, 0.01, "친구들과 늦게까지 이야기를 나눴다."),
@@ -210,6 +227,36 @@ public class EngineChoice {
 				new Opt("넉넉히 낸다", 3, 0, 2, 0, 0.02, "넉넉히 보탰다. 이웃이 몇 번이고 고개를 숙였다."),
 				new Opt("조금 보탠다", 1, 0, 1, 0, 0.003, "형편껏 조금 보탰다."),
 				new Opt("이번엔 지나친다", -1, 0, 0, 0, 0, "모금함 앞을 그냥 지나쳤다.")));
+	}
+
+	static {
+		// ---------- 진학 (원작 school2 · school3 · college) ----------
+		Dec m = new Dec("SCHOOL_MIDDLE", SCHOOL, 0, 99, 1, 99, l -> true, "중학교에 갈까?",
+				new String[] { "초등학교를 마쳤어요. 중학교에 갈 수 있게 됐는데, 집안일을 도울 손도 필요해요." },
+				new Opt("중학교에 간다", 1, 0, 0, 2, 0, "중학교에 진학했다. 새 교과서 냄새가 좋았다.").act("ENROLL"),
+				new Opt("학교를 그만두고 집안일을 돕는다", -2, 0, 2, -1, 0, "학교 대신 집안일을 돕기로 했다. 교복 입은 친구들이 지나갈 때마다 눈길이 갔다.").act("QUIT"));
+		m.failText = "집안 형편이 어려워 중학교에 가지 못했다.";
+		ALL.add(m);
+		Dec h = new Dec("SCHOOL_HIGH", SCHOOL, 0, 99, 1, 99, l -> true, "고등학교에 갈까?",
+				new String[] { "중학교를 마쳤어요. 고등학교에 갈 수 있지만, 이제 돈을 벌 수 있는 나이이기도 해요." },
+				new Opt("고등학교에 간다", 1, 0, 0, 2, 0, "고등학교에 진학했다. 공부가 한결 어려워졌다.").act("ENROLL"),
+				new Opt("학교를 그만두고 일을 시작한다", -1, 0, 1, 0, 0, "고등학교 대신 일을 시작하기로 했다. 첫 월급날이 기다려졌다.").act("QUIT"));
+		h.failText = "집안 형편이 어려워 고등학교에 가지 못했다.";
+		ALL.add(h);
+		Dec u = new Dec("SCHOOL_UNI", SCHOOL, 0, 99, 1, 99, l -> true, "대학에 갈까?",
+				new String[] { "대학에 붙었어요. 몇 년 더 공부하면 더 좋은 일자리를 얻을 수 있지만, 그동안은 벌이가 없어요." },
+				new Opt("대학에 간다", 2, 0, 0, 2, 0, "대학에 진학했다. 강의실이 생각보다 넓었다.").act("ENROLL"),
+				new Opt("대학 대신 바로 일을 시작한다", 0, 0, 1, 0, 0, "대학 대신 바로 일을 시작하기로 했다.").act("QUIT"));
+		ALL.add(u);
+	}
+
+	public static int indexOf(String key) {
+		for (int i = 0; i < ALL.size(); i++) {
+			if (ALL.get(i).key.equals(key)) {
+				return i;
+			}
+		}
+		return -1;
 	}
 
 	public static Dec byKey(String key) {
