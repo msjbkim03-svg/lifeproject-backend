@@ -29,6 +29,7 @@ public class WebConfig implements WebMvcConfigurer {
 				.excludePathPatterns(
 						"/api/members",          // 회원가입
 						"/api/members/login",    // 로그인
+						"/api/members/oauth/**", // ★ 소셜 로그인 추가
 						"/api/members/check*",
 						"/api/members/find/**"); // 아이디·닉네임·이메일 중복 확인
 
@@ -42,6 +43,7 @@ public class WebConfig implements WebMvcConfigurer {
 						"/api/members",          // 회원가입
 						"/api/members/login",    // 로그인
 						"/api/members/check*",   // 중복 확인
+						"/api/members/oauth/**", // 소셜 로그인
 						"/api/members/find/**"); // 아이디·비번 찾기
 	}
 }

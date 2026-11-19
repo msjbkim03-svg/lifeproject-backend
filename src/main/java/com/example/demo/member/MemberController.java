@@ -85,6 +85,23 @@ public class MemberController {
 				"memberRole", member.getMemberRole(),
 				"guestConverted", converted));
 	}
+	
+	
+	@PostMapping("/oauth/kakao")
+	public ResponseEntity<?> kakaoLogin(@RequestBody Map<String,String> body){
+		String code = body.get("code");
+		String guestToken = body.get("guestToken");
+		
+		MemberDTO member = service.kakaoLogin(code);
+		if(member == null) {
+			return ResponseEntity.status(401).body(Map.of("message","카카오 로그인에 실패했거나 탈퇴한 계정이에요"));
+		}
+		
+		boolean converted = service.convertGuestLife(member.getMemberId(),guestToken);
+		
+		String token = jwtUtil.createToken(String.valueOf(member.getMemberId()),member.getMemberRole());
+		return ResponseEntity.ok(Map.of("token",token,"nickname",member.getNickname(),"memberRole",member.getMemberRole(),"guestConverted",converted));
+	}
 
 	// 마이페이지 (M04)  GET /api/members/me
 	@GetMapping("/me")
