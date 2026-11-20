@@ -24,12 +24,13 @@ public class WebConfig implements WebMvcConfigurer {
 	public void addInterceptors(InterceptorRegistry registry) {
 		registry.addInterceptor(loginValidator)
 				// 회원 전용 주소 (마이페이지·정보 수정·탈퇴·특성 강화 등 /api/members/... 아래)
-				.addPathPatterns("/api/members/**", "/api/quests/**") // 퀘스트(C01)도 회원만
+				.addPathPatterns("/api/members/**", "/api/quests/**", // 퀘스트(C01)도 회원만
+						"/api/memorials/*/open", "/api/memorials/*/candle", // 추모관(B01) 열기·촛불·방명록
+						"/api/memorials/*/comments", "/api/memorials/comments/**")
 				// 로그인 없이 써야 하는 주소는 빼기
 				.excludePathPatterns(
 						"/api/members",          // 회원가입
 						"/api/members/login",    // 로그인
-						"/api/members/oauth/**", // 소셜 로그인 (카카오)
 						"/api/members/check*",   // 아이디·닉네임·이메일 중복 확인
 						"/api/members/find/**"); // 아이디·비번 찾기
 
@@ -43,7 +44,6 @@ public class WebConfig implements WebMvcConfigurer {
 						"/api/members",          // 회원가입
 						"/api/members/login",    // 로그인
 						"/api/members/check*",   // 중복 확인
-						"/api/members/oauth/**", // 소셜 로그인
 						"/api/members/find/**"); // 아이디·비번 찾기
 	}
 }

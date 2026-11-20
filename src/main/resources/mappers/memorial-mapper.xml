@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+	"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- B01 추모관 (김민승) -->
+<mapper namespace="memorial">
+
+	<select id="selectCards" parameterType="map" resultType="com.example.demo.memorial.MemorialCardDTO">
+		SELECT *
+		FROM (
+			SELECT a.*, ROWNUM AS RN
+			FROM (
+				SELECT l.LIFE_ID                        AS lifeId,
+				       l.NAME                           AS name,
+				       l.BIRTH_YEAR                     AS birthYear,
+				       l.BIRTH_YEAR + NVL(l.DEATH_AGE, 0) AS deathYear,
+				       NVL(l.DEATH_AGE, 0)              AS deathAge,
+				       c.NAME_KO                        AS birthCountry,
+				       p.MESSAGE                        AS message,
+				       NVL(p.TRIBUTE_COUNT, 0) AS tributeCount
+				FROM MEMORIAL_POST p
+				JOIN LIFE l ON l.LIFE_ID = p.LIFE_ID
+				JOIN COUNTRY c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
+				ORDER BY p.POST_ID DESC
+			) a
+			WHERE ROWNUM &lt;= #{end}
+		)
+		WHERE RN &gt; #{start}
+	</select>
+
+	<select id="countCards" resultType="int">
+		SELECT COUNT(*) FROM MEMORIAL_POST
+	</select>
+
+	<select id="selectRoom" parameterType="int" resultType="com.example.demo.memorial.MemorialRoomDTO">
+		SELECT l.LIFE_ID                        AS lifeId,
+		       p.POST_ID                        AS postId,
+		       l.MEMBER_ID                      AS ownerId,
+		       l.NAME                           AS name,
+		       l.BIRTH_YEAR                     AS birthYear,
+		       l.BIRTH_YEAR + NVL(l.DEATH_AGE, 0) AS deathYear,
+		       NVL(l.DEATH_AGE, 0)              AS deathAge,
+		       bc.NAME_KO                       AS birthCountry,
+		       cc.NAME_KO                       AS deathCountry,
+		       l.DEATH_CAUSE                    AS deathCause,
+		       NVL(l.CHILD_COUNT, 0)            AS childCount,
+		       l.IS_MARRIED                     AS isMarried,
+		       l.OWNS                           AS owns,
+		       p.MESSAGE                        AS message,
+		       NVL(p.TRIBUTE_COUNT, 0) AS tributeCount
+		FROM LIFE l
+		JOIN COUNTRY bc ON bc.COUNTRY_CODE = l.BIRTH_COUNTRY
+		JOIN COUNTRY cc ON cc.COUNTRY_CODE = l.CURRENT_COUNTRY
+		LEFT JOIN MEMORIAL_POST p ON p.LIFE_ID = l.LIFE_ID
+		WHERE l.LIFE_ID = #{lifeId}
+		  AND l.STATUS = 'ENDED'
+	</select>
+
+	<!-- 가장 오래 한 직업 -->
+	<select id="selectMainJob" parameterType="int" resultType="com.example.demo.memorial.MemorialJobDTO">
+		SELECT *
+		FROM (
+			SELECT j.JOB_NAME AS jobName, COUNT(*) AS years
+			FROM LIFE_YEAR_LOG y
+			JOIN JOB j ON j.JOB_ID = y.JOB_ID
+			WHERE y.LIFE_ID = #{lifeId}
+			GROUP BY j.JOB_NAME
+			ORDER BY COUNT(*) DESC
+		)
+		WHERE ROWNUM = 1
+	</select>
+
+	<select id="selectHappiness" parameterType="int" resultType="int">
+		SELECT NVL(ROUND(HAPPINESS), 0)
+		FROM LIFE_YEAR_LOG
+		WHERE LIFE_ID = #{lifeId}
+		ORDER BY AGE
+	</select>
+
+	<!-- 강도가 큰 역사 사건 3개 -->
+	<select id="selectHistEvents" parameterType="int" resultType="com.example.demo.memorial.MemorialEventDTO">
+		SELECT age, year, text
+		FROM (
+			SELECT e.AGE AS age, e.YEAR_NO AS year, e.LOG_TEXT AS text
+			FROM LIFE_EVENT_LOG e
+			JOIN GAME_EVENT g ON g.EVENT_ID = e.EVENT_ID
+			WHERE e.LIFE_ID = #{lifeId}
+			  AND g.EVENT_TYPE = 'HIST'
+			ORDER BY NVL(g.INTENSITY, 1) DESC, e.AGE
+		)
+		WHERE ROWNUM &lt;= 3
+		ORDER BY age
+	</select>
+
+	<select id="selectLogs" parameterType="int" resultType="com.example.demo.memorial.MemorialEventDTO">
+		SELECT AGE AS age, YEAR_NO AS year, LOG_TEXT AS text
+		FROM LIFE_EVENT_LOG
+		WHERE LIFE_ID = #{lifeId}
+		  AND LOG_TEXT IS NOT NULL
+		ORDER BY AGE, LOG_ID
+	</select>
+
+	<select id="countCountries" parameterType="int" resultType="int">
+		SELECT COUNT(DISTINCT COUNTRY_CODE) FROM LIFE_YEAR_LOG WHERE LIFE_ID = #{lifeId}
+	</select>
+
+	<select id="countAchievedQuests" parameterType="int" resultType="int">
+		SELECT COUNT(*) FROM LIFE_QUEST WHERE LIFE_ID = #{lifeId} AND ACHIEVED = 'Y'
+	</select>
+
+	<select id="selectComments" parameterType="int" resultType="com.example.demo.memorial.MemorialCommentDTO">
+		SELECT c.COMMENT_ID AS commentId,
+		       c.MEMBER_ID  AS memberId,
+		       m.NICKNAME   AS nickname,
+		       c.CONTENT    AS content,
+		       TO_CHAR(c.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS createdAt
+		FROM MEMORIAL_COMMENT c
+		JOIN MEMBER m ON m.MEMBER_ID = c.MEMBER_ID
+		WHERE c.POST_ID = #{postId}
+		ORDER BY c.COMMENT_ID DESC
+	</select>
+
+	<select id="countMyCandle" parameterType="map" resultType="int">
+		SELECT COUNT(*) FROM MEMORIAL_TRIBUTE WHERE POST_ID = #{postId} AND MEMBER_ID = #{memberId}
+	</select>
+
+	<insert id="insertPost" parameterType="map">
+		INSERT INTO MEMORIAL_POST (POST_ID, LIFE_ID, MEMBER_ID, MESSAGE, VIEW_COUNT, TRIBUTE_COUNT, CREATED_AT)
+		VALUES (SEQ_MEMORIAL_POST.NEXTVAL, #{lifeId}, #{memberId}, #{message}, 0, 0, SYSDATE)
+	</insert>
+
+	<insert id="insertTribute" parameterType="map">
+		INSERT INTO MEMORIAL_TRIBUTE (POST_ID, MEMBER_ID, CREATED_AT)
+		VALUES (#{postId}, #{memberId}, SYSDATE)
+	</insert>
+
+	<update id="plusTributeCount" parameterType="int">
+		UPDATE MEMORIAL_POST SET TRIBUTE_COUNT = TRIBUTE_COUNT + 1 WHERE POST_ID = #{postId}
+	</update>
+
+	<update id="plusViewCount" parameterType="int">
+		UPDATE MEMORIAL_POST SET VIEW_COUNT = VIEW_COUNT + 1 WHERE POST_ID = #{postId}
+	</update>
+
+	<insert id="insertComment" parameterType="map">
+		INSERT INTO MEMORIAL_COMMENT (COMMENT_ID, POST_ID, MEMBER_ID, CONTENT, CREATED_AT)
+		VALUES (SEQ_MEMORIAL_COMMENT.NEXTVAL, #{postId}, #{memberId}, #{content}, SYSDATE)
+	</insert>
+
+	<delete id="deleteComment" parameterType="map">
+		DELETE FROM MEMORIAL_COMMENT WHERE COMMENT_ID = #{commentId} AND MEMBER_ID = #{memberId}
+	</delete>
+
+</mapper>
