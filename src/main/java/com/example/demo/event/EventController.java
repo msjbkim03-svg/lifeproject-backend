@@ -57,7 +57,8 @@ public class EventController {
 	public List<EventResultDTO> testYear(@RequestParam int age, @RequestParam int birthYear,
 			@RequestParam String country, @RequestParam String gender, @RequestParam int wealth,
 			@RequestParam String name, @RequestParam(defaultValue = "N") String married,
-			@RequestParam(defaultValue = "0") int lifeId) {
+			@RequestParam(defaultValue = "0") int lifeId,
+			@RequestParam(required = false) String birthCountry) {
 		LifeDTO life = new LifeDTO();
 		life.setLifeId(lifeId);
 		life.setCurrentAge(age);
@@ -67,19 +68,22 @@ public class EventController {
 		life.setWealthClass(wealth);
 		life.setName(name);
 		life.setMarriedYn(married);
+		life.setBirthCountry(birthCountry);
 		return eServ.rollYear(life);
 	}
 
 	// 테스트: 선택지 고르기 (최종 전에 삭제)
 	@GetMapping("/test/choice")
 	public EventResultDTO testChoice(@RequestParam int choiceId, @RequestParam int age, @RequestParam int birthYear,
-			@RequestParam String country, @RequestParam(defaultValue = "0") int lifeId, @RequestParam String name) {
+			@RequestParam String country, @RequestParam(defaultValue = "0") int lifeId, @RequestParam String name,
+			@RequestParam(required = false) String birthCountry) {
 		LifeDTO life = new LifeDTO();
 		life.setCurrentAge(age);
 		life.setBirthYear(birthYear);
 		life.setCurrentCountry(country);
 		life.setName(name);
 		life.setLifeId(lifeId);
+		life.setBirthCountry(birthCountry);
 		return eServ.applyChoice(life, choiceId, age);
 	}
 

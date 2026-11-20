@@ -235,6 +235,9 @@ public class EventService {
 		if ("Y".equals(life.getMarriedYn())) {
 			expIds.add("STATE_MARRIED"); // 지금 결혼 중 (DB 저장 안 함, 조건 판정용)
 		}
+		if (life.getBirthCountry() != null && !life.getBirthCountry().equals(life.getCurrentCountry())) {
+		    expIds.add("STATE_ABROAD"); // 지금 태어난 나라 밖에 사는 중 (DB 저장 안 함, 조건 판정용)
+		}
 		// 재혼하면 자녀 계획 다시 묻기: 마지막 결혼보다 먼저 정한 자녀 계획은 지난 결혼 것이라 판정에서 뺌
 		Integer marryAge = eDAO.selectLastExpAge(life.getLifeId(), "LE_LOVE_PROPOSAL_1");
 		Integer planAge = eDAO.selectLastExpAge(life.getLifeId(), "LE_CHILD_PLAN_%");
@@ -313,15 +316,21 @@ public class EventService {
 		} else {
 			r.setResultAction(c.getResultAction()); // MARRY, MIGRATE 등
 
-			// 떠난다(MIGRATE)인데 목적지가 정해지지 않았으면 → 목적지 후보 5곳
-			if ("MIGRATE".equals(c.getResultAction()) && c.getMigrateTo() == null) {
+			if ("RETURN_HOME".equals(c.getResultAction())) {
+				// 고향으로 돌아가기: 엔진에는 MIGRATE + 목적지 = 태어난 나라로 보냄
+				r.setResultAction("MIGRATE");
+				r.setMigrateTo(life.getBirthCountry());
+			} else if ("MIGRATE".equals(c.getResultAction()) && c.getMigrateTo() == null) {
+				// 떠난다(MIGRATE)인데 목적지가 정해지지 않았으면 → 목적지 후보 5곳
 				r.setNeedDestination(true);
 				r.setDestinations(pickDestinations(life.getCurrentCountry(), year));
 			}
 		}
 
 		r.setEffWealthRate(wealth);
-		r.setMigrateTo(c.getMigrateTo());
+		if (r.getMigrateTo() == null) {
+			r.setMigrateTo(c.getMigrateTo()); // 귀향은 위에서 태어난 나라를 넣었으니 덮어쓰지 않음
+		}
 		r.setLogText(text);
 
 		return r;
