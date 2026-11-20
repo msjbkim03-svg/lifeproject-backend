@@ -43,7 +43,7 @@ public class QuestJudgeService {
 
 		for (Map<String, Object> q : qDAO.selectJudgeTargets(lifeId)) {
 			int questId = num(q.get("QUEST_ID")).intValue();
-			boolean ok = judgeOne((String) q.get("QUEST_TYPE"), (String) q.get("TARGET_VALUE"), life);
+			boolean ok = judgeOne((String) q.get("QUEST_TYPE"), (String) q.get("TARGET_VALUE"), life, lifeId);
 			qDAO.updateAchieved(lifeId, questId, ok ? "Y" : "N");
 			results.put(questId, ok);
 		}
@@ -51,7 +51,7 @@ public class QuestJudgeService {
 	}
 
 	// 퀘스트 하나 판정
-	private boolean judgeOne(String type, String target, Map<String, Object> life) {
+	private boolean judgeOne(String type, String target, Map<String, Object> life, int lifeId) {
 		int deathAge = num(life.get("DEATH_AGE")).intValue();
 		int birthYear = num(life.get("BIRTH_YEAR")).intValue();
 		String eduLevel = (String) life.get("EDU_LEVEL");
@@ -74,13 +74,11 @@ public class QuestJudgeService {
 			return !life.get("BIRTH_COUNTRY").equals(life.get("CURRENT_COUNTRY"));
 		case "CHILD": // 자녀 N명 이상
 			return num(life.get("CHILD_COUNT")).intValue() >= Integer.parseInt(target);
-		case "INCOME_GDP": { // 평생 평균 소득 ≥ 태어난 나라 1인당 GDP × N (인생 중간 시점 연대 기준)
-			int midDecade = (birthYear + deathAge / 2) / 10 * 10;
-			Map<String, Object> stat = qDAO.selectStatForJudge((String) life.get("BIRTH_COUNTRY"), midDecade);
-			if (stat == null || stat.get("GDP_PER_CAPITA") == null || life.get("AVG_INCOME") == null)
-				return false;
-			return num(life.get("AVG_INCOME")).doubleValue() >= num(stat.get("GDP_PER_CAPITA")).doubleValue()
-					* Double.parseDouble(target);
+		case "INCOME_GDP": { // 태어난 나라에서 산 평생 평균 소득 ≥ 그해 1인당 GDP × N
+		    Map<String, Object> r = qDAO.selectIncomeRatio(lifeId, (String) life.get("BIRTH_COUNTRY"));
+		    if (r == null || r.get("INCOME_RATIO") == null)
+		        return false; // 태어난 나라에서 번 적 없음
+		    return num(r.get("INCOME_RATIO")).doubleValue() >= Double.parseDouble(target);
 		}
 		case "ASSETS": // 마지막 재산 N 이상 (빚 없이)
 			return num(life.get("ASSETS")).doubleValue() >= Double.parseDouble(target);

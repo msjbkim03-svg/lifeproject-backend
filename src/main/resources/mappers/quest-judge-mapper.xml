@@ -10,54 +10,72 @@
 	<!-- 달성했는데 아직 지급 안 한 퀘스트 → 지급 표시 (바뀐 행 수 = 줄 포인트) -->
 	<update id="markPointGiven" parameterType="int">
 		UPDATE LIFE_QUEST
-		   SET POINT_GIVEN = 'Y'
-		 WHERE LIFE_ID = #{lifeId}
-		   AND ACHIEVED = 'Y'
-		   AND POINT_GIVEN = 'N'
+		SET POINT_GIVEN = 'Y'
+		WHERE LIFE_ID = #{lifeId}
+		AND ACHIEVED = 'Y'
+		AND POINT_GIVEN = 'N'
 	</update>
 
 	<!-- 회원 보유 포인트 증가 -->
 	<update id="addMemberPoint" parameterType="map">
-		UPDATE MEMBER SET POINT = POINT + #{amount} WHERE MEMBER_ID = #{memberId}
+		UPDATE MEMBER SET POINT = POINT + #{amount} WHERE MEMBER_ID =
+		#{memberId}
 	</update>
 
 	<!-- 포인트 내역 (사유 QUEST) -->
 	<insert id="insertPointHistory" parameterType="map">
-		INSERT INTO POINT_HISTORY (POINT_ID, MEMBER_ID, LIFE_ID, AMOUNT, REASON, CREATED_AT)
-		VALUES (SEQ_POINT_HISTORY.NEXTVAL, #{memberId}, #{lifeId}, #{amount}, 'QUEST', SYSDATE)
+		INSERT INTO POINT_HISTORY (POINT_ID, MEMBER_ID, LIFE_ID, AMOUNT, REASON,
+		CREATED_AT)
+		VALUES (SEQ_POINT_HISTORY.NEXTVAL, #{memberId}, #{lifeId}, #{amount},
+		'QUEST', SYSDATE)
 	</insert>
 
 	<!-- 판정할 퀘스트: 이 인생이 고른 퀘스트 중 아직 판정 안 한 것 -->
 	<select id="selectJudgeTargets" parameterType="int" resultType="map">
 		SELECT Q.QUEST_ID, Q.QUEST_TYPE, Q.TARGET_VALUE
-		  FROM LIFE_QUEST LQ
-		  JOIN QUEST Q ON LQ.QUEST_ID = Q.QUEST_ID
-		 WHERE LQ.LIFE_ID = #{lifeId}
-		   AND LQ.ACHIEVED IS NULL
+		FROM LIFE_QUEST LQ
+		JOIN QUEST Q ON LQ.QUEST_ID = Q.QUEST_ID
+		WHERE LQ.LIFE_ID = #{lifeId}
+		AND LQ.ACHIEVED IS NULL
 	</select>
 
 	<!-- 판정에 쓸 인생 결과 -->
 	<select id="selectLifeResult" parameterType="int" resultType="map">
-		SELECT STATUS, BIRTH_YEAR, DEATH_AGE, EDU_LEVEL, SCHOOL_STATUS, BIRTH_COUNTRY, CURRENT_COUNTRY,
-		       CHILD_COUNT, AVG_INCOME, ASSETS, HAPPINESS
-		  FROM LIFE
-		 WHERE LIFE_ID = #{lifeId}
+		SELECT STATUS, BIRTH_YEAR, DEATH_AGE, EDU_LEVEL, SCHOOL_STATUS,
+		BIRTH_COUNTRY, CURRENT_COUNTRY,
+		CHILD_COUNT, AVG_INCOME, ASSETS, HAPPINESS
+		FROM LIFE
+		WHERE LIFE_ID = #{lifeId}
 	</select>
 
 	<!-- 나라·연대 통계 (기대수명, 1인당 GDP), 미래 연대는 그 나라 최근 연대 -->
 	<select id="selectStatForJudge" parameterType="map" resultType="map">
 		SELECT LIFE_EXPECTANCY, GDP_PER_CAPITA
-		  FROM COUNTRY_STAT
-		 WHERE COUNTRY_CODE = #{countryCode}
-		   AND DECADE = LEAST(#{decade}, (SELECT MAX(DECADE) FROM COUNTRY_STAT WHERE COUNTRY_CODE = #{countryCode}))
+		FROM COUNTRY_STAT
+		WHERE COUNTRY_CODE = #{countryCode}
+		AND DECADE = LEAST(#{decade}, (SELECT MAX(DECADE) FROM COUNTRY_STAT
+		WHERE COUNTRY_CODE = #{countryCode}))
+	</select>
+
+	<!-- INCOME_GDP 판정: 태어난 나라에 살던 모든 해의 (소득 / 그해 1인당 GDP) 평균, 소득 없는 해는 0 -->
+	<select id="selectIncomeRatio" parameterType="map" resultType="map">
+		SELECT AVG(NVL(Y.INCOME, 0) / S.GDP_PER_CAPITA) AS INCOME_RATIO
+		FROM LIFE_YEAR_LOG Y
+		JOIN COUNTRY_STAT S
+		ON S.COUNTRY_CODE = Y.COUNTRY_CODE
+		AND S.DECADE = LEAST(TRUNC(Y.YEAR_NO / 10) * 10,
+		(SELECT MAX(DECADE) FROM COUNTRY_STAT WHERE COUNTRY_CODE = #{country}))
+		WHERE Y.LIFE_ID = #{lifeId}
+		AND Y.COUNTRY_CODE = #{country}
+		AND S.GDP_PER_CAPITA > 0
 	</select>
 
 	<!-- 판정 결과 저장 -->
 	<update id="updateAchieved" parameterType="map">
 		UPDATE LIFE_QUEST
-		   SET ACHIEVED = #{achieved}
-		 WHERE LIFE_ID = #{lifeId}
-		   AND QUEST_ID = #{questId}
+		SET ACHIEVED = #{achieved}
+		WHERE LIFE_ID = #{lifeId}
+		AND QUEST_ID = #{questId}
 	</update>
-	
+
 </mapper>

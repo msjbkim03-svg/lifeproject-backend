@@ -60,6 +60,13 @@ public class QuestJudgeDAO {
 		param.put("decade", decade);
 		return mybatis.selectOne("QuestJudge.selectStatForJudge", param);
 	}
+	
+	public Map<String, Object> selectIncomeRatio(int lifeId, String country) {
+	    Map<String, Object> p = new HashMap<>();
+	    p.put("lifeId", lifeId);
+	    p.put("country", country);
+	    return mybatis.selectOne("QuestJudge.selectIncomeRatio", p);
+	}
 
 	// 판정 결과 저장 (Y/N)
 	public void updateAchieved(int lifeId, int questId, String achieved) {

@@ -21,6 +21,7 @@ public class EngineChoice {
 	public static final String KID = "KID";
 	public static final String ADULT = "ADULT";
 	public static final String HUM = "HUM";
+	public static final String HIST = "HIST";     // 역사 현장 선택 (그해·그 나라에서만, rollEngineChoice 가 먼저 띄움)
 	public static final String SCHOOL = "SCHOOL"; // 무작위로 뽑지 않음 (schoolStep 이 붙었을 때만 띄움)
 
 	// 선택지 하나
@@ -76,6 +77,8 @@ public class EngineChoice {
 		public final String[] bodies;
 		public final Opt[] opts;
 		public String failText; // 진학 선택: 붙지 못했을 때 기록 한 줄
+		public double badDeath;  // 나쁜 결과일 때 다음 해 사망 확률 가산 (역사 현장 선택)
+		public String badCause;  // 그때 사망 원인
 
 		Dec(String key, String group, int minAge, int maxAge, int max, int gap, Predicate<LifeDTO> ok, String title,
 				String[] bodies, Opt... opts) {
@@ -238,16 +241,55 @@ public class EngineChoice {
 		m.failText = "집안 형편이 어려워 중학교에 가지 못했다.";
 		ALL.add(m);
 		Dec h = new Dec("SCHOOL_HIGH", SCHOOL, 0, 99, 1, 99, l -> true, "고등학교에 갈까?",
-				new String[] { "중학교를 마쳤어요. 고등학교에 갈 수 있지만, 이제 돈을 벌 수 있는 나이이기도 해요." },
+				new String[] { "중학교를 마쳤어요. 고등학교에 갈 수 있지만, 집에 보탬이 될 손도 필요해요." },
 				new Opt("고등학교에 간다", 1, 0, 0, 2, 0, "고등학교에 진학했다. 공부가 한결 어려워졌다.").act("ENROLL"),
-				new Opt("학교를 그만두고 일을 시작한다", -1, 0, 1, 0, 0, "고등학교 대신 일을 시작하기로 했다. 첫 월급날이 기다려졌다.").act("QUIT"));
+				new Opt("학교를 그만두고 집안일을 돕는다", -1, 0, 1, 0, 0, "고등학교 대신 집안일을 거들며 지내기로 했다. 친구들 소식이 가끔 부러웠다.").act("QUIT"));
 		h.failText = "집안 형편이 어려워 고등학교에 가지 못했다.";
 		ALL.add(h);
 		Dec u = new Dec("SCHOOL_UNI", SCHOOL, 0, 99, 1, 99, l -> true, "대학에 갈까?",
 				new String[] { "대학에 붙었어요. 몇 년 더 공부하면 더 좋은 일자리를 얻을 수 있지만, 그동안은 벌이가 없어요." },
 				new Opt("대학에 간다", 2, 0, 0, 2, 0, "대학에 진학했다. 강의실이 생각보다 넓었다.").act("ENROLL"),
 				new Opt("대학 대신 바로 일을 시작한다", 0, 0, 1, 0, 0, "대학 대신 바로 일을 시작하기로 했다.").act("QUIT"));
+		u.failText = "대학 입시에 또 떨어졌다. 공부는 여기까지 하기로 했다.";
 		ALL.add(u);
+	}
+
+	static {
+		// ---------- 역사 현장 (한국 민주화운동): 그해 그 나라에 사는 젊은이에게 한 번 ----------
+		//   year(l) 은 '새 나이' 기준이라 지난 한 해(lived)는 year(l) - 1
+		Dec a = new Dec("DEMO_1960", HIST, 15, 35, 1, 99, l -> "KOR".equals(l.getCurrentCountry()) && year(l) - 1 == 1960,
+				"4·19 혁명",
+				new String[] { "부정선거에 항의하는 학생들이 거리로 쏟아져 나왔어요. 학교 친구들도 교문을 나서고 있어요." },
+				new Opt("거리로 나가 함께 외친다", 3, 0, 3, 1, 0,
+						new String[] { "시위대와 함께 거리를 걸으며 목이 쉬도록 외쳤다. 그 봄, 정권이 무너졌다.",
+								"시위대 속에서 총성을 피해 달아나다 크게 다쳤다." },
+						0.15, new int[] { -2, -15, 2, 0 }, null, null),
+				new Opt("멀리서 지켜본다", 0, 0, 0, 0, 0, "창문 너머로 행진하는 사람들을 지켜보았다."));
+		a.badDeath = 0.03;
+		a.badCause = "시위 진압";
+		ALL.add(a);
+		Dec b = new Dec("DEMO_1980", HIST, 17, 35, 1, 99, l -> "KOR".equals(l.getCurrentCountry()) && year(l) - 1 == 1980,
+				"서울의 봄",
+				new String[] { "계엄 해제와 민주화를 외치는 시위가 이어져요. 남쪽 광주에서는 계엄군이 시민을 막았다는 소문이 들려요." },
+				new Opt("시위에 나간다", 2, 0, 3, 1, 0,
+						new String[] { "수많은 사람들과 함께 민주주의를 외쳤다. 그 봄은 짧았지만 잊히지 않았다.",
+								"계엄군의 진압에 붙잡혀 크게 다쳤다. 한동안 그날 일을 입 밖에 내지 못했다." },
+						0.2, new int[] { -6, -15, 1, 0 }, null, null),
+				new Opt("몸을 사린다", -1, 0, 0, 0, 0, "뉴스가 끊긴 라디오 앞에서 숨죽이며 지냈다."));
+		b.badDeath = 0.03;
+		b.badCause = "시위 진압";
+		ALL.add(b);
+		Dec c = new Dec("DEMO_1987", HIST, 16, 45, 1, 99, l -> "KOR".equals(l.getCurrentCountry()) && year(l) - 1 == 1987,
+				"6월 민주항쟁",
+				new String[] { "대학생의 죽음이 알려지면서 전국에서 직선제를 요구하는 시위가 일어나고 있어요. 넥타이를 맨 회사원들도 거리로 나와요." },
+				new Opt("거리로 나간다", 5, 0, 3, 1, 0,
+						new String[] { "최루탄 연기 속에서도 사람들과 함께 외쳤다. 그해 여름, 대통령 직선제가 약속됐다.",
+								"최루탄 연기 속에서 넘어져 크게 다쳤다." },
+						0.1, new int[] { 0, -8, 2, 0 }, null, null),
+				new Opt("마음으로만 응원한다", 0, 0, 0, 0, 0, "퇴근길 버스 안에서 거리를 메운 사람들을 바라보았다."));
+		c.badDeath = 0.005;
+		c.badCause = "시위 진압";
+		ALL.add(c);
 	}
 
 	public static int indexOf(String key) {

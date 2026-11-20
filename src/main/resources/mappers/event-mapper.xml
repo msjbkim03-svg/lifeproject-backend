@@ -13,10 +13,11 @@
 	     미래 연도는 그 나라의 가장 최근 연대 통계 사용 (예: 2030 → 2020) -->
 	<select id="selectCountryStat" parameterType="map" resultType="map">
 		SELECT TFR, UNEMPLOYMENT_RATE, NET_MIGRATION_RATE, LIFE_EXPECTANCY,
-		       INFANT_MORTALITY, U5_MORTALITY
-		  FROM COUNTRY_STAT
-		 WHERE COUNTRY_CODE = #{countryCode}
-		   AND DECADE = LEAST(#{decade}, (SELECT MAX(DECADE) FROM COUNTRY_STAT WHERE COUNTRY_CODE = #{countryCode}))
+		INFANT_MORTALITY, U5_MORTALITY
+		FROM COUNTRY_STAT
+		WHERE COUNTRY_CODE = #{countryCode}
+		AND DECADE = LEAST(#{decade}, (SELECT MAX(DECADE) FROM COUNTRY_STAT
+		WHERE COUNTRY_CODE = #{countryCode}))
 	</select>
 
 	<!-- 걸린 템플릿 안에서 나이·성별·가정형편이 맞는 이벤트 후보
@@ -38,8 +39,8 @@
 	<select id="selectExpIds" parameterType="int" resultType="String">
 		SELECT EXP_ID FROM LIFE_EXPERIENCE WHERE LIFE_ID = #{lifeId}
 	</select>
-	
-		<!-- 템플릿 문장 2~3개 -->
+
+	<!-- 템플릿 문장 2~3개 -->
 	<select id="selectTexts" parameterType="String" resultType="String">
 		SELECT SENTENCE FROM EVENT_TEXT WHERE TEMPLATE_ID = #{templateId}
 	</select>
@@ -48,53 +49,67 @@
 	<select id="selectCountryName" parameterType="String" resultType="String">
 		SELECT NAME_KO FROM COUNTRY WHERE COUNTRY_CODE = #{countryCode}
 	</select>
-	
+
 	<!-- 선택 이벤트의 선택지 목록 (순서대로) -->
-	<select id="selectChoices" parameterType="String" resultType="com.example.demo.event.dto.EventChoiceDTO">
+	<select id="selectChoices" parameterType="String"
+		resultType="com.example.demo.event.dto.EventChoiceDTO">
 		SELECT * FROM EVENT_CHOICE
-		 WHERE EVENT_ID = #{eventId}
-		 ORDER BY CHOICE_ORDER
+		WHERE EVENT_ID = #{eventId}
+		ORDER BY CHOICE_ORDER
 	</select>
-	
+
 	<!-- 선택지 하나 -->
-	<select id="selectChoice" parameterType="int" resultType="com.example.demo.event.dto.EventChoiceDTO">
+	<select id="selectChoice" parameterType="int"
+		resultType="com.example.demo.event.dto.EventChoiceDTO">
 		SELECT * FROM EVENT_CHOICE WHERE CHOICE_ID = #{choiceId}
 	</select>
 
 	<!-- 역사 이벤트 후보: 내 나라, 올해가 사건 기간 안, 나이·성별 조건 -->
-	<select id="selectHistCandidates" parameterType="map" resultType="com.example.demo.event.dto.GameEventDTO">
+	<select id="selectHistCandidates" parameterType="map"
+		resultType="com.example.demo.event.dto.GameEventDTO">
 		SELECT G.*
-		  FROM GAME_EVENT G
-		  JOIN HISTORY_EVENT H ON G.HIST_EVENT_ID = H.EVENT_ID
-		 WHERE G.EVENT_TYPE = 'HIST'
-		   AND H.COUNTRY_CODE = #{countryCode}
-		   AND #{year} BETWEEN H.START_YEAR AND H.END_YEAR
-		   AND #{age} BETWEEN NVL(G.MIN_AGE, 0) AND NVL(G.MAX_AGE, 110)
-		   AND NVL(G.GENDER, #{gender}) = #{gender}
+		FROM GAME_EVENT G
+		JOIN HISTORY_EVENT H ON G.HIST_EVENT_ID = H.EVENT_ID
+		WHERE G.EVENT_TYPE = 'HIST'
+		AND H.COUNTRY_CODE = #{countryCode}
+		AND #{year} BETWEEN H.START_YEAR AND H.END_YEAR
+		AND #{age} BETWEEN NVL(G.MIN_AGE, 0) AND NVL(G.MAX_AGE, 110)
+		AND NVL(G.GENDER, #{gender}) = #{gender}
 	</select>
-	
+
 	<!-- 역사 사건 유형 5종 효과 -->
-	<select id="selectHistTypes" resultType="com.example.demo.event.dto.HistEventTypeDTO">
+	<select id="selectHistTypes"
+		resultType="com.example.demo.event.dto.HistEventTypeDTO">
 		SELECT * FROM HIST_EVENT_TYPE
 	</select>
-	
+
 	<!-- 이민 목적지 후보: 활성 나라 (현재 나라 제외), 그 시대 1인당 GDP 높은 순 -->
-	<select id="selectMigrateCandidates" parameterType="map" resultType="com.example.demo.event.dto.DestinationDTO">
+	<select id="selectMigrateCandidates" parameterType="map"
+		resultType="com.example.demo.event.dto.DestinationDTO">
 		SELECT C.COUNTRY_CODE, C.NAME_KO, S.GDP_PER_CAPITA
-		  FROM COUNTRY C
-		  JOIN COUNTRY_STAT S ON C.COUNTRY_CODE = S.COUNTRY_CODE
-		 WHERE C.IS_ACTIVE = 'Y'
-		   AND C.COUNTRY_CODE != #{countryCode}
-		   AND S.DECADE = LEAST(#{decade}, (SELECT MAX(DECADE) FROM COUNTRY_STAT))
-		 ORDER BY NVL(S.GDP_PER_CAPITA, 0) DESC
+		FROM COUNTRY C
+		JOIN COUNTRY_STAT S ON C.COUNTRY_CODE = S.COUNTRY_CODE
+		WHERE C.IS_ACTIVE = 'Y'
+		AND C.COUNTRY_CODE != #{countryCode}
+		AND S.DECADE = LEAST(#{decade}, (SELECT MAX(DECADE) FROM COUNTRY_STAT))
+		ORDER BY NVL(S.GDP_PER_CAPITA, 0) DESC
 	</select>
-	
+
 	<!-- 인생의 특성 효과 (C13): 시작할 때 고정한 레벨(LIFE_TRAIT) → 레벨별 효과 값 -->
 	<select id="selectLifeTraitEffects" parameterType="int" resultType="map">
 		SELECT T.TRAIT_ID, E.EFFECT_VALUE
-		  FROM LIFE_TRAIT T
-		  JOIN TRAIT_LEVEL_EFFECT E ON T.TRAIT_ID = E.TRAIT_ID AND T.TRAIT_LEVEL = E.LEVEL_NO
-		 WHERE T.LIFE_ID = #{lifeId}
+		FROM LIFE_TRAIT T
+		JOIN TRAIT_LEVEL_EFFECT E ON T.TRAIT_ID = E.TRAIT_ID AND T.TRAIT_LEVEL =
+		E.LEVEL_NO
+		WHERE T.LIFE_ID = #{lifeId}
 	</select>
-	
+
+	<!-- 이 경험을 마지막으로 겪은 나이 (없으면 null) -->
+	<select id="selectLastExpAge" parameterType="map" resultType="Integer">
+		SELECT MAX(AGE)
+		FROM LIFE_EXPERIENCE
+		WHERE LIFE_ID = #{lifeId}
+		AND EXP_ID LIKE #{expId}
+	</select>
+
 </mapper>
