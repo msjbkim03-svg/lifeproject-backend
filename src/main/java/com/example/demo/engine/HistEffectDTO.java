@@ -7,6 +7,15 @@ public class HistEffectDTO {
 	private Double eduStopAdd;	// 강도 1 기준 학업 중단 확률
 	private Double migrateAdd;	// 강도 1 기준 이민(피란) 확률
 	private String typeName;	// 유형 이름 (전쟁, 경제 위기 등)
+	private String typeCode;	// 유형 코드 WAR, ECON, DISASTER, POLITICS, REFUGE
+
+	public String getTypeCode() {
+		return typeCode;
+	}
+
+	public void setTypeCode(String typeCode) {
+		this.typeCode = typeCode;
+	}
 
 	public Integer getIntensity() {
 		return intensity;

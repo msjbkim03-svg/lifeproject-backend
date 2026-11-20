@@ -88,7 +88,7 @@ final class EngineStory {
 	}
 	private static boolean level(LifeDTO l, String lv) { return enrolled(l) && lv.equals(l.getEduLevel()); }
 	// 학교 밖 아이: 막 졸업한 해(초등 졸업 무렵)는 빼기 - "졸업했다"와 "또래를 부러워했다"가 같은 해에 나오지 않게
-	private static boolean outOfSchool(LifeDTO l) { return !enrolled(l) && !("GRADUATED".equals(l.getSchoolStatus()) && l.getCurrentAge() <= 13); }
+	private static boolean outOfSchool(LifeDTO l) { return !enrolled(l) && !("GRADUATED".equals(l.getSchoolStatus()) && l.getCurrentAge() <= 14); }
 
 	private static final Predicate<LifeDTO> ANY = l -> true;
 
@@ -138,7 +138,7 @@ final class EngineStory {
 			new Line("sch_fight", 6, 16, 2, ANY, "친구와 크게 다퉜다가 며칠 만에 화해했다."),
 			new Line("sch_lonely", 6, 16, 2, l -> l.getRelation() < 40, "반 아이들 사이에 끼지 못해 쉬는 시간이 길게 느껴졌다."),
 			new Line("sch_teacher", 7, 17, 2, l -> enrolled(l), "좋은 선생님을 만나 공부에 재미를 붙였다."),
-			new Line("sch_chores", 6, 14, 2, l -> focus(l, "HOUSE") || poor(l), "학교가 끝나면 집으로 달려가 집안일을 거들었다."),
+			new Line("sch_chores", 6, 14, 2, l -> enrolled(l) && (focus(l, "HOUSE") || poor(l)), "학교가 끝나면 집으로 달려가 집안일을 거들었다."),
 			new Line("sch_sport", 6, 18, 3, l -> focus(l, "SPORT"), "운동장에서 공을 차며 하루를 보냈다. 운동회에서 반 대표로 뛰었다."),
 			new Line("sch_hobby", 6, 18, 3, l -> focus(l, "HOBBY"), "좋아하는 일에 푹 빠져 시간 가는 줄 몰랐다."),
 			new Line("sch_study", 6, 18, 3, l -> focus(l, "STUDY") && enrolled(l), "책상 앞에 앉아 있는 시간이 부쩍 늘었다."),
@@ -154,8 +154,8 @@ final class EngineStory {
 			new Line("sch_bully", 8, 15, 1, l -> enrolled(l) && l.getRelation() < 45, "괴롭히는 아이들 때문에 학교 가는 길이 무거웠다."),
 			new Line("sch_cram", 10, 18, 2, l -> enrolled(l) && rich(l) && !rural(l), "학교가 끝나면 학원으로 향했다. 집에 오면 밤이었다."),
 			new Line("sch_award", 8, 17, 1, l -> enrolled(l) && l.getKnowledge() >= 75, "글짓기 대회에서 상을 받아 집에 상장을 들고 갔다."),
-			new Line("sch_vacation", 7, 15, 2, l -> rural(l), "방학이면 냇가에서 물고기를 잡으며 하루를 보냈다."),
-			new Line("sch_cousins", 7, 15, 2, ANY, "방학에 사촌들이 놀러 와 며칠 내내 붙어 지냈다."),
+			new Line("sch_vacation", 7, 15, 2, l -> rural(l) && enrolled(l), "방학이면 냇가에서 물고기를 잡으며 하루를 보냈다."),
+			new Line("sch_cousins", 7, 15, 2, l -> enrolled(l), "방학에 사촌들이 놀러 와 며칠 내내 붙어 지냈다."),
 			new Line("noschool_work", 6, 14, 3, l -> outOfSchool(l) && rural(l), "학교 대신 밭에 나가 어른들 일을 거들었다."),
 			new Line("noschool_care", 6, 14, 3, l -> outOfSchool(l), "어린 동생들을 돌보며 하루를 보냈다."),
 			new Line("noschool_envy", 7, 14, 2, l -> outOfSchool(l), "책가방을 메고 가는 또래들을 오래 바라보았다."),
@@ -171,14 +171,14 @@ final class EngineStory {
 			new Line("teen_exam", 15, 19, 3, l -> level(l, "HIGH"), "시험을 앞두고 밤늦게까지 문제집을 풀었다."),
 			new Line("teen_entrance", 17, 19, 3, l -> level(l, "HIGH") && l.getKnowledge() >= 45, "입시를 앞두고 1년 내내 책상 앞을 떠나지 않았다."),
 			new Line("teen_future", 15, 19, 2, l -> enrolled(l), "앞으로 무엇을 하며 살지 처음으로 진지하게 고민했다."),
-			new Line("teen_job", 14, 19, 2, l -> poor(l), "방학 동안 일을 해서 처음으로 돈을 벌었다."),
+			new Line("teen_job", 14, 19, 2, l -> poor(l) && enrolled(l), "방학 동안 일을 해서 처음으로 돈을 벌었다."),
 			new Line("teen_music", 13, 19, 2, ANY, "좋아하는 노래를 하루에도 몇 번씩 되풀이해 들었다."),
 			new Line("teen_band", 14, 19, 1, l -> focus(l, "HOBBY"), "친구들과 밴드를 만들어 창고에서 연습했다."),
 			new Line("teen_star", 13, 18, 2, ANY, "좋아하는 가수의 사진을 책상 앞에 붙여 두었다."),
 			new Line("teen_secret", 13, 18, 2, l -> l.getRelation() >= 50, "친구들과 밤새 비밀 이야기를 나눴다."),
 			new Line("teen_mirror", 13, 17, 2, ANY, "거울 앞에 서 있는 시간이 부쩍 길어졌다."),
-			new Line("teen_sports", 13, 19, 2, l -> focus(l, "SPORT"), "학교 대표로 경기에 나가 땀을 흘렸다."),
-			new Line("teen_chores", 12, 18, 2, l -> rural(l) && !enrolled(l), "어른 몫의 일을 맡게 되었다. 손이 거칠어졌다."),
+			new Line("teen_sports", 13, 19, 2, l -> focus(l, "SPORT") && enrolled(l), "학교 대표로 경기에 나가 땀을 흘렸다."),
+			new Line("teen_chores", 12, 18, 2, l -> rural(l) && outOfSchool(l), "어른 몫의 일을 맡게 되었다. 손이 거칠어졌다."),
 
 			// ── 시대 물건 (그 물건이 흔해진 해부터) ──
 			new Line("era_radio", 5, 60, 2, l -> l.getWealthClass() >= 3, "집에 라디오가 생겼다. 저녁마다 식구들이 모여 들었다.", 0, 1950),
