@@ -108,4 +108,9 @@ public class EventDAO {
 		return mybatis.selectList("Event.selectRecentExpIds", p);
 	}
 
+	// C11: 역사 사건 설명 (없으면 null)
+	public String selectHistDescription(String eventId) {
+		return mybatis.selectOne("Event.selectHistDescription", eventId);
+	}
+	
 }

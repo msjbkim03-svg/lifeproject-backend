@@ -119,4 +119,13 @@
 		AND AGE >= #{fromAge}
 	</select>
 
+	<!-- C11: 역사 이벤트의 사건 설명 (C16 자료, Gemini 근거) -->
+	<select id="selectHistDescription" parameterType="String"
+		resultType="String">
+		SELECT H.DESCRIPTION
+		FROM GAME_EVENT G
+		JOIN HISTORY_EVENT H ON G.HIST_EVENT_ID = H.EVENT_ID
+		WHERE G.EVENT_ID = #{eventId}
+	</select>
+
 </mapper>
