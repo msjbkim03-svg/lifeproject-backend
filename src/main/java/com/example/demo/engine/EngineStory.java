@@ -188,7 +188,7 @@ final class EngineStory {
 			new Line("era_net", 10, 70, 2, ANY, "처음으로 인터넷에 접속했다. 세상이 넓어졌다.", 0, 2002),
 			// 휴대전화는 스마트폰이 흔해지기 전(2013년 전)까지만, 돈 쓰기로 이미 산 사람은 빼고
 			new Line("era_mobile", 13, 75, 2, l -> l.getBirthYear() + l.getCurrentAge() < 2013 && !owns(l, "CELL") && !owns(l, "PHONE"), "처음으로 휴대전화가 생겼다.", 0, 2005),
-			new Line("era_smart", 10, 80, 3, l -> !owns(l, "PHONE"), "첫 스마트폰이 생겼다. 손에서 놓을 줄을 몰랐다.", 0, 2013),
+			// 첫 스마트폰은 이야기 한 줄이 아니라 EngineService.phoneYear 에서 흔해진 해에 바로 장만 (원작식)
 			new Line("era_video", 20, 90, 2, ANY, "멀리 사는 가족과 영상 통화로 얼굴을 보며 이야기했다.", 0, 2016),
 
 			// ── 대학생 ──

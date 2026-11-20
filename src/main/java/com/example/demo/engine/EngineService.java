@@ -1388,6 +1388,8 @@ public class EngineService {
 
 		// ⑤-2 돈 쓰기·투자 (C06-3): 모은 돈 굴리기 + 가진 물건 유지비
 		investStep(life, stat);
+		// ⑤-3 스마트폰이 흔해진 해부터 장만 (원작 phoneYear)
+		phoneYear(life, stat);
 		fixStats(life);
 
 		// ⑥ 사망 판정 (C07): 올해(현재 나이)를 못 넘기면 사망
@@ -2177,14 +2179,14 @@ public class EngineService {
 		if ("EMPLOYED".equals(life.getJobStatus())) {
 			return "WORKER"; // 직장인
 		}
-		if (age < 15) {
-			return "YOUTH"; // 학교 안 다니는 아이 (6~14세)
+		if (age < 18) {
+			return "YOUTH"; // 학교·일 없는 청소년 (6~17세, 명세서 C04-1)
 		}
-		return "JOBLESS"; // 일이 없는 15세 이상
+		return "JOBLESS"; // 학교·일 없는 18세 이상 (무직 성인)
 	}
 
 	// 나이대별로 고를 수 있는 집중 목록 (원작 기준 + 나이에 맞게 조금씩 바뀜)
-	//   학생: 14세까지 집안 돕기, 15세부터는 대신 진로 준비(취업 준비)
+	//   학생: 공부·친구·집안 돕기·운동·취미 + 15세부터 진로 준비(취업 준비)
 	//   대학생·직장인·무직: 18~39세 미혼이면 연애·만남 (LOVE)
 	//   무직 40세 미만: 취업 준비, 노년: 종교·봉사 (원작 faith)
 	private List<String> focusOptions(String stage, LifeDTO life) {
@@ -2193,11 +2195,7 @@ public class EngineService {
 		boolean single = !"Y".equals(life.getMarriedYn());
 		boolean loveAge = age >= 18 && age < 40 && single;
 		if (stage.equals("STUDENT")) {
-			list.add("STUDY"); list.add("PLAY");
-			if (age < 15) {
-				list.add("HOUSE");
-			}
-			list.add("SPORT"); list.add("HOBBY");
+			list.add("STUDY"); list.add("PLAY"); list.add("HOUSE"); list.add("SPORT"); list.add("HOBBY");
 			if (age >= 15) {
 				list.add("JOB_PREP");
 			}
@@ -2225,21 +2223,27 @@ public class EngineService {
 			if ("EMPLOYED".equals(life.getJobStatus())) {
 				list.add("WORK");
 			}
-			list.add("FAMILY"); list.add("HEALTH"); list.add("BRAIN"); list.add("HOBBY"); list.add("FAITH");
-			if (!"EMPLOYED".equals(life.getJobStatus())) {
-				list.add("REST");
-			}
+			list.add("FAMILY"); list.add("HEALTH"); list.add("BRAIN"); list.add("HOBBY"); list.add("REST"); list.add("FAITH");
 		}
 		return list;
 	}
 
-	// 고르지 않았을 때 기본값 (원작 기준): 목록에 '균형'이 있으면 균형, 없으면 목록 첫 번째
+	// 고르지 않았을 때 기본값 (명세서 C04-5): 학생·대학생 공부, 비학생 청소년 집안 돕기, 직장인 균형,
+	//   무직 성인 자기계발, 노년 건강 관리 (목록에 없으면 목록 첫 번째)
 	private String defaultFocus(LifeDTO life) {
-		List<String> list = focusOptions(life.getStageCode(), life);
-		if (list.contains("BALANCE")) {
-			return "BALANCE";
+		String stage = life.getStageCode();
+		List<String> list = focusOptions(stage, life);
+		String want = "BALANCE";
+		if ("STUDENT".equals(stage) || "UNIV".equals(stage)) {
+			want = "STUDY";
+		} else if ("YOUTH".equals(stage)) {
+			want = "HOUSE";
+		} else if ("JOBLESS".equals(stage)) {
+			want = "SELF_DEV";
+		} else if ("SENIOR".equals(stage)) {
+			want = "HEALTH";
 		}
-		return list.get(0);
+		return list.contains(want) ? want : list.get(0);
 	}
 
 	// 집중별 1년 능력치 효과 (원작 FOCUS 수치: 건강, 행복, 관계)
@@ -2556,11 +2560,17 @@ public class EngineService {
 	}
 
 	// 1년 중퇴 확률 (원작 lsKeep·usKeep)
-	// 중학교·고등학교만 중퇴 있음 (초등·대학·대학원은 원작에도 일반 중퇴 없음)
+	// 중학교·고등학교는 원작식, 대학은 명세서 C06-3 지식 배율 (초등·대학원은 중퇴 없음)
 	//   끝까지 다닐 확률 = 그 단계 진학 확률을 노력 배율만큼 키운 값 (최소 중학교 10%·고등학교 8%)
 	//   노력 배율 = 1.15 × (13세 이하 1.7, 그 위 2.05) × e^(0.85×지식 z - 0.36)
 	//   1년 중퇴 확률 = 1 - 끝까지 다닐 확률^(1/2) (3년 과정이라 2번 판정)
 	private double dropRate(LifeDTO life, int idx) {
+		if (idx == 3) {
+			// 대학 중퇴 (명세서 C06-3, 원작에는 없음): 1년 2.5% × 형편(1~2분위 ×1.5) × 지식 배율 → 4년 동안 평균 약 10%
+			double k = life.getKnowledge();
+			double kMul = k >= 85 ? 0.45 : k >= 70 ? 0.78 : k >= 50 ? 1.12 : 1.68;
+			return 0.025 * (life.getWealthClass() <= 2 ? 1.5 : 1) * kMul;
+		}
 		if (idx != 1 && idx != 2) {
 			return 0;
 		}
@@ -2734,6 +2744,65 @@ public class EngineService {
 		List<EventResultDTO> list = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
 		list.add(noteEvent(text));
 		life.setEvents(list);
+	}
+
+	// 첫 스마트폰 (원작 phoneYear): 그 나라에 스마트폰이 흔해진 해부터 그해 바로 장만
+	//   (예전엔 이야기 한 줄로 가끔 뽑혀서 2020년 37세에야 생기기도 함 → 11/20 동현님 요청으로 원작식)
+	//   흔해진 해: 구매력 1인당 GDP 3만 달러 이상 2009년, 1.5만 이상 2013년, 8천 이상 2016년, 4천 이상 2019년, 그 아래 2022년
+	//     (원작: 스마트폰 시대(고소득 2008년·그 외 2012년) + 인터넷 사용률 80% 이상, 우리 DB엔 사용률이 없어 소득으로 대신)
+	//   10~12세 35%, 13~17세는 부모가 사 줌 (학교 안 다니는 가난한 집 아이는 15세부터 직접 벌어서)
+	//   어른은 값(구매력 200달러)을 냄, 모자라면 중고(40%), 벌이가 없거나 빚이 무거운데 모자라면 미룸
+	//   북한은 도시·넉넉한 어른만 해마다 3% (원작 nkPhone)
+	private void phoneYear(LifeDTO life, CountryStatDTO stat) {
+		java.util.LinkedHashSet<String> owns = ownSet(life);
+		if (owns.contains("PHONE") || !"PLAYING".equals(life.getStatus())) {
+			return;
+		}
+		int age = life.getCurrentAge();
+		int year = life.getBirthYear() + age;
+		if (age < 10) {
+			return;
+		}
+		if ("PRK".equals(life.getCurrentCountry())) {
+			if (year < 2012 || age < 18 || !("Y".equals(life.getIsUrban()) || life.getWealthClass() >= 4) || random.nextDouble() >= 0.03) {
+				return;
+			}
+		} else {
+			double ppp = toPpp(gdpOf(stat));
+			int common = ppp >= 30000 ? 2009 : ppp >= 15000 ? 2013 : ppp >= 8000 ? 2016 : ppp >= 4000 ? 2019 : 2022;
+			if (year < common) {
+				return;
+			}
+		}
+		boolean poorOut = age < 18 && !"ENROLLED".equals(life.getSchoolStatus()) && life.getWealthClass() <= 2;
+		String text = "첫 스마트폰이 생겼다. 손에서 놓을 줄을 몰랐다.";
+		if (age < 18 && !poorOut) {
+			if (age < 13 && random.nextDouble() >= 0.35) {
+				return; // 10~12세는 집마다 다름
+			}
+		} else {
+			if (poorOut && (age < 15 || life.getIncome() <= 0)) {
+				return;
+			}
+			long price = Math.round(200 * priceK(stat));
+			boolean tight = life.getAssets() < price * 1.1;
+			if (tight && (life.getIncome() <= 0 || debtHeavy(life, stat))) {
+				return; // 형편이 풀릴 때까지 미룸
+			}
+			if (tight) {
+				price = Math.round(price * 0.4);
+				text = "형편에 맞춰 중고 스마트폰을 하나 장만했다.";
+			}
+			life.setAssets(life.getAssets() - price);
+			book(life, "스마트폰 구입", -price);
+			text = text + " (−" + won(life, price) + ")";
+		}
+		owns.remove("CELL");
+		owns.add("PHONE");
+		life.setOwns(String.join(",", owns));
+		life.setHappiness(life.getHappiness() + 2);
+		saveEventLog(life, age, null, null, text);
+		addYearNote(life, text);
 	}
 
 	// 직업을 제안받을 수 있는 상태인지: 성인(JOB_MIN_AGE) 이상, 학교 안 다니고, 일자리 없고, 은퇴 나이 전
@@ -2914,6 +2983,11 @@ public class EngineService {
 				if ("SELF_DEV".equals(focus)) {
 					change -= income * 0.02;
 					book(life, "자기계발 비용", -income * 0.02);
+				}
+				// 건강 관리: 운동·검진에 소득의 2% (명세서 C04-4)
+				if ("HEALTH".equals(focus)) {
+					change -= income * 0.02;
+					book(life, "건강 관리 비용", -income * 0.02);
 				}
 				// 최소 생활비보다 적게 벌면 모자란 돈의 절반이 빠짐
 				if (income < minLive) {
@@ -3855,7 +3929,10 @@ public class EngineService {
 			int nx = s.schoolNext;
 			s.schoolNext = null;
 			int di = EngineChoice.indexOf("SCHOOL_" + levels[nx]);
-			if (s.pend == null && !life.isNeedChoice() && !life.isNeedDestination() && life.getPendingEventId() == null) {
+			boolean free = s.pend == null && !life.isNeedChoice() && !life.isNeedDestination() && life.getPendingEventId() == null;
+			// 그해에만 뜨는 역사 현장(4·19 등)이 겹치면 역사 현장을 띄우고 진학은 바로 (1944년생 1960년 고교 진학과 겹쳐 4·19가 안 뜨던 것)
+			int hist = free ? pickEngine(life, s, lived, EngineChoice.HIST) : -1;
+			if (free && hist < 0) {
 				openEngineChoice(life, s, di, lived);
 				if (s.pend != null) {
 					return;
@@ -3869,18 +3946,26 @@ public class EngineService {
 			String t = d.opts[0].results[0];
 			saveEventLog(life, lived, null, null, t);
 			addYearNote(life, t);
+			if (hist >= 0) {
+				openEngineChoice(life, s, hist, lived);
+			}
 			return;
 		}
-		if (!"PLAYING".equals(life.getStatus()) || life.isNeedChoice() || life.isNeedJob() || life.isNeedDestination()
+		if (!"PLAYING".equals(life.getStatus()) || life.isNeedChoice() || life.isNeedDestination()
 				|| life.getPendingEventId() != null) {
 			return;
 		}
 		if (s.pend != null) {
 			return;
 		}
-		int pick = pickEngine(life, s, lived, EngineChoice.HIST); // 4·19 · 서울의 봄 · 6월 항쟁 (그해·한국에서만)
+		// 4·19 · 서울의 봄 · 6월 항쟁 (그해·한국에서만): 일자리 제안 창이 있어도 먼저 띄움
+		//   (화면은 선택 창 → 일자리 창 순서로 보여 줌, 18세 첫 제안과 1960년이 겹쳐 4·19가 안 뜨던 것)
+		int pick = pickEngine(life, s, lived, EngineChoice.HIST);
 		if (pick >= 0) {
 			openEngineChoice(life, s, pick, lived);
+			return;
+		}
+		if (life.isNeedJob()) {
 			return;
 		}
 		if (lived == 2) {
