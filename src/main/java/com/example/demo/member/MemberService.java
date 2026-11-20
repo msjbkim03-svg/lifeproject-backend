@@ -3,7 +3,6 @@ package com.example.demo.member;
 import java.security.SecureRandom;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -27,19 +26,11 @@ public class MemberService {
 	private String mailFrom;           // 보내는 사람 = Gmail 주소 (spring.mail.username)
 	private BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
-	// 카카오 로그인 설정 (application.properties)
-	@Value("${kakao.client.id}")
-	private String kakaoClientId;       // REST API 키
-	@Value("${kakao.redirect.uri}")
-	private String kakaoRedirectUri;    // 카카오가 code 를 붙여 돌려보낼 프론트 주소
-	@Value("${kakao.client.secret:}")
-	private String kakaoClientSecret;   // 카카오 콘솔에서 Client Secret 을 켰을 때만 (없으면 빈 값)
-
 	// 회원가입 로봇 확인 (reCAPTCHA) 비밀 키 - application-secret.properties 의 recaptcha.secret
 	@Value("${recaptcha.secret:}")
 	private String recaptchaSecret;
 
-	private RestClient restClient = RestClient.create(); // 카카오 서버에 요청 보내는 도구
+	private RestClient restClient = RestClient.create(); // 구글(reCAPTCHA)에 요청 보내는 도구
 
 	public MemberService(MemberDAO dao, JavaMailSender mailSender,
 			@Value("${spring.mail.username}") String mailFrom) {
@@ -172,114 +163,6 @@ public class MemberService {
 
 		// 3. 비회원 인생에 회원 번호 채우기
 		return dao.convertGuestLife(memberId, guestToken) > 0;
-	}
-
-	// ===== 카카오 로그인 (M02 소셜) =====
-	// 흐름: 프론트가 받은 code → ① 카카오에 토큰 요청 → ② 토큰으로 사용자 정보 요청
-	//       → ③ 카카오 번호로 회원 찾기 (없으면 자동 가입) → 회원 정보 돌려주기
-	// 실패하거나 탈퇴한 회원이면 null
-	// DB 는 안 바꿈: LOGIN_ID = "kakao_카카오번호" 로 카카오 회원을 구분
-	@Transactional // 자동 가입할 때 회원 INSERT 와 특성 INSERT 를 하나로 묶음
-	public MemberDTO kakaoLogin(String code) {
-		if (code == null || code.isBlank()) return null;
-
-		// ① code → 카카오 액세스 토큰
-		String accessToken = requestKakaoToken(code);
-		if (accessToken == null) return null;
-
-		// ② 토큰 → 카카오 사용자 정보 { id, kakao_account: { email, profile: { nickname } } }
-		Map<String, Object> info = requestKakaoUser(accessToken);
-		if (info == null || info.get("id") == null) return null;
-
-		// ③ 카카오 번호로 회원 찾기
-		String loginId = "kakao_" + info.get("id");
-		MemberDTO member = dao.selectByLoginId(loginId);
-
-		if (member != null) {
-			// 이미 가입한 카카오 회원 → 탈퇴했으면 로그인 불가 (일반 로그인과 같은 규칙)
-			return "WITHDRAWN".equals(member.getStatus()) ? null : member;
-		}
-
-		// ④ 처음 온 카카오 회원 → 자동 가입
-		MemberDTO dto = new MemberDTO();
-		dto.setLoginId(loginId);
-		dto.setPassword(encoder.encode(UUID.randomUUID().toString())); // 아무도 모르는 비밀번호 (아이디·비번 로그인은 못 함)
-		dto.setNickname(makeKakaoNickname(info));
-		dto.setEmail(makeKakaoEmail(info, loginId));
-		dto.setPhone(null);              // 카카오는 전화번호를 받지 않음
-		dto.setPrivacyAgreed("Y");        // 카카오 동의 화면에서 동의함
-		dao.insertMember(dto);            // memberId 가 채워짐 (selectKey)
-		dao.insertDefaultTraits(dto.getMemberId()); // 특성 4종 Lv.1
-
-		return dao.selectByLoginId(loginId); // 권한(USER) 등 DB 기본값까지 담아서
-	}
-
-	// 카카오 ① 토큰 받기  POST https://kauth.kakao.com/oauth/token (form 형식)
-	private String requestKakaoToken(String code) {
-		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
-		form.add("grant_type", "authorization_code");
-		form.add("client_id", kakaoClientId);
-		form.add("redirect_uri", kakaoRedirectUri);
-		form.add("code", code);
-		if (!kakaoClientSecret.isBlank()) form.add("client_secret", kakaoClientSecret);
-
-		try {
-			Map<?, ?> res = restClient.post()
-					.uri("https://kauth.kakao.com/oauth/token")
-					.contentType(MediaType.APPLICATION_FORM_URLENCODED)
-					.body(form)
-					.retrieve()
-					.body(Map.class);
-			return res == null ? null : (String) res.get("access_token");
-		} catch (Exception e) {
-			// code 를 두 번 썼거나 키·주소가 틀린 경우 → null (컨트롤러가 401)
-			return null;
-		}
-	}
-
-	// 카카오 ② 사용자 정보  GET https://kapi.kakao.com/v2/user/me (Authorization: Bearer 토큰)
-	@SuppressWarnings("unchecked")
-	private Map<String, Object> requestKakaoUser(String accessToken) {
-		try {
-			return restClient.get()
-					.uri("https://kapi.kakao.com/v2/user/me")
-					.header("Authorization", "Bearer " + accessToken)
-					.retrieve()
-					.body(Map.class);
-		} catch (Exception e) {
-			// 카카오 토큰이 잘못됐거나 카카오 서버 오류 → null (컨트롤러가 401)
-			return null;
-		}
-	}
-
-	// 닉네임: 카카오 닉네임 (2~10자 규칙에 맞추기), 겹치면 뒤에 숫자 붙이기
-	@SuppressWarnings("unchecked")
-	private String makeKakaoNickname(Map<String, Object> info) {
-		String name = "카카오회원";
-		Map<String, Object> account = (Map<String, Object>) info.get("kakao_account");
-		if (account != null && account.get("profile") != null) {
-			Object nick = ((Map<String, Object>) account.get("profile")).get("nickname");
-			if (nick != null && !nick.toString().isBlank()) name = nick.toString().trim();
-		}
-		if (name.length() < 2) name = name + "님";
-		if (name.length() > 6) name = name.substring(0, 6); // 숫자 4자리 붙일 자리 남기기
-
-		String nickname = name;
-		while (dao.countByNickname(nickname) > 0) { // 이미 있으면 다시 뽑기
-			nickname = name + (1000 + new SecureRandom().nextInt(9000));
-		}
-		return nickname;
-	}
-
-	// 이메일: 카카오 이메일 (동의했고 안 겹치면), 아니면 임시 주소 kakao_번호@kakao.local
-	@SuppressWarnings("unchecked")
-	private String makeKakaoEmail(Map<String, Object> info, String loginId) {
-		Map<String, Object> account = (Map<String, Object>) info.get("kakao_account");
-		if (account != null && account.get("email") != null) {
-			String email = account.get("email").toString();
-			if (dao.countByEmail(email) == 0) return email;
-		}
-		return loginId + "@kakao.local";
 	}
 
 	// ===== 마이페이지 (M04) =====
