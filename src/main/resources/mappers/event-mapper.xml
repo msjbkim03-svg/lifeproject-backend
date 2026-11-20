@@ -112,4 +112,11 @@
 		AND EXP_ID LIKE #{expId}
 	</select>
 
+	<!-- 최근 몇 년 사이의 경험 ID (선택 이벤트 반복 방지) -->
+	<select id="selectRecentExpIds" parameterType="map" resultType="String">
+		SELECT EXP_ID FROM LIFE_EXPERIENCE
+		WHERE LIFE_ID = #{lifeId}
+		AND AGE >= #{fromAge}
+	</select>
+
 </mapper>
