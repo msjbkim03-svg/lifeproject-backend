@@ -16,6 +16,7 @@ import com.example.demo.event.EventDAO;
 import com.example.demo.event.EventService;
 import com.example.demo.event.dto.EventChoiceDTO;
 import com.example.demo.event.dto.EventResultDTO;
+import com.example.demo.quest.QuestJudgeService;
 
 @Service
 public class EngineService {
@@ -23,12 +24,15 @@ public class EngineService {
 	private final EngineDao engineDao;
 	private final EventService eventService; // C09·C10 이벤트 (장윤아님)
 	private final EventDAO eventDao; // 선택지 다시 불러오기용 (장윤아님, 읽기만)
+	private final QuestJudgeService questJudgeService; // 사망 후 퀘스트 판정·포인트 지급 (quest 패키지, 호출만)
 
-	// 생성자 주입: 스프링이 객체를 만들 때 EngineDao, EventService, EventDAO를 넣어줌
-	public EngineService(EngineDao engineDao, EventService eventService, EventDAO eventDao) {
+	// 생성자 주입: 스프링이 객체를 만들 때 EngineDao, EventService, EventDAO, QuestJudgeService를 넣어줌
+	public EngineService(EngineDao engineDao, EventService eventService, EventDAO eventDao,
+			QuestJudgeService questJudgeService) {
 		this.engineDao = engineDao;
 		this.eventService = eventService;
 		this.eventDao = eventDao;
+		this.questJudgeService = questJudgeService;
 	}
 
 	private Random random = new Random();
@@ -764,6 +768,9 @@ public class EngineService {
 			if ("JPN".equals(cc) && mom != null) {
 				mom = joinName(sur, splitName(mom)[1], me);
 			}
+		} else if (me != null && me.indexOf(' ') > 0 && dad != null && dad.indexOf(' ') > 0) {
+			// 띄어 쓰는 이름 (인도·아랍 …): 아버지도 내 집안 이름(마지막 낱말)을 씀 (예전엔 아버지 성이 나와 달랐음)
+			dad = dad.substring(0, dad.indexOf(' ')) + me.substring(me.lastIndexOf(' '));
 		}
 		f.father = dad;
 		f.mother = mom;
@@ -808,7 +815,7 @@ public class EngineService {
 		f.spouseGap = ("M".equals(life.getGender()) ? -1 : 1) * (1 + r.nextInt(4));
 		// 태어난 나라 이름으로 (사는 나라로 하면 이민 뒤 서버를 다시 켤 때마다 배우자 이름이 바뀌었음)
 		f.spouse = pickName(life.getBirthCountry(), sg, r);
-		f.spouseJob = parentJob(r, Math.max(2, life.getWealthClass()), urban, by + 25, false);
+		f.spouseJob = parentJob(r, Math.max(2, life.getWealthClass()), urban, by + 25, "F".equals(sg));
 
 		famCache.put(life.getLifeId(), f);
 		return f;
@@ -829,6 +836,8 @@ public class EngineService {
 		FamSeed f = famSeed(life, stat);
 		int age = life.getCurrentAge();
 		List<FamilyMemberDTO> out = new ArrayList<>();
+		// 사이(원작 bondWord)는 사람마다 조금씩 다르게: 인생 번호 + 역할로 늘 같은 흔들림
+		java.util.SplittableRandom br = new java.util.SplittableRandom(life.getLifeId() * 31337L + 17);
 
 		// 부모: 부모 생존이 N이면 먼저 떠날 사람부터 (나이가 많이 들었으면 둘 다)
 		boolean bothAlive = !"N".equals(life.getParentAlive());
@@ -844,11 +853,13 @@ public class EngineService {
 				dadGone = dadEnd <= age;
 			}
 		}
-		out.add(parentRow("어머니", f.mother, f.motherAt, f.motherDie, f.motherJob, momGone, age));
-		out.add(parentRow("아버지", f.father, f.fatherAt, f.fatherDie, f.fatherJob, dadGone, age));
+		double momB = br.nextDouble(), dadB = br.nextDouble();
+		out.add(parentRow("어머니", f.mother, f.motherAt, f.motherDie, f.motherJob, momGone, age).with(null, momGone ? null : bondWord(life, momB, 8)));
+		out.add(parentRow("아버지", f.father, f.fatherAt, f.fatherDie, f.fatherJob, dadGone, age).with(null, dadGone ? null : bondWord(life, dadB, 0)));
 
-		// 형제자매: 손위는 늘, 손아래는 태어난 뒤부터
+		// 형제자매: 손위는 늘, 손아래는 태어난 뒤부터 / 24세가 넘으면 집을 떠남 (원작 sibsLeft)
 		List<String> sib = new ArrayList<>();
+		int left = 0;
 		for (int i = 0; i < f.siblingGap.length; i++) {
 			int g = f.siblingGap[i];
 			int sAge = age + g;
@@ -856,18 +867,28 @@ public class EngineService {
 				continue;
 			}
 			sib.add(sibWord(life.getGender(), f.siblingSex[i], g > 0) + " " + sAge + "세");
+			if (sAge >= 24 && age >= 6) {
+				left++;
+			}
 		}
-		out.add(new FamilyMemberDTO("형제자매", null, null, sib.isEmpty() ? "없음" : String.join(" · ", sib), true));
+		String sibText = sib.isEmpty() ? "없음" : sib.size() <= 5 ? String.join(" · ", sib) : sib.size() + "명";
+		if (left > 0) {
+			sibText = sibText + " · " + (left == sib.size() ? "모두 집을 떠남" : left + "명은 집을 떠남");
+		}
+		out.add(new FamilyMemberDTO("형제자매", null, null, null, true).with(sibText, sib.isEmpty() ? null : bondWord(life, br.nextDouble(), 0)));
 
-		// 배우자·자녀
+		// 배우자: 이름 · 성별 · 나이 · 사이, 아랫줄 직업 (원작처럼 없으면 줄을 안 띄움)
+		double spB = br.nextDouble();
 		if ("Y".equals(life.getMarriedYn())) {
 			int sa = Math.max(16, age + f.spouseGap);
-			String job = sa >= retireAge(life, stat) ? "은퇴" : f.spouseJob;
-			out.add(new FamilyMemberDTO("배우자", f.spouse, sa, job, true));
-		} else if (age >= 18) {
-			out.add(new FamilyMemberDTO("배우자", null, null, "없음", true));
+			String job = sa >= retireAge(life, stat) ? "은퇴 · 전 " + f.spouseJob : f.spouseJob;
+			String sex = "M".equals(life.getGender()) ? "여성" : "남성";
+			out.add(new FamilyMemberDTO("배우자", f.spouse, sa, job, true).with(sex, bondWord(life, spB, 10)));
 		}
+
 		// 자녀: 한 명씩 아들·딸, 이름(성 쓰는 나라는 아버지 성), 나이 (태어난 해는 CHILD 이벤트 기록에서)
+		//   학생이면 학교, 어른이 되면 결혼·아이 수 (원작 kidLine) → 아이들의 아이는 '손주' 줄로 모음
+		List<Integer> grand = new ArrayList<>();
 		if (life.getChildCount() > 0) {
 			List<Integer> births = engineDao.selectChildBirthAges(life.getLifeId());
 			java.util.SplittableRandom r = new java.util.SplittableRandom(life.getLifeId() * 104729L + 7);
@@ -887,10 +908,98 @@ public class EngineService {
 				}
 				Integer born = births != null && i < births.size() ? births.get(i) : null;
 				Integer ka = born == null ? null : Math.max(0, age - born - 1); // 그해 기록 나이 = 태어난 해의 내 나이
-				out.add(new FamilyMemberDTO("M".equals(sex) ? "아들" : "딸", nm, ka, childLine(ka), true));
+
+				// 이 아이의 앞날 (아이 번호로 늘 같게): 결혼 나이, 아이 수, 아이 터울
+				java.util.SplittableRandom kr = new java.util.SplittableRandom(life.getLifeId() * 7727L + i * 131L + 3);
+				boolean willMarry = kr.nextDouble() < 0.82;
+				int marryAt = 24 + kr.nextInt(10);
+				double u = kr.nextDouble();
+				int gkN = u < 0.12 ? 0 : u < 0.40 ? 1 : u < 0.78 ? 2 : 3;
+				List<String> info = new ArrayList<>();
+				String school = kidSchool(ka);
+				if (school != null) {
+					info.add(school);
+				}
+				if (ka != null && willMarry && ka >= marryAt) {
+					info.add("기혼");
+					int at = marryAt + 1 + kr.nextInt(2), born2 = 0;
+					for (int k = 0; k < gkN; k++) {
+						int ga = ka - at;
+						if (ga >= 0) {
+							grand.add(ga);
+							born2++;
+						}
+						at += 2 + kr.nextInt(2);
+					}
+					if (born2 > 0) {
+						info.add(born2 == 1 ? "아이 한 명" : "아이 " + born2 + "명");
+					}
+				}
+				FamilyMemberDTO row = new FamilyMemberDTO("M".equals(sex) ? "아들" : "딸", nm, ka, childLine(ka), true);
+				out.add(row.with(info.isEmpty() ? null : String.join(" · ", info), ka != null && ka >= 6 ? bondWord(life, kr.nextDouble(), 6) : null));
 			}
 		}
+
+		// 친구 (12세부터, 원작 frNames): 관계가 좋을수록 많고, 70세가 넘으면 하나둘 먼저 떠남
+		if (age >= 12) {
+			java.util.SplittableRandom fr = new java.util.SplittableRandom(life.getLifeId() * 4421L + 29);
+			int n = (int) Math.round(clamp(0.6 + life.getRelation() / 28.0 + fr.nextGaussian() * 0.5, 0, 4));
+			List<String> alive = new ArrayList<>();
+			int gone = 0;
+			for (int i = 0; i < n; i++) {
+				String sx = fr.nextDouble() < 0.75 ? life.getGender() : ("M".equals(life.getGender()) ? "F" : "M");
+				String nm = pickName(life.getBirthCountry(), sx, fr);
+				int dieAt = (int) Math.round(clamp(78 + fr.nextGaussian() * 9, 55, 102));
+				if (nm == null) {
+					continue;
+				}
+				if (age >= dieAt) {
+					gone++;
+				} else {
+					alive.add(SURNAME_CC.contains(life.getBirthCountry()) ? nm : nm.split(" ")[0]);
+				}
+			}
+			if (n > 0) {
+				String text;
+				if (alive.isEmpty()) {
+					text = "오랜 친구들이 모두 곁을 떠났습니다";
+				} else if (gone > 0) {
+					text = (alive.size() == 1 ? "곁에 남은 오랜 친구 한 명" : "곁에 남은 오랜 친구 " + alive.size() + "명") + " · " + String.join(", ", alive);
+				} else {
+					text = String.join(", ", alive);
+				}
+				out.add(new FamilyMemberDTO("친구", null, null, null, !alive.isEmpty())
+						.with(text, alive.isEmpty() ? null : bondWord(life, fr.nextDouble(), 4)));
+			}
+		}
+
+		// 손주 (원작: n명 · 나이들)
+		if (!grand.isEmpty()) {
+			grand.sort(null);
+			String ages = grand.size() <= 6
+					? grand.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining("·")) + "세"
+					: grand.get(0) + "~" + grand.get(grand.size() - 1) + "세";
+			out.add(new FamilyMemberDTO("손주", null, null, null, true).with(grand.size() + "명 · " + ages, null));
+		}
 		return out;
+	}
+
+	// 나와의 사이 (원작 bondWord): 내 관계 능력치 + 사람마다 흔들림(0~1 → ±18) + 역할 덤
+	//   6세 전에는 비움
+	private static String bondWord(LifeDTO life, double jitter, double plus) {
+		if (life.getCurrentAge() < 6) {
+			return null;
+		}
+		double s = life.getRelation() + (jitter - 0.5) * 36 + plus;
+		return s >= 62 ? "가까운 사이" : s >= 38 ? "무난한 사이" : "서먹한 사이";
+	}
+
+	// 아이가 다니는 학교 (한국 학제: 7~12 초등, 13~15 중학, 16~18 고등)
+	private static String kidSchool(Integer a) {
+		if (a == null || a < 7 || a > 18) {
+			return null;
+		}
+		return a <= 12 ? "초등학생" : a <= 15 ? "중학생" : "고등학생";
 	}
 
 	private static String childLine(Integer a) {
@@ -903,13 +1012,10 @@ public class EngineService {
 		if (a < 7) {
 			return "아기";
 		}
-		if (a < 13) {
-			return "어린이";
-		}
 		if (a < 19) {
-			return "청소년";
+			return null; // 학생은 info 에 학교로
 		}
-		return a < 30 ? "청년" : "어른";
+		return null;
 	}
 
 	private FamilyMemberDTO parentRow(String role, String name, int at, int die, String job, boolean gone, int myAge) {
@@ -917,7 +1023,10 @@ public class EngineService {
 			int d = Math.min(die, at + myAge);
 			return new FamilyMemberDTO(role, name, d, d + "세에 세상을 떠남", false);
 		}
-		return new FamilyMemberDTO(role, name, at + myAge, job, true);
+		int pa = at + myAge;
+		// 65세가 넘으면 은퇴 (원작: 은퇴 · 전 직업), 가사·육아는 그대로
+		String j = pa >= 65 && job != null && !job.startsWith("가사") ? "은퇴 · 전 " + job : job;
+		return new FamilyMemberDTO(role, name, pa, j, true);
 	}
 
 	// ---------- 같은 1초에 태어난 사람들 (원작 makeCompanions 4명) ----------
@@ -994,7 +1103,7 @@ public class EngineService {
 			// 학교·결혼·자녀 (나라 형편으로 대충)
 			double gdp = gdpOf(c);
 			double edu = clamp(4 + 2 * Math.log(Math.max(300, gdp) / 1000) + r.nextGaussian() * 3, 0, 18);
-			p.schoolEnd = edu < 1 ? 0 : 6 + (int) Math.round(edu);
+			p.schoolEnd = edu < 1 ? 0 : 7 + (int) Math.round(edu);
 			p.marryAge = r.nextDouble() < 0.93 ? (int) Math.round(clamp(("F".equals(p.gender) ? 22 : 26) + r.nextGaussian() * 4, 16, 45)) : 99;
 			p.kids = (int) Math.round(clamp(kidsOfEra(p.cc, c, by + 25) + r.nextGaussian() * 1.2 - 0.3, 0, 9));
 			double home = by < 1965 ? 0.6 : by < 1985 ? 0.45 : 0.3;
@@ -1026,11 +1135,11 @@ public class EngineService {
 	}
 
 	private static String peerStatus(PeerSeed p, int age) {
-		if (age < 6) {
+		if (age < 7) {
 			return "어린 시절";
 		}
 		if (age < p.schoolEnd) {
-			return age < 12 ? "초등학교에 다니는 중" : age < 15 ? "중학교에 다니는 중" : age < 18 ? "고등학교에 다니는 중" : "대학에 다니는 중";
+			return age < 13 ? "초등학교에 다니는 중" : age < 16 ? "중학교에 다니는 중" : age < 19 ? "고등학교에 다니는 중" : "대학에 다니는 중";
 		}
 		if (age < 15) {
 			return "집안일과 일을 돕는 중";
@@ -1282,6 +1391,17 @@ public class EngineService {
 				}
 			}
 		}
+		// 지난해 선택(참전 등)에서 넘어온 사망 위험
+		EngState carry = engStates.get(life.getLifeId());
+		if (carry != null && carry.carryDeath > 0) {
+			histAdd = histAdd + carry.carryDeath;
+			if (carry.carryCause != null && carry.carryDeath > histBest) {
+				histBest = carry.carryDeath;
+				histCause = carry.carryCause;
+			}
+			carry.carryDeath = 0;
+			carry.carryCause = null;
+		}
 		double deathP = Math.min(1, deathRate(life, stat) + histAdd);
 		if (random.nextDouble() < deathP) {
 			// 올해 선택 이벤트가 걸려 있었어도 죽었으니 선택 대기 해제 (끝난 인생에 선택 창이 뜨지 않게)
@@ -1299,6 +1419,9 @@ public class EngineService {
 			}
 			finalResult(life);
 			engineDao.endLife(life);
+			// 퀘스트 판정 + 포인트 지급 (끝난 인생만, 비회원은 퀘스트가 없어 그냥 지나감)
+			//   같은 트랜잭션이라 방금 저장한 STATUS='ENDED'·사망 나이를 그대로 읽어서 판정
+			questJudgeService.judgeAndGive(life.getLifeId());
 			closeBook(life, startAssets);
 			fillRegion(life);
 			return life;
@@ -1324,6 +1447,12 @@ public class EngineService {
 		for (String note : milestones(life, eduBefore, schoolBefore, jobBefore, jobIdBefore)) {
 			saveEventLog(life, lived, null, null, note);
 			yearEvents.add(noteEvent(note));
+		}
+		EngState sn = engStates.get(life.getLifeId());
+		if (sn != null && sn.schoolNote != null) {
+			saveEventLog(life, lived, null, null, sn.schoolNote);
+			yearEvents.add(noteEvent(sn.schoolNote));
+			sn.schoolNote = null;
 		}
 		for (String line : storyLines(life, stat, lived, yearEvents.size())) {
 			saveEventLog(life, lived, null, null, line);
@@ -1358,7 +1487,15 @@ public class EngineService {
 		//   화면엔 고를 수 있다고 나온 가게 차리기가 고르면 "돈이 모자라요"로 막혔음
 		if (life.isNeedChoice() && life.getPendingEvent() != null) {
 			life.setChoiceCosts(costsOf(life, life.getPendingEvent().getChoices(), life.getPendingEvent().getLogText()));
-			hideUnaffordable(life); // 돈·신용이 모자라 고를 수 없는 선택지는 아예 빼고 보여 줌
+			// 나이가 바뀌어 다시 계산했더니 '하지 않는다'만 남으면 그 선택은 없던 일로 (드문 경우)
+			if (onlyNoLeft(life.getPendingEvent().getChoices(), life.getChoiceCosts())) {
+				life.setPendingEventId(null);
+				life.setNeedChoice(false);
+				life.setPendingEvent(null);
+				life.setChoiceCosts(null);
+			} else {
+				hideUnaffordable(life); // 돈·신용이 모자라 고를 수 없는 선택지는 아예 빼고 보여 줌
+			}
 		}
 
 		// 윤아님 선택 이벤트·직업 제안이 없는 해엔 엔진 선택지 (C06-4: 기질·어린 시절·주말·사람 사이)
@@ -1958,7 +2095,7 @@ public class EngineService {
 		if (!life.getStatus().equals("PLAYING")) {
 			return null;
 		}
-		if (life.getCurrentAge() < 15 || "ENROLLED".equals(life.getSchoolStatus())
+		if (life.getCurrentAge() < JOB_MIN_AGE || "ENROLLED".equals(life.getSchoolStatus())
 				|| "EMPLOYED".equals(life.getJobStatus()) || "RETIRED".equals(life.getJobStatus())) {
 			return null; // 지금은 직업을 고를 수 없는 상태
 		}
@@ -2010,8 +2147,8 @@ public class EngineService {
 		String level = life.getEduLevel();
 		boolean enrolled = "ENROLLED".equals(life.getSchoolStatus());
 
-		if (age < 6) {
-			return null; // 0~5세는 집중 선택 없음
+		if (age < 6 || (age < startAges[0] && !enrolled)) {
+			return null; // 0~5세, 초등학교 입학 전에는 집중 선택 없음
 		}
 		if (enrolled && (level.equals("UNI") || level.equals("GRAD"))) {
 			return "UNIV"; // 대학생
@@ -2243,11 +2380,13 @@ public class EngineService {
 	// ================= C06-1 학교 (진학·졸업·중퇴) =================
 
 	// 학교 단계: 초등 6년 → 중등 3년 → 고등 3년 → 대학 4년 → 대학원 2년 (모든 나라 같은 기간)
-	//   startAges 는 '새 나이'로 판정: 7이면 6살을 마치며 입학 → 인생 기록(지난 해 나이)에는 6세 입학으로 보임
-	//   그래서 기록에는 초등 6세 입학 · 중학교 12세 · 고등학교 15세 진학 · 18세 졸업 · 대학 22세 졸업 (한국 만 나이와 같음)
-	//   (예전 6·12·15·18·22 는 기록이 한 살씩 빨라 '17세 고등학교 졸업'으로 보였음)
+	//   startAges 는 '새 나이'로 판정: 8이면 7살을 마치며 입학 → 인생 기록(지난 해 나이)에는 7세 입학으로 보임
+	//   한국 학제 기준: 초등 7세 입학 · 13세 졸업 → 중학교 16세 졸업 → 고등학교 19세 졸업 → 대학 23세 졸업
+	//   (11/20 동현님 요청: 12세 초졸 → 13세 초졸)
 	private String[] levels = { "ELEM", "MIDDLE", "HIGH", "UNI", "GRAD" };
-	private int[] startAges = { 7, 13, 16, 19, 23 };
+	private int[] startAges = { 8, 14, 17, 20, 24 };
+	// 일자리 제안을 받기 시작하는 나이 ('새 나이' 기준 19 = 인생 기록 18세, 성인부터)
+	private static final int JOB_MIN_AGE = 19;
 	private int[] years = { 6, 3, 3, 4, 2 };
 
 	// 학력 코드 → 몇 번째 단계인지 (NONE은 -1)
@@ -2287,8 +2426,8 @@ public class EngineService {
 
 		// 2. 진학: 아직 입학 전이거나, 졸업한 해에 다음 단계 입학 나이면 판정
 		//   중학교·고등학교·대학(next 1~3)은 붙으면 그해 끝에 갈지 말지 직접 고름 (C06-4 진학 선택, 원작 school2·school3·college)
-		//   못 붙으면 중·고등학교는 "형편이 어려워 못 갔다" 한 줄
-		//   기다리던 진학 선택을 서버 재시작으로 잃었으면 (기록에 그 단계 결과가 없으면) 한 해 늦게 다시 판정
+		//   제때(onTime) 못 붙으면 다음 해 한 번 더 도전 (11/19 일지), 두 번째도 못 붙으면 "형편이 어려워 못 갔다" 한 줄
+		//   기다리던 진학 선택을 서버 재시작으로 잃었을 때도 같은 '한 해 늦게' 판정으로 다시 고름
 		int next = idx + 1;
 		boolean canEnter = (idx == -1 && status == null) || "GRADUATED".equals(status);
 		boolean choose = next >= 1 && next <= 3;
@@ -2303,6 +2442,10 @@ public class EngineService {
 				life.setEduLevel(levels[next]);
 				life.setSchoolStatus("ENROLLED");
 				life.setDropReason(null);
+			} else if (choose && onTime) {
+				// 첫해 낙방: 기록만 남기고 다음 해 다시 판정 (late)
+				// 기록은 졸업 문장 뒤에 오도록 nextYear 의 졸업·입학 기록 다음에 저장 (EngState.schoolNote)
+				engState(life).schoolNote = SCHOOL_NAME.getOrDefault(levels[next], "학교") + "에 들어가지 못했다. 내년에 다시 도전하기로 했다.";
 			} else if (choose) {
 				EngineChoice.Dec d = EngineChoice.byKey("SCHOOL_" + levels[next]);
 				markEngineDone(engState(life), d, age - 1);
@@ -2531,7 +2674,7 @@ public class EngineService {
 		// 1-2. 가게(자영업 사장)는 몇 해에 걸쳐 버티거나 접음 (원작 bizStart · BIZ_Y1)
 		bizYear(life, stat);
 
-		// 2. 15세 이상, 학교 안 다니고, 일자리가 없으면 매년 직업 3개 제안
+		// 2. 성인(JOB_MIN_AGE) 이상, 학교 안 다니고, 일자리가 없으면 매년 직업 3개 제안
 		showOffers(life, stat);
 	}
 
@@ -2578,10 +2721,10 @@ public class EngineService {
 		life.setEvents(list);
 	}
 
-	// 직업을 제안받을 수 있는 상태인지: 15세 이상, 학교 안 다니고, 일자리 없고, 은퇴 나이 전
+	// 직업을 제안받을 수 있는 상태인지: 성인(JOB_MIN_AGE) 이상, 학교 안 다니고, 일자리 없고, 은퇴 나이 전
 	private boolean canGetJob(LifeDTO life, CountryStatDTO stat) {
 		boolean noJob = life.getJobStatus() == null || "UNEMPLOYED".equals(life.getJobStatus());
-		return "PLAYING".equals(life.getStatus()) && life.getCurrentAge() >= 15
+		return "PLAYING".equals(life.getStatus()) && life.getCurrentAge() >= JOB_MIN_AGE
 				&& !"ENROLLED".equals(life.getSchoolStatus()) && noJob && life.getCurrentAge() < retireAge(life, stat);
 	}
 
@@ -2843,11 +2986,17 @@ public class EngineService {
 		for (EventResultDTO e : events) {
 			applyHistEffect(life, e); // 역사 사건이면 실직·학업 중단 (선택 이벤트도 사건은 이미 일어남)
 			if (e.isChoice()) {
+				// 돈·신용이 모자라 큰돈 드는 선택지가 다 빠지고 '하지 않는다' 하나만 남으면, 기회 자체를 띄우지 않음
+				//   (예전엔 '부동산 투자' 창에 '하지 않는다' 하나만 떠서 누를 수밖에 없었음)
+				List<ChoiceCostDTO> cs = costsOf(life, e.getChoices(), e.getLogText());
+				if (onlyNoLeft(e.getChoices(), cs)) {
+					continue;
+				}
 				// 상황 문장만 기록하고, 효과는 고른 선택지로 (PENDING_EVENT_ID에 저장)
 				life.setPendingEventId(e.getEventId());
 				life.setNeedChoice(true);
 				life.setPendingEvent(e);
-				life.setChoiceCosts(costsOf(life, e.getChoices(), e.getLogText()));
+				life.setChoiceCosts(cs);
 				saveEventLog(life, life.getCurrentAge(), e.getEventId(), null, e.getLogText());
 				continue;
 			}
@@ -2872,6 +3021,7 @@ public class EngineService {
 		int k = h.getIntensity() == null ? 1 : h.getIntensity();
 		String why = h.getTypeName() == null ? "역사적 사건" : h.getTypeName();
 		int age = life.getCurrentAge();
+		histForPerson(life, e, h, k, age);
 		if ("EMPLOYED".equals(life.getJobStatus()) && h.getJobLossAdd() != null
 				&& random.nextDouble() < h.getJobLossAdd() * k) {
 			life.setJobStatus("UNEMPLOYED");
@@ -2884,6 +3034,56 @@ public class EngineService {
 			life.setDropReason(why + " 때문에 학교를 그만둠");
 			saveEventLog(life, age, e.getEventId(), null, why + " 때문에 학교를 그만두었다.");
 		}
+	}
+
+	// 같은 역사 사건도 나이·성별·형편에 따라 다르게 (11/20 동현님 요청: 코로나·대기근·IMF·전쟁)
+	//   사망 확률 가산(윤아님 유형값 × 강도)에 배율을 곱하고, 사건별로 몇 가지를 더함
+	//   - 대기근: 5세 미만 ×3, 65세 이상 ×2 / 가난한 집 ×1.6, 넉넉한 집 ×0.3
+	//   - 코로나: 50세 미만 거의 0, 65세 이상 ×1.5, 80세 이상 ×4 / 학생은 온라인 수업(지식 −2, 관계 −2)
+	//   - 전쟁: 18~45세 남자 ×1.6, 넉넉한 집 ×0.8
+	//   - 경제 위기(IMF 등): 40세 이상 직장인은 명예퇴직 8% × 강도, 가게(자영업)는 문 닫을 확률 10% × 강도
+	private void histForPerson(LifeDTO life, EventResultDTO e, HistEffectDTO h, int k, int age) {
+		String id = e.getEventId() == null ? "" : e.getEventId();
+		String type = h.getTypeCode() == null ? "" : h.getTypeCode();
+		int wc = life.getWealthClass();
+		boolean famine = id.contains("FAMINE") || id.contains("BENGAL") || id.contains("HUNGER");
+		boolean covid = id.contains("COVID");
+		double m = 1;
+		if (famine) {
+			m = (age < 5 ? 3 : age >= 65 ? 2 : 1) * (wc <= 2 ? 1.6 : wc == 3 ? 1 : 0.3);
+		} else if (covid) {
+			m = age < 50 ? 0.05 : age < 65 ? 0.4 : age < 80 ? 1.5 : 4;
+		} else if ("WAR".equals(type)) {
+			m = ("M".equals(life.getGender()) && age >= 18 && age <= 45 ? 1.6 : 1) * (wc >= 4 ? 0.8 : 1);
+			if (soldier(life)) {
+				m = m * 2; // 직업군인·장교는 전선에 나감
+				saveEventLog(life, age, null, null, "군인으로서 전선에 배치되었다.");
+			}
+		} else if ("DISASTER".equals(type)) {
+			m = wc <= 2 ? 1.3 : wc >= 4 ? 0.7 : 1;
+		}
+		if (!e.isChoice() && e.getDeathAdd() > 0) {
+			e.setDeathAdd(e.getDeathAdd() * m);
+		}
+		if (covid && "ENROLLED".equals(life.getSchoolStatus())) {
+			life.setKnowledge(life.getKnowledge() - 2);
+			life.setRelation(life.getRelation() - 2);
+			saveEventLog(life, age, null, null, "학교 수업이 온라인으로 바뀌어 친구들을 화면으로만 만났다.");
+		}
+		if ("ECON".equals(type) && "EMPLOYED".equals(life.getJobStatus())) {
+			boolean shop = life.getJobId() != null && life.getJobId().contains("BIZ");
+			double p = shop ? 0.10 * k : age >= 40 ? 0.08 * k : 0;
+			if (p > 0 && random.nextDouble() < p) {
+				life.setJobStatus("UNEMPLOYED");
+				life.setJobYears(0);
+				saveEventLog(life, age, null, null, shop ? "손님이 끊겨 결국 가게 문을 닫았다."
+						: "회사가 구조조정을 하며 명예퇴직을 권했다. 오래 다닌 직장을 떠났다.");
+			}
+		}
+	}
+
+	private static boolean soldier(LifeDTO l) {
+		return "EMPLOYED".equals(l.getJobStatus()) && ("JOB_SOLDIER".equals(l.getJobId()) || "JOB_OFFICER".equals(l.getJobId()));
 	}
 
 	// C13 학업 능력 효과값 = 타고난 재능에 더하는 값 (표준편차 단위)
@@ -2988,6 +3188,28 @@ public class EngineService {
 		EventResultDTO r = eventService.applyChoice(life, choiceId, age);
 		if (r == null || !life.getPendingEventId().equals(r.getEventId())) {
 			return null; // 없는 선택지이거나 지금 이벤트의 선택지가 아님
+		}
+		// 선택 결과의 사망 위험 (윤아님 applyFail: 참전 중상 +0.05 '전쟁', 시위 진압 +0.02)
+		//   선택은 한 해가 끝난 뒤에 고르니, 그 위험은 다음 해 사망 판정에 더함 (예전엔 버려져서 참전해도 죽지 않았음)
+		if (r.getDeathAdd() > 0) {
+			EngState es = engState(life);
+			es.carryDeath = es.carryDeath + r.getDeathAdd();
+			es.carryCause = r.getDeathCause();
+		}
+		// 전쟁 한가운데서 '남는다'(떠나지도 참전하지도 않음)를 고르면, 선택 없는 전쟁과 같은 위험 (강도 × 1%, 원인 전쟁)
+		//   예전엔 남아도 위험이 0이라, 선택 없는 전쟁(+3%)보다 오히려 안전했음
+		//   r.getResultAction() 은 참전(성공) 뒤엔 null 이 되므로, 고른 선택지 원래 값으로 판단
+		EventChoiceDTO picked = eventDao.selectChoice(choiceId);
+		if (picked != null && picked.getResultAction() == null && r.getDeathAdd() <= 0) {
+			HistEffectDTO he = engineDao.selectHistEffect(r.getEventId());
+			if (he != null && "WAR".equals(he.getTypeCode())) {
+				int k = he.getIntensity() == null ? 1 : he.getIntensity();
+				double m = ("M".equals(life.getGender()) && age >= 18 && age <= 45 ? 1.6 : 1) * (life.getWealthClass() >= 4 ? 0.8 : 1)
+						* (soldier(life) ? 2 : 1);
+				EngState es = engState(life);
+				es.carryDeath = es.carryDeath + 0.01 * k * m;
+				es.carryCause = "전쟁";
+			}
 		}
 
 		// 큰돈이 드는 선택지(집·땅·가게·투자): 실제 비용·대출·이자로 계산 (재산 비율 대신)
@@ -3505,6 +3727,9 @@ public class EngineService {
 		String temper;
 		EngPend pend;
 		Integer schoolNext; // 이번 해 붙은 진학 단계 (그해 끝에 선택 창)
+		double carryDeath;  // 선택 결과의 사망 확률 가산 (참전 중상 0.05 · 시위 진압 0.02 …), 다음 해 사망 판정에 더함
+		String carryCause;  // 그때의 사망 원인 (전쟁, 시위 진압)
+		String schoolNote;  // 진학 첫해 낙방 기록 (졸업 문장 뒤에 남기려고 잠시 보관)
 	}
 
 	private static class EngPend {
@@ -3624,7 +3849,11 @@ public class EngineService {
 		if (s.pend != null) {
 			return;
 		}
-		int pick = -1;
+		int pick = pickEngine(life, s, lived, EngineChoice.HIST); // 4·19 · 서울의 봄 · 6월 항쟁 (그해·한국에서만)
+		if (pick >= 0) {
+			openEngineChoice(life, s, pick, lived);
+			return;
+		}
 		if (lived == 2) {
 			pick = pickEngine(life, s, lived, EngineChoice.TEMPER);
 		}
@@ -3751,6 +3980,10 @@ public class EngineService {
 		life.setMoneyFlow(new ArrayList<>());
 
 		boolean bad = o.badP > 0 && random.nextDouble() < o.badP;
+		if (bad && d.badDeath > 0) {
+			s.carryDeath = s.carryDeath + d.badDeath;
+			s.carryCause = d.badCause;
+		}
 		int[] eff = bad && o.badEff != null ? o.badEff : new int[] { o.h, o.hl, o.re, o.kn };
 		life.setHappiness(life.getHappiness() + eff[0]);
 		life.setHealth(life.getHealth() + eff[1]);
@@ -3788,7 +4021,7 @@ public class EngineService {
 		list.add(noteEvent(text));
 		life.setEvents(list);
 		if ("QUIT".equals(o.act)) {
-			showOffers(life, yearStat(life)); // 학교 대신 일을 고르면 바로 일자리 제안 (15세부터)
+			showOffers(life, yearStat(life)); // 학교 대신 일을 고르면 바로 일자리 제안 (JOB_MIN_AGE 이상일 때만)
 		}
 		engineDao.updateLifeYear(life);
 		fillRegion(life);
@@ -3796,6 +4029,28 @@ public class EngineService {
 	}
 
 	// 돈·신용이 모자라 고를 수 없는 선택지는 화면에서 빼기 (고를 수 있는 게 하나도 안 남으면 그대로 둠)
+	// 고를 수 없는 선택지(돈 모자람)를 빼면 하나 이하만 남는지
+	private static boolean onlyNoLeft(List<EventChoiceDTO> choices, List<ChoiceCostDTO> costs) {
+		if (choices == null || costs == null || costs.isEmpty()) {
+			return false;
+		}
+		int left = 0, hidden = 0;
+		for (EventChoiceDTO c : choices) {
+			boolean blocked = false;
+			for (ChoiceCostDTO x : costs) {
+				if (c.getChoiceId() != null && x.getChoiceId() == c.getChoiceId() && !x.isOk()) {
+					blocked = true;
+				}
+			}
+			if (blocked) {
+				hidden++;
+			} else {
+				left++;
+			}
+		}
+		return hidden > 0 && left <= 1;
+	}
+
 	private void hideUnaffordable(LifeDTO life) {
 		EventResultDTO e = life.getPendingEvent();
 		List<ChoiceCostDTO> costs = life.getChoiceCosts();

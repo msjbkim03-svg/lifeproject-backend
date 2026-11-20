@@ -233,6 +233,7 @@
 		    STAGE_CODE     = #{stageCode, jdbcType=VARCHAR},
 		    FOCUS_CODE     = #{focusCode, jdbcType=VARCHAR},
 		    PENDING_EVENT_ID = #{pendingEventId, jdbcType=VARCHAR},
+		    OWNS           = #{owns, jdbcType=VARCHAR},
 		    LAST_PLAYED_AT = SYSDATE
 		WHERE LIFE_ID = #{lifeId}
 	</update>
@@ -340,7 +341,8 @@
 		       T.JOB_LOSS_ADD      AS jobLossAdd,
 		       T.EDU_STOP_ADD      AS eduStopAdd,
 		       T.MIGRATE_ADD       AS migrateAdd,
-		       T.TYPE_NAME         AS typeName
+		       T.TYPE_NAME         AS typeName,
+		       G.HIST_TYPE_CODE    AS typeCode
 		FROM GAME_EVENT G
 		JOIN HIST_EVENT_TYPE T ON G.HIST_TYPE_CODE = T.TYPE_CODE
 		WHERE G.EVENT_ID = #{eventId}
