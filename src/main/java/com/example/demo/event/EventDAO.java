@@ -91,5 +91,13 @@ public class EventDAO {
 	public List<Map<String, Object>> selectLifeTraitEffects(int lifeId) {
 		return mybatis.selectList("Event.selectLifeTraitEffects", lifeId);
 	}
+	
+	// 경험을 마지막으로 겪은 나이 (없으면 null)
+	public Integer selectLastExpAge(int lifeId, String expId) {
+	    Map<String, Object> p = new HashMap<>();
+	    p.put("lifeId", lifeId);
+	    p.put("expId", expId);
+	    return mybatis.selectOne("Event.selectLastExpAge", p);
+	}
 
 }
