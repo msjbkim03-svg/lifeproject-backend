@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="AdminEvent">
+
+	<!-- A03 이벤트 목록 (조건은 있을 때만 적용)
+	     params: type(LIFE/HIST), reviewed(Y/N), aiNarrate(Y/N), keyword, eventId(상세에서 한
+	줄만 볼 때) -->
+	<select id="selectEventList" parameterType="map"
+		resultType="com.example.demo.admin.AdminEventRowDTO"> SELECT G.EVENT_ID,
+		G.EVENT_TYPE, G.TEMPLATE_ID, T.TEMPLATE_NAME, G.HIST_EVENT_ID, H.TITLE
+		AS HIST_TITLE, H.COUNTRY_CODE, H.START_YEAR, H.END_YEAR, G.TITLE,
+		G.BASE_TEXT, G.IS_CHOICE, G.AI_NARRATE, G.IS_REVIEWED, G.PROBABILITY,
+		(SELECT COUNT(*) FROM EVENT_CHOICE C WHERE C.EVENT_ID = G.EVENT_ID) AS
+		CHOICE_COUNT FROM GAME_EVENT G LEFT JOIN EVENT_TEMPLATE T ON
+		G.TEMPLATE_ID = T.TEMPLATE_ID LEFT JOIN HISTORY_EVENT H ON
+		G.HIST_EVENT_ID = H.EVENT_ID <where>
+			<if test="eventId != null and eventId != ''">
+				AND G.EVENT_ID = #{eventId}
+			</if>
+			<if test="type != null and type != ''">
+				AND G.EVENT_TYPE = #{type}
+			</if>
+			<if test="reviewed != null and reviewed != ''">
+				AND G.IS_REVIEWED = #{reviewed}
+			</if>
+			<if test="aiNarrate != null and aiNarrate != ''">
+				AND G.AI_NARRATE = #{aiNarrate}
+			</if>
+			<if test="keyword != null and keyword != ''">
+				AND (G.EVENT_ID LIKE '%' || #{keyword} || '%'
+				OR G.TITLE LIKE '%' || #{keyword} || '%'
+				OR G.BASE_TEXT LIKE '%' || #{keyword} || '%'
+				OR H.TITLE LIKE '%' || #{keyword} || '%')
+			</if>
+		</where>
+		ORDER BY G.EVENT_TYPE DESC, H.COUNTRY_CODE NULLS FIRST, H.START_YEAR
+		NULLS FIRST, G.EVENT_ID </select>
+
+	<!-- 이벤트 하나 (전체 컬럼) -->
+	<select id="selectEvent" parameterType="String"
+		resultType="com.example.demo.event.dto.GameEventDTO">
+		SELECT * FROM GAME_EVENT WHERE EVENT_ID = #{eventId}
+	</select>
+
+	<!-- 템플릿 하나 (캐시가 아니라 DB 값 그대로) -->
+	<select id="selectTemplate" parameterType="String"
+		resultType="com.example.demo.event.dto.EventTemplateDTO">
+		SELECT * FROM EVENT_TEMPLATE WHERE TEMPLATE_ID = #{templateId}
+	</select>
+
+	<!-- A03 이벤트 등록 (null 가능 값은 jdbcType 필수: Oracle 은 null 타입을 모르면 1111 에러) -->
+	<insert id="insertEvent"
+		parameterType="com.example.demo.event.dto.GameEventDTO">
+		INSERT INTO GAME_EVENT (EVENT_ID, EVENT_TYPE, TEMPLATE_ID, VAR_VALUE,
+		EFFECT_SCALE,
+		HIST_EVENT_ID, HIST_TYPE_CODE, INTENSITY, TITLE, BASE_TEXT, IS_REVIEWED,
+		MIN_AGE, MAX_AGE, GENDER, MIN_WEALTH, MAX_WEALTH, REQUIRED_EXP_ID,
+		EXCLUDED_EXP_ID,
+		IS_ONCE, PROBABILITY, IS_CHOICE, AI_NARRATE, EFF_WEALTH_RATE)
+		VALUES (#{eventId}, #{eventType}, #{templateId, jdbcType=VARCHAR},
+		#{varValue, jdbcType=VARCHAR}, #{effectScale},
+		#{histEventId, jdbcType=VARCHAR}, #{histTypeCode, jdbcType=VARCHAR},
+		#{intensity, jdbcType=NUMERIC}, #{title}, #{baseText, jdbcType=VARCHAR},
+		#{isReviewed},
+		#{minAge, jdbcType=NUMERIC}, #{maxAge, jdbcType=NUMERIC}, #{gender,
+		jdbcType=VARCHAR},
+		#{minWealth, jdbcType=NUMERIC}, #{maxWealth, jdbcType=NUMERIC},
+		#{requiredExpId, jdbcType=VARCHAR}, #{excludedExpId, jdbcType=VARCHAR},
+		#{isOnce}, #{probability, jdbcType=NUMERIC}, #{isChoice}, #{aiNarrate},
+		#{effWealthRate, jdbcType=NUMERIC})
+	</insert>
+
+	<!-- A03 이벤트 수정 (EVENT_ID·EVENT_TYPE 은 안 바꿈, 나머지는 받은 값으로 전체 덮어쓰기) -->
+	<update id="updateEvent"
+		parameterType="com.example.demo.event.dto.GameEventDTO">
+		UPDATE GAME_EVENT SET
+		TEMPLATE_ID = #{templateId, jdbcType=VARCHAR},
+		VAR_VALUE = #{varValue, jdbcType=VARCHAR},
+		EFFECT_SCALE = #{effectScale},
+		HIST_EVENT_ID = #{histEventId, jdbcType=VARCHAR},
+		HIST_TYPE_CODE = #{histTypeCode, jdbcType=VARCHAR},
+		INTENSITY = #{intensity, jdbcType=NUMERIC},
+		TITLE = #{title},
+		BASE_TEXT = #{baseText, jdbcType=VARCHAR},
+		IS_REVIEWED = #{isReviewed},
+		MIN_AGE = #{minAge, jdbcType=NUMERIC},
+		MAX_AGE = #{maxAge, jdbcType=NUMERIC},
+		GENDER = #{gender, jdbcType=VARCHAR},
+		MIN_WEALTH = #{minWealth, jdbcType=NUMERIC},
+		MAX_WEALTH = #{maxWealth, jdbcType=NUMERIC},
+		REQUIRED_EXP_ID = #{requiredExpId, jdbcType=VARCHAR},
+		EXCLUDED_EXP_ID = #{excludedExpId, jdbcType=VARCHAR},
+		IS_ONCE = #{isOnce},
+		PROBABILITY = #{probability, jdbcType=NUMERIC},
+		IS_CHOICE = #{isChoice},
+		AI_NARRATE = #{aiNarrate},
+		EFF_WEALTH_RATE = #{effWealthRate, jdbcType=NUMERIC}
+		WHERE EVENT_ID = #{eventId}
+	</update>
+
+	<!-- A03 AI 서술 대상 지정 (C11 이 이 값을 보고 Gemini 서술) -->
+	<update id="updateAiNarrate" parameterType="map">
+		UPDATE GAME_EVENT SET AI_NARRATE = #{value} WHERE EVENT_ID = #{eventId}
+	</update>
+
+	<!-- ================= A03 선택지 ================= -->
+
+	<!-- 이 이벤트의 다음 선택지 순서 (없으면 1) -->
+	<select id="selectNextChoiceOrder" parameterType="String" resultType="int">
+		SELECT NVL(MAX(CHOICE_ORDER), 0) + 1 FROM EVENT_CHOICE WHERE EVENT_ID =
+		#{eventId}
+	</select>
+
+	<!-- 같은 이벤트에 이 순서가 이미 있는지 -->
+	<select id="countChoiceOrder" parameterType="map" resultType="int">
+		SELECT COUNT(*) FROM EVENT_CHOICE
+		WHERE EVENT_ID = #{eventId} AND CHOICE_ORDER = #{choiceOrder}
+	</select>
+
+	<!-- 지금 쓰고 있는 결과 동작 (코드가 처리하는 값만 허용하려고) -->
+	<select id="selectResultActions" resultType="String">
+		SELECT RESULT_ACTION FROM EVENT_CHOICE WHERE RESULT_ACTION IS NOT NULL
+		UNION
+		SELECT RESULT_ACTION FROM EVENT_TEMPLATE WHERE RESULT_ACTION IS NOT NULL
+		ORDER BY 1
+	</select>
+
+	<!-- 선택지 추가: 번호는 시퀀스로 먼저 받아서 choiceId 에 채움 -->
+	<insert id="insertChoice"
+		parameterType="com.example.demo.event.dto.EventChoiceDTO">
+		<selectKey keyProperty="choiceId" resultType="int" order="BEFORE">
+			SELECT SEQ_EVENT_CHOICE.NEXTVAL FROM DUAL
+		</selectKey> INSERT
+		INTO EVENT_CHOICE (CHOICE_ID, EVENT_ID, CHOICE_ORDER, CHOICE_TEXT,
+		RESULT_TEXT, EFF_HEALTH, EFF_HAPPINESS, EFF_KNOWLEDGE, EFF_RELATION,
+		EFF_INCOME_RATE, EFF_WEALTH_RATE, RESULT_ACTION, MIGRATE_TO,
+		SUCCESS_RATE) VALUES (#{choiceId}, #{eventId}, #{choiceOrder},
+		#{choiceText}, #{resultText}, #{effHealth, jdbcType=NUMERIC},
+		#{effHappiness, jdbcType=NUMERIC}, #{effKnowledge, jdbcType=NUMERIC},
+		#{effRelation, jdbcType=NUMERIC}, #{effIncomeRate, jdbcType=NUMERIC},
+		#{effWealthRate, jdbcType=NUMERIC}, #{resultAction, jdbcType=VARCHAR},
+		#{migrateTo, jdbcType=VARCHAR}, #{successRate, jdbcType=NUMERIC}) </insert>
+
+	<!-- 선택지 수정: 이벤트 ID·순서는 안 바꿈 (경험 ID = 이벤트ID_순서) -->
+	<update id="updateChoice"
+		parameterType="com.example.demo.event.dto.EventChoiceDTO">
+		UPDATE EVENT_CHOICE SET
+		CHOICE_TEXT = #{choiceText},
+		RESULT_TEXT = #{resultText},
+		EFF_HEALTH = #{effHealth, jdbcType=NUMERIC},
+		EFF_HAPPINESS = #{effHappiness, jdbcType=NUMERIC},
+		EFF_KNOWLEDGE = #{effKnowledge, jdbcType=NUMERIC},
+		EFF_RELATION = #{effRelation, jdbcType=NUMERIC},
+		EFF_INCOME_RATE = #{effIncomeRate, jdbcType=NUMERIC},
+		EFF_WEALTH_RATE = #{effWealthRate, jdbcType=NUMERIC},
+		RESULT_ACTION = #{resultAction, jdbcType=VARCHAR},
+		MIGRATE_TO = #{migrateTo, jdbcType=VARCHAR},
+		SUCCESS_RATE = #{successRate, jdbcType=NUMERIC}
+		WHERE CHOICE_ID = #{choiceId}
+	</update>
+
+	<!-- ================= A03 템플릿 확률 조정 ================= -->
+	<!-- 확률 방식(PROB_METHOD)·효과는 코드와 묶여 있어서 안 바꿈 -->
+	<update id="updateTemplateProb"
+		parameterType="com.example.demo.event.dto.EventTemplateDTO">
+		UPDATE EVENT_TEMPLATE SET
+		BASE_PROB = #{baseProb, jdbcType=NUMERIC},
+		MIN_AGE = #{minAge, jdbcType=NUMERIC},
+		MAX_AGE = #{maxAge, jdbcType=NUMERIC}
+		WHERE TEMPLATE_ID = #{templateId}
+	</update>
+	
+		<!-- ================= C10 역사 문장 검수 ================= -->
+	<!-- 검수한 문장 저장 → 검수 완료 (역사 이벤트만) -->
+	<update id="updateBaseText" parameterType="map">
+		UPDATE GAME_EVENT SET BASE_TEXT = #{baseText}, IS_REVIEWED = 'Y'
+		WHERE EVENT_ID = #{eventId} AND EVENT_TYPE = 'HIST'
+	</update>
+
+</mapper>
