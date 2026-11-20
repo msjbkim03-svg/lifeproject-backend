@@ -2737,7 +2737,13 @@ public class EngineService {
 		if (es != null && es.schoolNext != null) {
 			return; // 진학할지 고르는 해 (고른 뒤 안 가면 chooseEngine 에서 제안)
 		}
-		List<JobDTO> offers = offerJobs(life);
+		List<JobDTO> offers = new ArrayList<>();
+		double gdp = gdpOf(stat);
+		for (JobDTO j : offerJobs(life)) {
+			JobDTO c = j.copy();
+			c.setYearIncome(Math.round(gdp * j.getIncomeRate())); // moneyStep 소득 = 1인당 GDP × 배율 (±20%는 빼고 가운데 값)
+			offers.add(c);
+		}
 		if (!offers.isEmpty()) {
 			life.setNeedJob(true);
 			life.setJobOffers(offers);
@@ -3566,6 +3572,14 @@ public class EngineService {
 		case "MIGRATE": // 이민: 갈 나라가 정해져 있을 때만
 			if (migrateTo != null && !migrateTo.equals(life.getCurrentCountry())) {
 				life.setCurrentCountry(migrateTo);
+			}
+			break;
+		case "LOAN": // 빚을 내서 치료 (윤아님 11/20): 재산이 0 이하면 변화율이 안 먹으니, 그 나라 중위 소득 1년치를 빚으로
+			{
+				double med = medIncome(life.getCurrentCountry(), yearStat(life));
+				long debt = Math.round(med);
+				life.setAssets(life.getAssets() - debt);
+				book(life, "치료비로 진 빚", -debt);
 			}
 			break;
 		default: // INVEST 등: 재산 변화율만 반영 (위 3번)
