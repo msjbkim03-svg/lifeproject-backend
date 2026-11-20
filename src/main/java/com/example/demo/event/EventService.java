@@ -235,6 +235,12 @@ public class EventService {
 		if ("Y".equals(life.getMarriedYn())) {
 			expIds.add("STATE_MARRIED"); // 지금 결혼 중 (DB 저장 안 함, 조건 판정용)
 		}
+		// 재혼하면 자녀 계획 다시 묻기: 마지막 결혼보다 먼저 정한 자녀 계획은 지난 결혼 것이라 판정에서 뺌
+		Integer marryAge = eDAO.selectLastExpAge(life.getLifeId(), "LE_LOVE_PROPOSAL_1");
+		Integer planAge = eDAO.selectLastExpAge(life.getLifeId(), "LE_CHILD_PLAN_%");
+		if (marryAge != null && planAge != null && planAge < marryAge) {
+		    expIds.removeIf(id -> id.startsWith("LE_CHILD_PLAN_")); // 순회 중 삭제를 안전하게 처리
+		}
 		List<EventResultDTO> results = new ArrayList<>();
 		boolean hasChoice = false; // 한 해에 선택 이벤트는 1개만 (역사 + 인생 합쳐서)
 
@@ -324,10 +330,11 @@ public class EventService {
 	// ===== 성공·실패 선택지 (투자·치료·참여·상담) =====
 
 	// 종류별 결과 문장 [성공, 실패]
-	private static final Map<String, String[]> SUCCESS_TEXT = Map.of("INVEST",
-			new String[] { " 투자는 성공적이었다.", " 하지만 투자는 실패해 손해를 봤다." }, "PROTEST",
-			new String[] { " 함께한 사람들과 변화를 이끌어 냈다.", " 하지만 진압 과정에서 크게 다쳤다." }, "ENLIST",
-			new String[] { " 무사히 살아 돌아왔다.", " 하지만 전투 중 크게 다쳤다." });
+	private static final Map<String, String[]> SUCCESS_TEXT = Map.of(
+	        "INVEST", new String[] { " 투자는 성공적이었다.", " 하지만 투자는 실패해 손해를 봤다." },
+	        "PROTEST", new String[] { " 함께한 사람들과 변화를 이끌어 냈다.", " 하지만 진압 과정에서 크게 다쳤다." },
+	        "ENLIST", new String[] { " 무사히 살아 돌아왔다.", " 하지만 전투 중 크게 다쳤다." },
+	        "COUNSEL", new String[] { " 서로를 다시 이해하게 되었다.", " 하지만 끝내 마음을 돌리지 못하고 헤어졌다." });
 
 	// 결과 종류 묶기: TREAT_HOSPITAL, TREAT_HOME, TREAT_LOAN → TREAT
 	private String actionGroup(String action) {
@@ -340,6 +347,8 @@ public class EventService {
 			return 1 + getTraitEffect(lifeId, "INVEST");
 		if ("TREAT".equals(group))
 			return 1 - getTraitEffect(lifeId, "DISEASE"); // 질병 효과는 음수라 빼면 커짐
+		if ("COUNSEL".equals(group))
+		    return 1 + getTraitEffect(lifeId, "LOVE"); // 상담 → 연애 특성 (관계를 잘 꾸리는 능력)
 		return 1.0;
 	}
 
@@ -364,6 +373,12 @@ public class EventService {
 			r.setDeathAdd(0.05);
 			r.setDeathCause("전쟁");
 			return wealth;
+		case "COUNSEL": // 상담 실패 → 이혼 (기존 이혼 템플릿 효과와 같게)
+		    r.setEffHealth(-2);
+		    r.setEffHappiness(-10);
+		    r.setEffKnowledge(0);
+		    r.setEffRelation(-6);
+		    return -0.20;
 		default:
 			return wealth;
 		}
@@ -371,7 +386,9 @@ public class EventService {
 
 	// 판정 후 엔진에 보낼 상태 변화
 	private String afterAction(String action, boolean success) {
-		return null; // 투자는 상태 변화 없음 (치료·상담은 다음 단계에서 추가)
+	    if ("COUNSEL".equals(action) && !success)
+	        return "MARRIAGE_END"; // 상담 실패 → 이혼 (엔진이 결혼 상태 해제)
+	    return null; // 투자·참여는 상태 변화 없음 (치료는 4단계에서 추가)
 	}
 
 	// ===== 이민 목적지 (C10) =====
