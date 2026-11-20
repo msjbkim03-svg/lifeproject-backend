@@ -169,6 +169,15 @@ public class EventService {
 		return true;
 	}
 
+	// 최근에 이 선택 이벤트를 물어봤는지 (선택 이벤트 경험 ID = 이벤트ID_선택지순서)
+	private boolean askedRecently(String eventId, List<String> recentIds) {
+		for (String id : recentIds) {
+			if (id.startsWith(eventId + "_"))
+				return true;
+		}
+		return false;
+	}
+
 	// ===== 4단계: 문장 만들기 + 효과 계산 =====
 
 	// 고른 이벤트 → 결과 (문장 + 효과)
@@ -194,7 +203,7 @@ public class EventService {
 		sentence = sentence.replace("{이름}", name).replace("{나이}", String.valueOf(age))
 				.replace("{연도}", String.valueOf(year)).replace("{나라}", countryName == null ? countryCode : countryName)
 				.replace("{변수}", e.getVarValue() == null ? "" : e.getVarValue());
-		r.setLogText(sentence);
+		r.setLogText(Josa.apply(sentence));
 
 		// 3. 효과 = 템플릿 효과 × 이벤트 배율 (예: 질병 건강 -10 × 결핵 1.5 = -15)
 		double scale = e.getEffectScale() == null ? 1.0 : e.getEffectScale();
@@ -246,6 +255,7 @@ public class EventService {
 		}
 		List<EventResultDTO> results = new ArrayList<>();
 		boolean hasChoice = false; // 한 해에 선택 이벤트는 1개만 (역사 + 인생 합쳐서)
+		List<String> recentIds = eDAO.selectRecentExpIds(life.getLifeId(), age - 5); // 최근 5년 경험
 
 		// 1. 역사 이벤트 (C10): 먼저 굴림
 		for (EventResultDTO h : rollHist(life.getCurrentCountry(), year, age, life.getGender(), life.getName(),
@@ -264,8 +274,8 @@ public class EventService {
 			if (e == null)
 				continue; // 조건 맞는 이벤트 없음
 			if ("Y".equals(e.getIsChoice())) {
-				if (hasChoice)
-					continue; // 이미 선택 이벤트가 있으면 건너뜀
+				if (hasChoice || askedRecently(e.getEventId(), recentIds))
+					continue; // 이미 선택 이벤트가 있거나, 최근 5년 안에 물어본 이벤트면 건너뜀
 				hasChoice = true;
 			}
 
@@ -331,7 +341,7 @@ public class EventService {
 		if (r.getMigrateTo() == null) {
 			r.setMigrateTo(c.getMigrateTo()); // 귀향은 위에서 태어난 나라를 넣었으니 덮어쓰지 않음
 		}
-		r.setLogText(text);
+		r.setLogText(Josa.apply(text));
 
 		return r;
 	}
@@ -460,7 +470,7 @@ public class EventService {
 		r.setExpId("MIGRATE_" + countryCode); // 예: MIGRATE_JPN (어느 나라로 갔는지 경험)
 		r.setEventType(eventId.startsWith("LE_") ? "LIFE" : "HIST");
 		r.setTitle(d.getNameKo() + " 이주");
-		r.setLogText(year + "년, " + life.getName() + "은(는) " + d.getNameKo() + "(으)로 떠났다.");
+		r.setLogText(Josa.apply(year + "년, " + life.getName() + "은(는) " + d.getNameKo() + "(으)로 떠났다."));
 		r.setEffIncomeRate(TIER_INCOME[g]);
 		r.setEffHappiness(TIER_HAPPY[g]);
 		r.setResultAction("MIGRATE");
@@ -521,7 +531,7 @@ public class EventService {
 		String text = e.getBaseText() == null ? e.getTitle() : e.getBaseText();
 		text = text.replace("{이름}", name).replace("{나이}", String.valueOf(age)).replace("{연도}", String.valueOf(year))
 				.replace("{나라}", countryName == null ? countryCode : countryName);
-		r.setLogText(text);
+		r.setLogText(Josa.apply(text));
 
 		// 선택 이벤트는 효과 없이 대기 → 고른 선택지 효과만 반영
 		if (r.isChoice()) {
