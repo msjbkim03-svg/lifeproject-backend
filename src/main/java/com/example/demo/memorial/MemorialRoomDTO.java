@@ -14,8 +14,8 @@ public class MemorialRoomDTO {
 	private int birthYear;
 	private int deathYear;
 	private int deathAge;
-	private String birthCountry;
-	private String deathCountry;
+	private String birthCountryName;
+	private String deathCountryName;
 	private String deathCause;
 	private int childCount;
 	private String isMarried;
@@ -56,11 +56,11 @@ public class MemorialRoomDTO {
 	public int getDeathAge() { return deathAge; }
 	public void setDeathAge(int deathAge) { this.deathAge = deathAge; }
 
-	public String getBirthCountry() { return birthCountry; }
-	public void setBirthCountry(String birthCountry) { this.birthCountry = birthCountry; }
+	public String getBirthCountryName() { return birthCountryName; }
+	public void setBirthCountryName(String birthCountryName) { this.birthCountryName = birthCountryName; }
 
-	public String getDeathCountry() { return deathCountry; }
-	public void setDeathCountry(String deathCountry) { this.deathCountry = deathCountry; }
+	public String getDeathCountryName() { return deathCountryName; }
+	public void setDeathCountryName(String deathCountryName) { this.deathCountryName = deathCountryName; }
 
 	@JsonIgnore
 	public String getDeathCause() { return deathCause; }
