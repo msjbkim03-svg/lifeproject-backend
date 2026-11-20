@@ -112,4 +112,20 @@
 		AND EXP_ID LIKE #{expId}
 	</select>
 
+	<!-- 최근 몇 년 사이의 경험 ID (선택 이벤트 반복 방지) -->
+	<select id="selectRecentExpIds" parameterType="map" resultType="String">
+		SELECT EXP_ID FROM LIFE_EXPERIENCE
+		WHERE LIFE_ID = #{lifeId}
+		AND AGE >= #{fromAge}
+	</select>
+
+	<!-- C11: 역사 이벤트의 사건 설명 (C16 자료, Gemini 근거) -->
+	<select id="selectHistDescription" parameterType="String"
+		resultType="String">
+		SELECT H.DESCRIPTION
+		FROM GAME_EVENT G
+		JOIN HISTORY_EVENT H ON G.HIST_EVENT_ID = H.EVENT_ID
+		WHERE G.EVENT_ID = #{eventId}
+	</select>
+
 </mapper>

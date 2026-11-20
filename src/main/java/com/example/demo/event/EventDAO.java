@@ -99,5 +99,18 @@ public class EventDAO {
 	    p.put("expId", expId);
 	    return mybatis.selectOne("Event.selectLastExpAge", p);
 	}
+	
+	// 최근 몇 년 사이의 경험 ID
+	public List<String> selectRecentExpIds(int lifeId, int fromAge) {
+		Map<String, Object> p = new HashMap<>();
+		p.put("lifeId", lifeId);
+		p.put("fromAge", fromAge);
+		return mybatis.selectList("Event.selectRecentExpIds", p);
+	}
 
+	// C11: 역사 사건 설명 (없으면 null)
+	public String selectHistDescription(String eventId) {
+		return mybatis.selectOne("Event.selectHistDescription", eventId);
+	}
+	
 }

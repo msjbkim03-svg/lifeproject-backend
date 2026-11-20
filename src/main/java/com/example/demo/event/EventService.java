@@ -20,9 +20,11 @@ import com.example.demo.event.dto.HistEventTypeDTO;
 public class EventService {
 
 	private final EventDAO eDAO;
+	private final NarrateService narrateService;
 
-	public EventService(EventDAO eDAO) {
+	public EventService(EventDAO eDAO, NarrateService narrateService) {
 		this.eDAO = eDAO;
+		this.narrateService = narrateService;
 	}
 
 	// ===== 1단계: 템플릿 목록 (한 번만 DB 조회) =====
@@ -169,6 +171,15 @@ public class EventService {
 		return true;
 	}
 
+	// 최근에 이 선택 이벤트를 물어봤는지 (선택 이벤트 경험 ID = 이벤트ID_선택지순서)
+	private boolean askedRecently(String eventId, List<String> recentIds) {
+		for (String id : recentIds) {
+			if (id.startsWith(eventId + "_"))
+				return true;
+		}
+		return false;
+	}
+
 	// ===== 4단계: 문장 만들기 + 효과 계산 =====
 
 	// 고른 이벤트 → 결과 (문장 + 효과)
@@ -194,7 +205,7 @@ public class EventService {
 		sentence = sentence.replace("{이름}", name).replace("{나이}", String.valueOf(age))
 				.replace("{연도}", String.valueOf(year)).replace("{나라}", countryName == null ? countryCode : countryName)
 				.replace("{변수}", e.getVarValue() == null ? "" : e.getVarValue());
-		r.setLogText(sentence);
+		r.setLogText(Josa.apply(sentence));
 
 		// 3. 효과 = 템플릿 효과 × 이벤트 배율 (예: 질병 건강 -10 × 결핵 1.5 = -15)
 		double scale = e.getEffectScale() == null ? 1.0 : e.getEffectScale();
@@ -236,16 +247,17 @@ public class EventService {
 			expIds.add("STATE_MARRIED"); // 지금 결혼 중 (DB 저장 안 함, 조건 판정용)
 		}
 		if (life.getBirthCountry() != null && !life.getBirthCountry().equals(life.getCurrentCountry())) {
-		    expIds.add("STATE_ABROAD"); // 지금 태어난 나라 밖에 사는 중 (DB 저장 안 함, 조건 판정용)
+			expIds.add("STATE_ABROAD"); // 지금 태어난 나라 밖에 사는 중 (DB 저장 안 함, 조건 판정용)
 		}
 		// 재혼하면 자녀 계획 다시 묻기: 마지막 결혼보다 먼저 정한 자녀 계획은 지난 결혼 것이라 판정에서 뺌
 		Integer marryAge = eDAO.selectLastExpAge(life.getLifeId(), "LE_LOVE_PROPOSAL_1");
 		Integer planAge = eDAO.selectLastExpAge(life.getLifeId(), "LE_CHILD_PLAN_%");
 		if (marryAge != null && planAge != null && planAge < marryAge) {
-		    expIds.removeIf(id -> id.startsWith("LE_CHILD_PLAN_")); // 순회 중 삭제를 안전하게 처리
+			expIds.removeIf(id -> id.startsWith("LE_CHILD_PLAN_")); // 순회 중 삭제를 안전하게 처리
 		}
 		List<EventResultDTO> results = new ArrayList<>();
 		boolean hasChoice = false; // 한 해에 선택 이벤트는 1개만 (역사 + 인생 합쳐서)
+		List<String> recentIds = eDAO.selectRecentExpIds(life.getLifeId(), age - 5); // 최근 5년 경험
 
 		// 1. 역사 이벤트 (C10): 먼저 굴림
 		for (EventResultDTO h : rollHist(life.getCurrentCountry(), year, age, life.getGender(), life.getName(),
@@ -264,13 +276,19 @@ public class EventService {
 			if (e == null)
 				continue; // 조건 맞는 이벤트 없음
 			if ("Y".equals(e.getIsChoice())) {
-				if (hasChoice)
-					continue; // 이미 선택 이벤트가 있으면 건너뜀
+				if (hasChoice || askedRecently(e.getEventId(), recentIds))
+					continue; // 이미 선택 이벤트가 있거나, 최근 5년 안에 물어본 이벤트면 건너뜀
 				hasChoice = true;
 			}
 
 			results.add(buildResult(t, e, life.getName(), age, year, life.getCurrentCountry()));
 		}
+		
+		// 3. AI 서술 (C11): AI 서술 대상만, 실패하면 기본 문구 그대로
+		for (EventResultDTO r : results) {
+			narrateService.narrate(life, r, age, year);
+		}
+		
 		return results;
 	}
 
@@ -331,7 +349,7 @@ public class EventService {
 		if (r.getMigrateTo() == null) {
 			r.setMigrateTo(c.getMigrateTo()); // 귀향은 위에서 태어난 나라를 넣었으니 덮어쓰지 않음
 		}
-		r.setLogText(text);
+		r.setLogText(Josa.apply(text));
 
 		return r;
 	}
@@ -339,12 +357,12 @@ public class EventService {
 	// ===== 성공·실패 선택지 (투자·치료·참여·상담) =====
 
 	// 종류별 결과 문장 [성공, 실패]
-	private static final Map<String, String[]> SUCCESS_TEXT = Map.of(
-	        "INVEST", new String[] { " 투자는 성공적이었다.", " 하지만 투자는 실패해 손해를 봤다." },
-	        "PROTEST", new String[] { " 함께한 사람들과 변화를 이끌어 냈다.", " 하지만 진압 과정에서 크게 다쳤다." },
-	        "ENLIST", new String[] { " 무사히 살아 돌아왔다.", " 하지만 전투 중 크게 다쳤다." },
-	        "COUNSEL", new String[] { " 서로를 다시 이해하게 되었다.", " 하지만 끝내 마음을 돌리지 못하고 헤어졌다." },
-	        "TREAT", new String[] { " 치료가 잘 되어 몸을 회복했다.", " 하지만 치료가 듣지 않아 병이 깊어졌다." });
+	private static final Map<String, String[]> SUCCESS_TEXT = Map.of("INVEST",
+			new String[] { " 투자는 성공적이었다.", " 하지만 투자는 실패해 손해를 봤다." }, "PROTEST",
+			new String[] { " 함께한 사람들과 변화를 이끌어 냈다.", " 하지만 진압 과정에서 크게 다쳤다." }, "ENLIST",
+			new String[] { " 무사히 살아 돌아왔다.", " 하지만 전투 중 크게 다쳤다." }, "COUNSEL",
+			new String[] { " 서로를 다시 이해하게 되었다.", " 하지만 끝내 마음을 돌리지 못하고 헤어졌다." }, "TREAT",
+			new String[] { " 치료가 잘 되어 몸을 회복했다.", " 하지만 치료가 듣지 않아 병이 깊어졌다." });
 
 	// 결과 종류 묶기: TREAT_HOSPITAL, TREAT_HOME, TREAT_LOAN → TREAT
 	private String actionGroup(String action) {
@@ -358,7 +376,7 @@ public class EventService {
 		if ("TREAT".equals(group))
 			return 1 - getTraitEffect(lifeId, "DISEASE"); // 질병 효과는 음수라 빼면 커짐
 		if ("COUNSEL".equals(group))
-		    return 1 + getTraitEffect(lifeId, "LOVE"); // 상담 → 연애 특성 (관계를 잘 꾸리는 능력)
+			return 1 + getTraitEffect(lifeId, "LOVE"); // 상담 → 연애 특성 (관계를 잘 꾸리는 능력)
 		return 1.0;
 	}
 
@@ -384,17 +402,17 @@ public class EventService {
 			r.setDeathCause("전쟁");
 			return wealth;
 		case "COUNSEL": // 상담 실패 → 이혼 (기존 이혼 템플릿 효과와 같게)
-		    r.setEffHealth(-2);
-		    r.setEffHappiness(-10);
-		    r.setEffKnowledge(0);
-		    r.setEffRelation(-6);
-		    return -0.20;
+			r.setEffHealth(-2);
+			r.setEffHappiness(-10);
+			r.setEffKnowledge(0);
+			r.setEffRelation(-6);
+			return -0.20;
 		case "TREAT": // 치료 실패: 병이 깊어짐 (치료 방법과 관계없이 같은 피해)
-		    r.setEffHealth(-15);
-		    r.setEffHappiness(-8);
-		    r.setDeathAdd(0.05);
-		    r.setDeathCause("질병");
-		    return wealth; // 치료비는 성공·실패와 관계없이 나감
+			r.setEffHealth(-15);
+			r.setEffHappiness(-8);
+			r.setDeathAdd(0.05);
+			r.setDeathCause("질병");
+			return wealth; // 치료비는 성공·실패와 관계없이 나감
 		default:
 			return wealth;
 		}
@@ -402,11 +420,11 @@ public class EventService {
 
 	// 판정 후 엔진에 보낼 상태 변화
 	private String afterAction(String action, boolean success) {
-	    if ("COUNSEL".equals(action) && !success)
-	        return "MARRIAGE_END"; // 상담 실패 → 이혼 (엔진이 결혼 상태 해제)
-	    if ("TREAT_LOAN".equals(action))
-	        return "LOAN"; // 빚내서 치료 → 성공·실패와 관계없이 빚 (엔진이 재산에서 뺌)
-	    return null; // 투자·참여·병원·집 치료는 상태 변화 없음
+		if ("COUNSEL".equals(action) && !success)
+			return "MARRIAGE_END"; // 상담 실패 → 이혼 (엔진이 결혼 상태 해제)
+		if ("TREAT_LOAN".equals(action))
+			return "LOAN"; // 빚내서 치료 → 성공·실패와 관계없이 빚 (엔진이 재산에서 뺌)
+		return null; // 투자·참여·병원·집 치료는 상태 변화 없음
 	}
 
 	// ===== 이민 목적지 (C10) =====
@@ -460,7 +478,7 @@ public class EventService {
 		r.setExpId("MIGRATE_" + countryCode); // 예: MIGRATE_JPN (어느 나라로 갔는지 경험)
 		r.setEventType(eventId.startsWith("LE_") ? "LIFE" : "HIST");
 		r.setTitle(d.getNameKo() + " 이주");
-		r.setLogText(year + "년, " + life.getName() + "은(는) " + d.getNameKo() + "(으)로 떠났다.");
+		r.setLogText(Josa.apply(year + "년, " + life.getName() + "은(는) " + d.getNameKo() + "(으)로 떠났다."));
 		r.setEffIncomeRate(TIER_INCOME[g]);
 		r.setEffHappiness(TIER_HAPPY[g]);
 		r.setResultAction("MIGRATE");
@@ -521,7 +539,7 @@ public class EventService {
 		String text = e.getBaseText() == null ? e.getTitle() : e.getBaseText();
 		text = text.replace("{이름}", name).replace("{나이}", String.valueOf(age)).replace("{연도}", String.valueOf(year))
 				.replace("{나라}", countryName == null ? countryCode : countryName);
-		r.setLogText(text);
+		r.setLogText(Josa.apply(text));
 
 		// 선택 이벤트는 효과 없이 대기 → 고른 선택지 효과만 반영
 		if (r.isChoice()) {

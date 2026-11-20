@@ -49,6 +49,7 @@ public class LifeDTO {
 	private boolean needJob;	// [화면용] 직업 선택 창 띄우기 (C06)
 	private List<JobDTO> jobOffers;	// [화면용] 제안된 직업 3개 (C06)
 	private String jobName;	// [화면용] 직업 이름
+	private List<LifeQuestDTO> quests;	// [화면용] 이 인생에서 고른 퀘스트 (진행 화면 퀘스트 칸)
 	private String countryName;	// [화면용] 나라 이름
 	private String histName;	// [화면용] 당시 국가명
 	private Double lifeExpectancy;	// [화면용] 기대수명
@@ -399,6 +400,14 @@ public class LifeDTO {
 
 	public void setJobOffers(List<JobDTO> jobOffers) {
 		this.jobOffers = jobOffers;
+	}
+
+	public List<LifeQuestDTO> getQuests() {
+		return quests;
+	}
+
+	public void setQuests(List<LifeQuestDTO> quests) {
+		this.quests = quests;
 	}
 
 	public String getJobName() {

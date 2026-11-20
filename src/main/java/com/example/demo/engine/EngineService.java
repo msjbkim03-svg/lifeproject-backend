@@ -124,6 +124,17 @@ public class EngineService {
 		return Math.sqrt(2) * invNorm((t + 1) / 2);
 	}
 
+	// 직업 소득 = 1인당 GDP × 배율을 나라 형편에 맞춤 (11/20 동현님: 소득이 현실과 동떨어짐)
+	//   ① 불평등이 큰 나라일수록 좋은 일과 나쁜 일의 소득 차가 큼: 배율^(σ/0.57) (원작 로그정규 소득처럼, 한국 σ≈0.57이 기준이라 한국은 그대로)
+	//   ② 가난한 나라는 일하는 사람이 인구에 비해 적어, 일하는 사람 1명의 소득이 1인당 GDP보다 큼:
+	//      구매력 1인당 GDP 2만 달러 아래면 최대 ×1.4 (2만 달러 이상은 그대로)
+	//   예) 인도 2018년 철도 기관사 월 72만 → 약 110만 원 (한국 체감, 실제 인도 기관사 월급 4.5만 루피 ≈ 한국 체감 200만 원 쪽으로)
+	private double jobPay(double gdp, double rate, String cc, CountryStatDTO stat) {
+		double k = clamp(sigmaOf(cc, stat) / 0.57, 0.9, 1.5);
+		double w = 1 + 0.4 * clamp(1 - toPpp(gdp) / 20000, 0, 1);
+		return gdp * Math.pow(Math.max(0.01, rate), k) * w;
+	}
+
 	// 그 나라 중위 소득 (원작 incomeAt(나라, 0.5))
 	private double medIncome(String cc, CountryStatDTO stat) {
 		double s = sigmaOf(cc, stat);
@@ -147,7 +158,7 @@ public class EngineService {
 			return incomePct(life.getIncome(), cc, stat);
 		}
 		if (life.getIncomeRate() != null) {
-			return incomePct(gdpOf(stat) * life.getIncomeRate(), cc, stat);
+			return incomePct(jobPay(gdpOf(stat), life.getIncomeRate(), cc, stat), cc, stat);
 		}
 		if (life.getIncome() > 0) {
 			return incomePct(life.getIncome(), cc, stat);
@@ -614,6 +625,21 @@ public class EngineService {
 	// 진행 화면에 함께 보내는 값 (fillRegion 끝에서)
 	private void fillView(LifeDTO life, CountryStatDTO stat) {
 		life.setKrwPerUsd(krwPerUsd(stat));
+		// 직업 이름: DB(LIFE)에는 JOB_ID 만 있어서, 다시 읽은 인생(1년 진행·이어하기)에는 이름이 비어 화면에 '일하는 중'만 떴음 → 직업 목록에서 채움
+		if (life.getJobId() != null && life.getJobName() == null) {
+			for (JobDTO j : jobs()) {
+				if (j.getJobId().equals(life.getJobId())) {
+					life.setJobName(j.getJobName());
+					break;
+				}
+			}
+		}
+		// 이 인생에서 고른 퀘스트 (읽기만, 비회원·퀘스트 없는 인생은 빈 목록)
+		try {
+			life.setQuests(engineDao.selectLifeQuests(life.getLifeId()));
+		} catch (RuntimeException e) {
+			// 퀘스트 표가 없어도 진행은 되게
+		}
 		// 태어난 해 기대수명 (원작 e0): 화면의 '1년 ≈ n초'·인생 지도 기대수명 칸에 씀
 		//   DB에서 다시 읽은 인생(1년 진행·이어하기)에는 이 값이 없어서 태어난 나라·연대 통계에서 채움
 		if (life.getLifeExpectancy() == null) {
@@ -626,10 +652,26 @@ public class EngineService {
 				}
 			}
 		}
+		fillQuestLive(life);
 		double med = medIncome(life.getCurrentCountry(), stat);
-		boolean partner = "Y".equals(life.getMarriedYn()) && life.getCurrentAge() < retireAge(life, stat);
-		life.setSpouseIncome(partner ? Math.round(med) : null);
-		double inc = life.getIncome() > 0 ? life.getIncome() : partner ? med : 0;
+		// 배우자 소득: 배우자 직업 소득 배율 × 1인당 GDP (원작처럼 직업에 맞춤, 예전엔 누구나 중위 소득)
+		//   집안일·육아를 맡았거나 배우자가 은퇴 나이면 없음
+		Long spInc = null;
+		if ("Y".equals(life.getMarriedYn())) {
+			try {
+				FamSeed fs = famSeed(life, stat);
+				int sa = Math.max(16, life.getCurrentAge() + fs.spouseGap);
+				double rate = spouseRate(life, fs);
+				if (sa < retireAge(life, stat) && rate > 0) {
+					spInc = Math.round(jobPay(gdpOf(stat), rate, life.getCurrentCountry(), stat));
+				}
+			} catch (RuntimeException e) {
+				spInc = Math.round(med); // 통계가 모자라면 예전처럼 중위 소득
+			}
+		}
+		life.setSpouseIncome(spInc);
+		boolean partner = spInc != null;
+		double inc = life.getIncome() > 0 ? life.getIncome() : partner ? spInc : 0;
 		if (inc > 0 && life.getCurrentAge() >= 15) {
 			life.setIncomeRankCountry(incomePct(inc, life.getCurrentCountry(), stat));
 			life.setIncomeRankAsia(asiaPct(inc, life.getBirthYear() + life.getCurrentAge()));
@@ -705,6 +747,49 @@ public class EngineService {
 	}
 
 	private final Map<Integer, FamSeed> famCache = new ConcurrentHashMap<>();
+
+	// 배우자 직업별 소득 배율 (1인당 GDP 기준, 직업 표 INCOME_RATE 와 같은 눈금) · 가사·육아는 0
+	private static final Map<String, Double> SPOUSE_RATE = Map.ofEntries(
+			Map.entry("가사·육아", 0.0), Map.entry("농사일", 0.45), Map.entry("날품팔이", 0.4), Map.entry("시장 행상", 0.5),
+			Map.entry("소작농", 0.4), Map.entry("농업 노동자", 0.45), Map.entry("어부", 0.6), Map.entry("자작농", 0.75),
+			Map.entry("시장 상인", 0.75), Map.entry("재봉사", 0.65), Map.entry("목수", 0.8), Map.entry("교사", 1.1),
+			Map.entry("상점 주인", 1.2), Map.entry("면사무소 직원", 1.0), Map.entry("지주", 2.0), Map.entry("공무원", 1.1),
+			Map.entry("공장 노동자", 0.8), Map.entry("건설 노동자", 0.8), Map.entry("노점상", 0.5), Map.entry("청소 노동자", 0.55),
+			Map.entry("운전기사", 0.85), Map.entry("사무원", 1.0), Map.entry("간호사", 1.1), Map.entry("미용사", 0.8),
+			Map.entry("기술자", 1.1), Map.entry("상인", 0.9), Map.entry("버스 기사", 0.9), Map.entry("회사원", 1.2),
+			Map.entry("엔지니어", 1.5), Map.entry("약사", 1.6), Map.entry("의사", 2.5), Map.entry("프로그래머", 1.6),
+			Map.entry("사업가", 2.0));
+
+	// 같은 인생은 늘 같은 배율 (직업 배율 × 0.85~1.15)
+	private double spouseRate(LifeDTO life, FamSeed f) {
+		double k = SPOUSE_RATE.getOrDefault(f.spouseJob, 1.0);
+		return k * (0.85 + new java.util.SplittableRandom(life.getLifeId() * 31L + 7).nextDouble() * 0.3);
+	}
+
+	// 결혼한 해에 결혼 상대 소개 한 줄 (원작: 상대의 나이·직업·소득) - 한 인생에 한 번
+	private void spouseNote(LifeDTO life, int age) {
+		if (!"Y".equals(life.getMarriedYn()) || !"PLAYING".equals(life.getStatus())) {
+			return;
+		}
+		EngState s = engState(life);
+		if (s.spouseNoted) {
+			return;
+		}
+		s.spouseNoted = true;
+		try {
+			CountryStatDTO stat = yearStat(life);
+			FamSeed f = famSeed(life, stat);
+			int sa = Math.max(16, age + f.spouseGap);
+			double rate = spouseRate(life, f);
+			String t = "결혼 상대 " + f.spouse + ": " + sa + "세 · "
+					+ (rate > 0 ? f.spouseJob + " · 월 소득 약 " + won(life, jobPay(gdpOf(stat), rate, life.getCurrentCountry(), stat) / 12) + " (한국 체감)"
+							: "집안일과 아이 돌보기를 맡기로 했다");
+			saveEventLog(life, age, null, null, t);
+			addYearNote(life, t);
+		} catch (RuntimeException e) {
+			// 이름·통계가 없으면 소개 줄만 건너뜀
+		}
+	}
 
 	private static String pick(java.util.SplittableRandom r, String... a) {
 		return a[r.nextInt(a.length)];
@@ -882,6 +967,9 @@ public class EngineService {
 		if ("Y".equals(life.getMarriedYn())) {
 			int sa = Math.max(16, age + f.spouseGap);
 			String job = sa >= retireAge(life, stat) ? "은퇴 · 전 " + f.spouseJob : f.spouseJob;
+			if (life.getSpouseIncome() != null && life.getSpouseIncome() > 0) {
+				job = job + " · 월 " + won(life, life.getSpouseIncome() / 12.0); // 원작처럼 배우자 소득도
+			}
 			String sex = "M".equals(life.getGender()) ? "여성" : "남성";
 			out.add(new FamilyMemberDTO("배우자", f.spouse, sa, job, true).with(sex, bondWord(life, spB, 10)));
 		}
@@ -1037,6 +1125,7 @@ public class EngineService {
 		int marryAge;      // 결혼하는 나이 (99면 안 함)
 		int kids;
 		boolean home;      // 가사·육아 전담
+		String job;        // 일하는 동안의 직업 이름 (학력·권역 산업 비율로 하나, '일하는 중' 대신 보여 줌)
 	}
 
 	private final Map<Integer, List<PeerSeed>> peerCache = new ConcurrentHashMap<>();
@@ -1108,10 +1197,59 @@ public class EngineService {
 			p.kids = (int) Math.round(clamp(kidsOfEra(p.cc, c, by + 25) + r.nextGaussian() * 1.2 - 0.3, 0, 9));
 			double home = by < 1965 ? 0.6 : by < 1985 ? 0.45 : 0.3;
 			p.home = "F".equals(p.gender) && r.nextDouble() < home;
+			p.job = peerJob(ghost, edu, r);
 			list.add(p);
 		}
 		peerCache.put(life.getLifeId(), list);
 		return list;
+	}
+
+	// 또래 직업: 마친 학력으로 할 수 있는 직업 중 그 권역 산업 비율(25세 무렵)대로 하나
+	//   학교 다닌 햇수 edu → 마친 단계: 6년 초등, 9년 중학교, 12년 고등학교, 16년 대학, 18년 대학원
+	private String peerJob(LifeDTO ghost, double edu, java.util.SplittableRandom r) {
+		int finished = edu >= 18 ? 4 : edu >= 16 ? 3 : edu >= 12 ? 2 : edu >= 9 ? 1 : edu >= 6 ? 0 : -1;
+		ghost.setCurrentAge(25);
+		double agri = 40, industry = 25, service = 35;
+		RegionStatDTO rs = regionStat(ghost);
+		if (rs != null) {
+			if (rs.getAgriRate() != null) {
+				agri = rs.getAgriRate();
+			}
+			if (rs.getIndustryRate() != null) {
+				industry = rs.getIndustryRate();
+			}
+			if (rs.getServiceRate() != null) {
+				service = rs.getServiceRate();
+			}
+		}
+		// 산업별로 고를 수 있는 직업 수가 달라도 비율이 맞게: 산업 비율 ÷ 그 산업 직업 수
+		Map<String, Integer> cnt = new HashMap<>();
+		List<JobDTO> pool = new ArrayList<>();
+		for (JobDTO j : jobs()) {
+			if (levelIndex(j.getRequiredEdu()) <= finished && !j.getJobId().equals("JOB_SOLDIER") && !j.getJobId().equals("JOB_OFFICER")) {
+				pool.add(j);
+				cnt.merge(j.getIndustry(), 1, Integer::sum);
+			}
+		}
+		if (pool.isEmpty()) {
+			return null;
+		}
+		double total = 0;
+		double[] w = new double[pool.size()];
+		for (int i = 0; i < pool.size(); i++) {
+			String ind = pool.get(i).getIndustry();
+			double rate = "AGRI".equals(ind) ? agri : "INDUSTRY".equals(ind) ? industry : service;
+			w[i] = rate / cnt.get(ind);
+			total += w[i];
+		}
+		double pick = r.nextDouble() * total;
+		for (int i = 0; i < pool.size(); i++) {
+			pick -= w[i];
+			if (pick < 0) {
+				return pool.get(i).getJobName();
+			}
+		}
+		return pool.get(pool.size() - 1).getJobName();
 	}
 
 	private List<PeerDTO> peers(LifeDTO life) {
@@ -1146,11 +1284,11 @@ public class EngineService {
 		}
 		String s;
 		if (age >= 65) {
-			s = "은퇴해 노년을 보내는 중";
+			s = p.job == null ? "은퇴해 노년을 보내는 중" : "은퇴 · 전 " + p.job;
 		} else if (p.home && age >= p.marryAge) {
 			s = "가정을 돌보는 중";
 		} else {
-			s = "일하는 중";
+			s = p.job == null ? "일하는 중" : p.job;
 		}
 		if (age >= p.marryAge && age < 65) {
 			int born = Math.min(p.kids, Math.max(0, (int) ((age - p.marryAge) / 2.5) + (age > p.marryAge ? 1 : 0)));
@@ -1353,6 +1491,7 @@ public class EngineService {
 		CountryStatDTO stat = yearStat(life);
 		long startAssets = life.getAssets();
 		life.setMoneyFlow(new ArrayList<>()); // [화면용] 지난 1년 순자산 내역
+		life.setEvents(new ArrayList<>());    // [화면용] 올해 일어난 일 (돈 계산·이벤트·물건이 차례로 덧붙임)
 
 		// ① 집중 효과 (C04): 고르지 않았으면 나이대 기본값
 		if (life.getStageCode() != null && life.getFocusCode() == null) {
@@ -1370,9 +1509,20 @@ public class EngineService {
 
 		// ⑤ 인생·역사 이벤트 (C09, C10): 윤아님 rollYear로 올해 일어난 일을 뽑고 → 효과·상태를 인생에 반영
 		eventStep(life);
+		// ⑤-1 전쟁 (원작 ERA_WAR): 그 나라·그해 전쟁이면 확률 없이 반드시 시작·끝 소식 / 결혼 상대 소개 (원작처럼 직업·소득)
+		warYear(life);
+		spouseNote(life, life.getCurrentAge());
 
 		// ⑤-2 돈 쓰기·투자 (C06-3): 모은 돈 굴리기 + 가진 물건 유지비
 		investStep(life, stat);
+		// ⑤-3 스마트폰이 흔해진 해부터 장만 (원작 phoneYear)
+		phoneYear(life, stat);
+		// ⑤-4 반려동물 돌봄·떠나보냄 (원작 petYear)
+		petYear(life, stat);
+		// ⑤-5 병역 복무·전역 (원작 service)
+		svcYear(life);
+		// ⑤-6 취미 (원작 hobby): 해마다 작은 효과와 비용
+		hobbyYear(life, stat);
 		fixStats(life);
 
 		// ⑥ 사망 판정 (C07): 올해(현재 나이)를 못 넘기면 사망
@@ -1418,6 +1568,14 @@ public class EngineService {
 				life.setDeathCause(deathCause(life));
 			}
 			finalResult(life);
+			// 재산이 어떻게 나뉘었는지 (원작 상속): 화면에선 사망 줄 뒤에 (eventType INHERIT)
+			String inh = inheritText(life);
+			saveEventLog(life, life.getCurrentAge(), null, null, inh);
+			List<EventResultDTO> evs = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
+			EventResultDTO ie = noteEvent(inh);
+			ie.setEventType("INHERIT");
+			evs.add(ie);
+			life.setEvents(evs);
 			engineDao.endLife(life);
 			// 퀘스트 판정 + 포인트 지급 (끝난 인생만, 비회원은 퀘스트가 없어 그냥 지나감)
 			//   같은 트랜잭션이라 방금 저장한 STATUS='ENDED'·사망 나이를 그대로 읽어서 판정
@@ -1445,6 +1603,10 @@ public class EngineService {
 		int lived = life.getCurrentAge() - 1; // 방금 지나간 해 (이벤트와 같은 나이로 기록)
 		List<EventResultDTO> yearEvents = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
 		for (String note : milestones(life, eduBefore, schoolBefore, jobBefore, jobIdBefore)) {
+			saveEventLog(life, lived, null, null, note);
+			yearEvents.add(noteEvent(note));
+		}
+		for (String note : questNotes(life)) {
 			saveEventLog(life, lived, null, null, note);
 			yearEvents.add(noteEvent(note));
 		}
@@ -1510,6 +1672,178 @@ public class EngineService {
 		return life;
 	}
 
+
+	// ================= 전쟁 (원작 ERA_WAR · eraDue) =================
+	// 그 나라·그해 전쟁이면 확률 없이 반드시 겪음 (11/20 동현님: "그 시대 그 나라에 살면 100%")
+	//   - 전쟁이 시작한 해: 시작 소식 (화면 경고등)
+	//   - 전쟁 중에 태어나면 0세에: 태어난 해에 전쟁이 이어지고 있었다
+	//   - 끝난 해: 끝 소식 + 행복 +4 (진 쪽·나라가 갈린 쪽은 빼고), 아직 이어지는 전쟁(2024년 이후 끝)은 없음
+	//   원작처럼 그해 강도 0.5 이상일 때만 (강도 0.5 아래는 국지 분쟁이라 소식 없음), 크메르 루주 학살은 따로 다루지 않음
+	//   윤아님 역사 이벤트(DB 확률)로 같은 해 전쟁 사건이 이미 떴으면 시작 소식은 겹치지 않게 뺌
+	//   사망 위험은 그해 생명표(전쟁 해의 기대수명)와 윤아님 전쟁 이벤트 deathAdd 에 이미 들어 있어 더하지 않음
+	//   { 나라, 시작, 끝, 강도, 전쟁 코드 } - 원작 ERA_WAR 중 우리 나라들
+	private static final String[][] ERA_WAR = {
+			{ "CHN", "1930", "1936", "0.5", "cncw" }, { "CHN", "1937", "1945", "3", "cjw" }, { "CHN", "1946", "1949", "2", "cncw" },
+			{ "JPN", "1937", "1940", "0.5", "cjw" }, { "JPN", "1941", "1943", "1.2", "ww2" }, { "JPN", "1944", "1945", "3", "ww2" },
+			{ "IND", "1939", "1945", "0.2", "ww2" }, { "PHL", "1941", "1945", "2", "ww2" }, { "IDN", "1942", "1945", "1.5", "ww2" },
+			{ "MMR", "1942", "1945", "1.5", "ww2" }, { "MYS", "1941", "1945", "1", "ww2" }, { "SGP", "1942", "1945", "1", "ww2" },
+			{ "VNM", "1940", "1945", "0.5", "ww2" }, { "TLS", "1942", "1945", "3", "ww2" }, { "THA", "1941", "1945", "0.3", "ww2" },
+			{ "IDN", "1945", "1949", "1", "idrev" }, { "VNM", "1946", "1954", "1.5", "indo" }, { "MYS", "1948", "1960", "0.3", "mye" },
+			{ "MMR", "1948", "2020", "0.4", "mmw" }, { "MMR", "2021", "2025", "1.5", "mmw" }, { "IND", "1947", "1948", "0.2", "kash47" },
+			{ "PAK", "1947", "1948", "0.3", "kash47" }, { "KOR", "1950", "1953", "5", "kw" }, { "PRK", "1950", "1953", "5", "kw" },
+			{ "VNM", "1955", "1964", "1", "vnw" }, { "VNM", "1965", "1975", "3", "vnw" }, { "VNM", "1979", "1979", "0.5", "sinovn" },
+			{ "LAO", "1959", "1975", "1.5", "laow" }, { "KHM", "1970", "1975", "2.5", "khw" }, { "KHM", "1979", "1991", "1", "khw2" },
+			{ "LKA", "1983", "2009", "1", "lkw" }, { "NPL", "1996", "2006", "0.4", "npw" }, { "AFG", "1978", "1989", "3", "afw1" },
+			{ "AFG", "1990", "2001", "2", "afw2" }, { "AFG", "2002", "2021", "1.2", "afw3" }, { "BGD", "1971", "1971", "5", "bdw" },
+			{ "PAK", "1971", "1971", "0.5", "bdw" }, { "PHL", "1972", "1990", "0.3", "phm" },
+			{ "SYR", "1967", "1967", "0.5", "w67" }, { "SYR", "1973", "1973", "0.5", "w73" }, { "SYR", "2011", "2024", "3", "syw" },
+			{ "SYR", "2025", "2025", "1", "syw" }, { "JOR", "1967", "1967", "0.5", "w67" }, { "JOR", "1970", "1971", "0.5", "bsep" },
+			{ "ISR", "1956", "1956", "0.3", "suez" }, { "ISR", "1967", "1967", "0.5", "w67" }, { "ISR", "1973", "1973", "1", "w73" },
+			{ "ISR", "1982", "1982", "0.3", "lbw82" }, { "ISR", "2006", "2006", "0.3", "lbw06" }, { "ISR", "2023", "2025", "0.6", "gaza23" },
+			{ "PSE", "1967", "1967", "1", "w67" }, { "PSE", "1987", "1993", "0.5", "int1" }, { "PSE", "2000", "2005", "1", "int2" },
+			{ "PSE", "2008", "2009", "1.5", "gaza08" }, { "PSE", "2014", "2014", "1.5", "gaza14" }, { "PSE", "2023", "2025", "5", "gaza23" },
+			{ "LBN", "1975", "1990", "2.5", "lbw" }, { "LBN", "2006", "2006", "1", "lbw06" }, { "IRN", "1980", "1988", "2", "iiw" },
+			{ "IRQ", "1961", "1970", "0.5", "kurd" }, { "IRQ", "1974", "1975", "0.5", "kurd" }, { "IRQ", "1980", "1988", "2.5", "iiw" },
+			{ "IRQ", "1991", "1991", "2", "gulf" }, { "IRQ", "2003", "2011", "2.5", "iqw" }, { "IRQ", "2014", "2017", "2", "isw" },
+			{ "KWT", "1990", "1991", "2", "gulf" }, { "YEM", "1962", "1970", "1.5", "yew1" }, { "YEM", "1986", "1986", "1", "yew86" },
+			{ "YEM", "1994", "1994", "0.5", "yew94" }, { "YEM", "2015", "2025", "2", "yew" }, { "OMN", "1963", "1976", "0.3", "dhofar" },
+			{ "TUR", "1984", "1999", "0.3", "pkk" }, { "AZE", "1988", "1994", "1.5", "nkw" }, { "AZE", "2020", "2020", "0.5", "nkw2" },
+			{ "GEO", "1991", "1993", "1.5", "geow" }, { "GEO", "2008", "2008", "0.5", "ruge" }, { "TJK", "1992", "1997", "2.5", "tjw" },
+			{ "ARM", "1988", "1994", "1.5", "nkw" }, { "ARM", "2020", "2020", "1", "nkw2" }, { "CYP", "1974", "1974", "2", "cyw" },
+			{ "TLS", "1975", "1999", "1.5", "tlw" } };
+
+	private static final Map<String, String> WAR_NAME = Map.ofEntries(
+			Map.entry("ww2", "제2차 세계대전"), Map.entry("cjw", "중일전쟁"), Map.entry("cncw", "국공 내전"),
+			Map.entry("idrev", "인도네시아 독립전쟁"), Map.entry("kash47", "제1차 카슈미르 전쟁"), Map.entry("kw", "한국전쟁"),
+			Map.entry("indo", "제1차 인도차이나 전쟁"), Map.entry("vnw", "베트남 전쟁"), Map.entry("sinovn", "중국-베트남 전쟁"),
+			Map.entry("laow", "라오스 내전"), Map.entry("khw", "캄보디아 내전"), Map.entry("khw2", "캄보디아 내전"),
+			Map.entry("lkw", "스리랑카 내전"), Map.entry("npw", "네팔 내전"), Map.entry("afw1", "소련-아프가니스탄 전쟁"),
+			Map.entry("afw2", "아프가니스탄 내전"), Map.entry("afw3", "아프가니스탄 전쟁"), Map.entry("bdw", "방글라데시 해방전쟁"),
+			Map.entry("mye", "말라야 비상사태"), Map.entry("phm", "민다나오 분쟁"), Map.entry("mmw", "미얀마 내전"),
+			Map.entry("suez", "수에즈 전쟁"), Map.entry("w67", "제3차 중동전쟁"), Map.entry("w73", "제4차 중동전쟁"),
+			Map.entry("syw", "시리아 내전"), Map.entry("bsep", "요르단 내전"), Map.entry("lbw82", "1982년 레바논 전쟁"),
+			Map.entry("lbw06", "2006년 레바논 전쟁"), Map.entry("gaza23", "2023년 가자 전쟁"), Map.entry("int1", "제1차 인티파다"),
+			Map.entry("int2", "제2차 인티파다"), Map.entry("gaza08", "2008년 가자 전쟁"), Map.entry("gaza14", "2014년 가자 전쟁"),
+			Map.entry("lbw", "레바논 내전"), Map.entry("iiw", "이란-이라크 전쟁"), Map.entry("kurd", "쿠르드 전쟁"),
+			Map.entry("gulf", "걸프 전쟁"), Map.entry("iqw", "이라크 전쟁"), Map.entry("isw", "IS와의 전쟁"),
+			Map.entry("yew1", "북예멘 내전"), Map.entry("yew86", "남예멘 내전"), Map.entry("yew94", "예멘 내전"),
+			Map.entry("yew", "예멘 내전"), Map.entry("dhofar", "도파르 전쟁"), Map.entry("pkk", "쿠르드 분쟁"),
+			Map.entry("nkw", "나고르노카라바흐 전쟁"), Map.entry("nkw2", "제2차 나고르노카라바흐 전쟁"), Map.entry("geow", "조지아 내전"),
+			Map.entry("ruge", "러시아-조지아 전쟁"), Map.entry("tjw", "타지키스탄 내전"), Map.entry("cyw", "1974년 키프로스 전쟁"),
+			Map.entry("tlw", "인도네시아의 동티모르 점령"));
+
+	// 시작 소식 (코드|나라 가 있으면 그것, 없으면 코드, 그것도 없으면 '○○이 일어났다')
+	private static final Map<String, String> WAR_START = Map.ofEntries(
+			Map.entry("cjw", "7월, 베이징 근처 루거우차오의 충돌이 일본과의 전면 전쟁으로 번졌다. 중일전쟁이 시작되었다."),
+			Map.entry("cjw|JPN", "중국과의 전쟁이 시작되었다. 마을마다 출정하는 군인을 깃발을 흔들며 배웅했다."),
+			Map.entry("ww2", "일본군이 쳐들어와 이곳을 점령했다. 제2차 세계대전의 전쟁터가 되었다."),
+			Map.entry("ww2|JPN", "12월 8일, 일본이 미국·영국과 전쟁을 시작했다는 라디오 방송이 흘러나왔다. 태평양 전쟁이 시작되었다."),
+			Map.entry("ww2|IDN", "일본군이 쳐들어와 네덜란드군이 항복했다. 제2차 세계대전의 전쟁터가 되었다."),
+			Map.entry("idrev", "돌아온 네덜란드군과 싸움이 시작되었다. 인도네시아 독립전쟁이 일어났다."),
+			Map.entry("kw", "6월 25일 새벽, 북한군이 38선을 넘어 쳐내려왔다. 한국전쟁이 시작되어 피란 짐을 진 사람들로 길이 메워졌다."),
+			Map.entry("kw|PRK", "6월 25일 새벽, 인민군이 38선을 넘어 남쪽으로 내려가며 한국전쟁이 시작되었다. 머지않아 폭격이 온 나라를 덮쳤다."),
+			Map.entry("bdw", "독립을 외치던 동파키스탄에서 군대의 학살이 시작되었다. 방글라데시 해방전쟁이 일어났다."),
+			Map.entry("bdw|PAK", "독립을 요구하는 동파키스탄에 군대가 보내졌다. 방글라데시 해방전쟁이 일어났다."),
+			Map.entry("syw", "시위가 내전으로 번졌다. 시리아 내전이 시작되어 도시마다 폭격 소리가 들렸다."),
+			Map.entry("gulf", "미국이 이끄는 다국적군이 이라크군을 몰아내려 공습을 시작했다. 걸프 전쟁이 일어났다."),
+			Map.entry("gulf|KWT", "이라크군이 국경을 넘어 쿠웨이트를 점령했다. 걸프 전쟁이 시작되었다."),
+			Map.entry("iqw", "미국이 이끄는 연합군이 이라크를 침공했다. 이라크 전쟁이 시작되었다."),
+			Map.entry("isw", "IS가 모술을 비롯한 여러 도시를 점령했다. IS와의 전쟁이 시작되었다."),
+			Map.entry("iiw", "이라크와 이란 사이에 전쟁이 일어났다. 이란-이라크 전쟁이 시작되었다."),
+			Map.entry("lbw", "종파 사이의 충돌이 내전으로 번졌다. 레바논 내전이 시작되어 베이루트가 동서로 갈렸다."));
+
+	private static final Map<String, String> WAR_END = Map.ofEntries(
+			Map.entry("ww2", "일본이 항복하고 제2차 세계대전이 끝났다."),
+			Map.entry("ww2|JPN", "8월 15일 정오, 라디오에서 전쟁이 끝났다는 천황의 방송이 흘러나왔다."),
+			Map.entry("cjw", "8월, 일본이 항복했다는 소식에 폭죽이 터졌다. 중일전쟁이 끝났다."),
+			Map.entry("cncw", "국공 내전이 끝났다."),
+			Map.entry("idrev", "네덜란드가 인도네시아의 독립을 인정했다. 독립전쟁이 끝났다."),
+			Map.entry("kw", "정전 협정이 맺어져 총성이 멎었다. 나라는 휴전선을 사이에 두고 둘로 나뉘었다."),
+			Map.entry("vnw", "사이공이 함락되고 베트남 전쟁이 끝났다."),
+			Map.entry("vnw|VNM", "사이공이 함락되고 베트남 전쟁이 끝났다. 나라는 하나가 되었다."),
+			Map.entry("bdw|PAK", "동파키스탄이 방글라데시로 독립하며 전쟁이 끝났다."));
+
+	private static final java.util.Set<String> WAR_END_SAD = java.util.Set.of("ww2|JPN", "bdw|PAK", "cyw", "nkw2|ARM");
+	private static final java.util.Set<String> WAR_JOIN = java.util.Set.of("cjw|JPN"); // 이어서 더 큰 전쟁이 된 쪽은 끝 소식 없음
+
+	private void warYear(LifeDTO life) {
+		if (!"PLAYING".equals(life.getStatus())) {
+			return;
+		}
+		String cc = life.getCurrentCountry();
+		int age = life.getCurrentAge();
+		int year = life.getBirthYear() + age;
+		// 그해 가장 센 전쟁 (원작 warAt)
+		String[] now = null;
+		for (String[] w : ERA_WAR) {
+			if (w[0].equals(cc) && year >= Integer.parseInt(w[1]) && year <= Integer.parseInt(w[2])
+					&& (now == null || Double.parseDouble(w[3]) > Double.parseDouble(now[3]))) {
+				now = w;
+			}
+		}
+		if (now == null || Double.parseDouble(now[3]) < 0.5) {
+			return;
+		}
+		String id = now[4];
+		String key = id + "|" + cc;
+		// 같은 전쟁의 처음과 끝 해 (원작 warSpan: 강도와 상관없이 같은 코드 전체)
+		int from = 9999, to = 0;
+		for (String[] w : ERA_WAR) {
+			if (w[0].equals(cc) && w[4].equals(id)) {
+				from = Math.min(from, Integer.parseInt(w[1]));
+				to = Math.max(to, Integer.parseInt(w[2]));
+			}
+		}
+		String name = WAR_NAME.getOrDefault(id, "전쟁");
+		List<String> lines = new ArrayList<>();
+		int h = 0;
+		if (year == from) {
+			if (!histWarThisYear(life)) {
+				lines.add(WAR_START.getOrDefault(key, WAR_START.getOrDefault(id, iga(name) + " 일어났다.")));
+			}
+		} else if (age == 0) {
+			String c = life.getCountryName() == null ? "이 나라" : life.getCountryName();
+			lines.add("태어난 해, " + c + "에서는 " + iga(name) + " 이어지고 있었다.");
+		}
+		if (year == to && to < 2024 && !WAR_JOIN.contains(key)) {
+			lines.add(WAR_END.getOrDefault(key, WAR_END.getOrDefault(id, iga(name) + " 끝났다.")));
+			if (!WAR_END_SAD.contains(id) && !WAR_END_SAD.contains(key)) {
+				h = 4;
+			}
+		}
+		for (int i = 0; i < lines.size(); i++) {
+			String t = lines.get(i);
+			EventResultDTO e = new EventResultDTO();
+			e.setEventType("HIST"); // 화면: 역사 사건 색 · 큰 사건 경고등
+			e.setTitle(name);
+			e.setLogText(t);
+			if (i == lines.size() - 1 && h != 0) {
+				e.setEffHappiness(h);
+				life.setHappiness(life.getHappiness() + h);
+			}
+			saveEventLog(life, age, null, null, t);
+			List<EventResultDTO> list = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
+			list.add(e);
+			life.setEvents(list);
+		}
+	}
+
+	// 올해 윤아님 역사 이벤트 가운데 전쟁(WAR 유형)이 이미 있는지
+	private boolean histWarThisYear(LifeDTO life) {
+		if (life.getEvents() == null) {
+			return false;
+		}
+		for (EventResultDTO e : life.getEvents()) {
+			if ("HIST".equals(e.getEventType()) && e.getEventId() != null) {
+				HistEffectDTO h = engineDao.selectHistEffect(e.getEventId());
+				if (h != null && "WAR".equals(h.getTypeCode())) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	// ================= C03 인생 기록 보강 =================
 
 	private static final Map<String, String> SCHOOL_NAME = Map.of(
@@ -1571,9 +1905,95 @@ public class EngineService {
 
 		if ("EMPLOYED".equals(jobBefore) && "RETIRED".equals(life.getJobStatus())) {
 			JobDTO job = jobIdBefore == null ? null : engineDao.selectJob(jobIdBefore);
-			notes.add(job == null ? "일을 그만두고 은퇴했다." : job.getJobName() + " 일을 마치고 은퇴했다.");
+			notes.add((job == null ? "일을 그만두고 은퇴했다." : job.getJobName() + " 일을 마치고 은퇴했다.") + pensionText(life));
+		} else if (!"RETIRED".equals(jobBefore) && "RETIRED".equals(life.getJobStatus())) {
+			notes.add("은퇴할 나이가 되었다." + pensionText(life)); // 일이 없던 사람도 정년 나이에 연금 판정 (jobStep 1-0)
 		}
 		return notes;
+	}
+
+	// ================= 퀘스트 (C12, 진행 중 달성) =================
+	// 판정은 인생이 끝날 때 QuestJudgeService(민승님)가 하지만, 한 번 이루면 되돌릴 수 없는 퀘스트는
+	// 진행 중에도 바로 '달성'으로 보여 주고 인생 기록에 한 줄 남김 (11/20 동현님: 대학 졸업했는데 완료 안 됨)
+	//   대학·대학원 졸업, 자녀 N명, N세 넘기기, 기대수명보다 N년 더 살기 (같은 조건식은 QuestJudgeService.judgeOne)
+	//   마지막 재산·행복·이민·평생 소득은 끝날 때 상태라 진행 중엔 판정하지 않음
+	private static final String QUEST_DONE = "퀘스트 달성: ";
+
+	private boolean questLive(LifeDTO life, LifeQuestDTO q) {
+		String type = q.getQuestType(), target = q.getTargetValue();
+		if (type == null || target == null) {
+			return false;
+		}
+		try {
+			String edu = life.getEduLevel();
+			boolean grad = "GRADUATED".equals(life.getSchoolStatus());
+			switch (type) {
+			case "EDU":
+				return "UNI".equals(target) ? ("UNI".equals(edu) && grad) || "GRAD".equals(edu) : "GRAD".equals(edu) && grad;
+			case "CHILD":
+				return life.getChildCount() >= Integer.parseInt(target);
+			case "AGE":
+				return life.getCurrentAge() >= Integer.parseInt(target);
+			case "AGE_EXP":
+				double le = life.getLifeExpectancy() != null ? life.getLifeExpectancy() : 70;
+				return life.getCurrentAge() - le >= Double.parseDouble(target);
+			default:
+				return false;
+			}
+		} catch (NumberFormatException e) {
+			return false;
+		}
+	}
+
+	// 화면용: 지금 이미 이룬 퀘스트는 live = Y (끝난 뒤 판정값 achieved 가 있으면 그것을 씀)
+	private void fillQuestLive(LifeDTO life) {
+		if (life.getQuests() == null) {
+			return;
+		}
+		for (LifeQuestDTO q : life.getQuests()) {
+			if (q.getAchieved() == null && questLive(life, q)) {
+				q.setLive("Y");
+			}
+		}
+	}
+
+	// 올해 새로 이룬 퀘스트 → 인생 기록 한 줄씩 (한 번만)
+	private List<String> questNotes(LifeDTO life) {
+		List<String> out = new ArrayList<>();
+		List<LifeQuestDTO> qs;
+		try {
+			qs = engineDao.selectLifeQuests(life.getLifeId());
+		} catch (RuntimeException e) {
+			return out;
+		}
+		if (qs == null || qs.isEmpty()) {
+			return out;
+		}
+		if (life.getLifeExpectancy() == null) {
+			for (CountryStatDTO c : birthList(life.getBirthYear() / 10 * 10)) {
+				if (c.getCountryCode().equals(life.getBirthCountry())) {
+					life.setLifeExpectancy(c.getLifeExpectancy());
+				}
+			}
+		}
+		EngState s = engState(life);
+		for (LifeQuestDTO q : qs) {
+			String key = "Q:" + q.getQuestName();
+			if (!s.done.containsKey(key) && questLive(life, q)) {
+				s.done.put(key, life.getCurrentAge());
+				out.add(QUEST_DONE + q.getQuestName());
+			}
+		}
+		return out;
+	}
+
+	// 은퇴할 때 연금 한 줄 (원작 pensionBase: 정식 일자리였던 사람만, 금액은 한 달 기준 한국 체감)
+	private String pensionText(LifeDTO life) {
+		Long p = life.getPension();
+		if (p != null && p > 0) {
+			return " 연금은 한 달에 약 " + won(life, p / 12.0) + "씩 나온다.";
+		}
+		return " 받을 연금이 없어 모아 둔 돈과 가족에 기대어 살아야 한다.";
 	}
 
 	// 몇 살 고비마다: 같은 해 같은 나라에서 태어난 또래 중 지금도 살아 있는 비율 (원작 생명표로 계산)
@@ -2162,14 +2582,14 @@ public class EngineService {
 		if ("EMPLOYED".equals(life.getJobStatus())) {
 			return "WORKER"; // 직장인
 		}
-		if (age < 15) {
-			return "YOUTH"; // 학교 안 다니는 아이 (6~14세)
+		if (age < 18) {
+			return "YOUTH"; // 학교·일 없는 청소년 (6~17세, 명세서 C04-1)
 		}
-		return "JOBLESS"; // 일이 없는 15세 이상
+		return "JOBLESS"; // 학교·일 없는 18세 이상 (무직 성인)
 	}
 
 	// 나이대별로 고를 수 있는 집중 목록 (원작 기준 + 나이에 맞게 조금씩 바뀜)
-	//   학생: 14세까지 집안 돕기, 15세부터는 대신 진로 준비(취업 준비)
+	//   학생: 공부·친구·집안 돕기·운동·취미 + 15세부터 진로 준비(취업 준비)
 	//   대학생·직장인·무직: 18~39세 미혼이면 연애·만남 (LOVE)
 	//   무직 40세 미만: 취업 준비, 노년: 종교·봉사 (원작 faith)
 	private List<String> focusOptions(String stage, LifeDTO life) {
@@ -2178,11 +2598,7 @@ public class EngineService {
 		boolean single = !"Y".equals(life.getMarriedYn());
 		boolean loveAge = age >= 18 && age < 40 && single;
 		if (stage.equals("STUDENT")) {
-			list.add("STUDY"); list.add("PLAY");
-			if (age < 15) {
-				list.add("HOUSE");
-			}
-			list.add("SPORT"); list.add("HOBBY");
+			list.add("STUDY"); list.add("PLAY"); list.add("HOUSE"); list.add("SPORT"); list.add("HOBBY");
 			if (age >= 15) {
 				list.add("JOB_PREP");
 			}
@@ -2210,21 +2626,27 @@ public class EngineService {
 			if ("EMPLOYED".equals(life.getJobStatus())) {
 				list.add("WORK");
 			}
-			list.add("FAMILY"); list.add("HEALTH"); list.add("BRAIN"); list.add("HOBBY"); list.add("FAITH");
-			if (!"EMPLOYED".equals(life.getJobStatus())) {
-				list.add("REST");
-			}
+			list.add("FAMILY"); list.add("HEALTH"); list.add("BRAIN"); list.add("HOBBY"); list.add("REST"); list.add("FAITH");
 		}
 		return list;
 	}
 
-	// 고르지 않았을 때 기본값 (원작 기준): 목록에 '균형'이 있으면 균형, 없으면 목록 첫 번째
+	// 고르지 않았을 때 기본값 (명세서 C04-5): 학생·대학생 공부, 비학생 청소년 집안 돕기, 직장인 균형,
+	//   무직 성인 자기계발, 노년 건강 관리 (목록에 없으면 목록 첫 번째)
 	private String defaultFocus(LifeDTO life) {
-		List<String> list = focusOptions(life.getStageCode(), life);
-		if (list.contains("BALANCE")) {
-			return "BALANCE";
+		String stage = life.getStageCode();
+		List<String> list = focusOptions(stage, life);
+		String want = "BALANCE";
+		if ("STUDENT".equals(stage) || "UNIV".equals(stage)) {
+			want = "STUDY";
+		} else if ("YOUTH".equals(stage)) {
+			want = "HOUSE";
+		} else if ("JOBLESS".equals(stage)) {
+			want = "SELF_DEV";
+		} else if ("SENIOR".equals(stage)) {
+			want = "HEALTH";
 		}
-		return list.get(0);
+		return list.contains(want) ? want : list.get(0);
 	}
 
 	// 집중별 1년 능력치 효과 (원작 FOCUS 수치: 건강, 행복, 관계)
@@ -2541,11 +2963,17 @@ public class EngineService {
 	}
 
 	// 1년 중퇴 확률 (원작 lsKeep·usKeep)
-	// 중학교·고등학교만 중퇴 있음 (초등·대학·대학원은 원작에도 일반 중퇴 없음)
+	// 중학교·고등학교는 원작식, 대학은 명세서 C06-3 지식 배율 (초등·대학원은 중퇴 없음)
 	//   끝까지 다닐 확률 = 그 단계 진학 확률을 노력 배율만큼 키운 값 (최소 중학교 10%·고등학교 8%)
 	//   노력 배율 = 1.15 × (13세 이하 1.7, 그 위 2.05) × e^(0.85×지식 z - 0.36)
 	//   1년 중퇴 확률 = 1 - 끝까지 다닐 확률^(1/2) (3년 과정이라 2번 판정)
 	private double dropRate(LifeDTO life, int idx) {
+		if (idx == 3) {
+			// 대학 중퇴 (명세서 C06-3, 원작에는 없음): 1년 2.5% × 형편(1~2분위 ×1.5) × 지식 배율 → 4년 동안 평균 약 10%
+			double k = life.getKnowledge();
+			double kMul = k >= 85 ? 0.45 : k >= 70 ? 0.78 : k >= 50 ? 1.12 : 1.68;
+			return 0.025 * (life.getWealthClass() <= 2 ? 1.5 : 1) * kMul;
+		}
 		if (idx != 1 && idx != 2) {
 			return 0;
 		}
@@ -2721,10 +3149,541 @@ public class EngineService {
 		life.setEvents(list);
 	}
 
+	// 첫 스마트폰 (원작 phoneYear): 그 나라에 스마트폰이 흔해진 해부터 그해 바로 장만
+	//   (예전엔 이야기 한 줄로 가끔 뽑혀서 2020년 37세에야 생기기도 함 → 11/20 동현님 요청으로 원작식)
+	//   흔해진 해: 구매력 1인당 GDP 3만 달러 이상 2009년, 1.5만 이상 2013년, 8천 이상 2016년, 4천 이상 2019년, 그 아래 2022년
+	//     (원작: 스마트폰 시대(고소득 2008년·그 외 2012년) + 인터넷 사용률 80% 이상, 우리 DB엔 사용률이 없어 소득으로 대신)
+	//   10~12세 35%, 13~17세는 부모가 사 줌 (학교 안 다니는 가난한 집 아이는 15세부터 직접 벌어서)
+	//   어른은 값(구매력 200달러)을 냄, 모자라면 중고(40%), 벌이가 없거나 빚이 무거운데 모자라면 미룸
+	//   북한은 도시·넉넉한 어른만 해마다 3% (원작 nkPhone)
+	private void phoneYear(LifeDTO life, CountryStatDTO stat) {
+		java.util.LinkedHashSet<String> owns = ownSet(life);
+		if (owns.contains("PHONE") || !"PLAYING".equals(life.getStatus())) {
+			return;
+		}
+		int age = life.getCurrentAge();
+		int year = life.getBirthYear() + age;
+		if (age < 10) {
+			return;
+		}
+		if ("PRK".equals(life.getCurrentCountry())) {
+			if (year < 2012 || age < 18 || !("Y".equals(life.getIsUrban()) || life.getWealthClass() >= 4) || random.nextDouble() >= 0.03) {
+				return;
+			}
+		} else {
+			double ppp = toPpp(gdpOf(stat));
+			int common = ppp >= 30000 ? 2009 : ppp >= 15000 ? 2013 : ppp >= 8000 ? 2016 : ppp >= 4000 ? 2019 : 2022;
+			if (year < common) {
+				return;
+			}
+		}
+		boolean poorOut = age < 18 && !"ENROLLED".equals(life.getSchoolStatus()) && life.getWealthClass() <= 2;
+		String text = "첫 스마트폰이 생겼다. 손에서 놓을 줄을 몰랐다.";
+		if (age < 18 && !poorOut) {
+			if (age < 13 && random.nextDouble() >= 0.35) {
+				return; // 10~12세는 집마다 다름
+			}
+		} else {
+			if (poorOut && (age < 15 || life.getIncome() <= 0)) {
+				return;
+			}
+			long price = Math.round(200 * priceK(stat));
+			boolean tight = life.getAssets() < price * 1.1;
+			if (tight && (life.getIncome() <= 0 || debtHeavy(life, stat))) {
+				return; // 형편이 풀릴 때까지 미룸
+			}
+			if (tight) {
+				price = Math.round(price * 0.4);
+				text = "형편에 맞춰 중고 스마트폰을 하나 장만했다.";
+			}
+			life.setAssets(life.getAssets() - price);
+			book(life, "스마트폰 구입", -price);
+			text = text + " (−" + won(life, price) + ")";
+		}
+		owns.remove("CELL");
+		owns.add("PHONE");
+		life.setOwns(String.join(",", owns));
+		life.setHappiness(life.getHappiness() + 2);
+		saveEventLog(life, age, null, null, text);
+		addYearNote(life, text);
+	}
+
+	// 취미: 해마다 효과 × 0.25 (원작 값이 한 해 효과로는 커서, 몇 해에 걸쳐 쌓이게), 18세부터 비용 (중위 소득 × 비율)
+	private void hobbyYear(LifeDTO life, CountryStatDTO stat) {
+		if (life.getOwns() == null || !"PLAYING".equals(life.getStatus())) {
+			return;
+		}
+		String code = null;
+		for (String x : life.getOwns().split(",")) {
+			if (x.trim().startsWith("HOB-")) {
+				code = x.trim().substring(4);
+			}
+		}
+		String[] h = code == null ? null : EngineChoice.hobbyOf(code);
+		if (h == null) {
+			return;
+		}
+		life.setHappiness(life.getHappiness() + Double.parseDouble(h[2]) * 0.25);
+		life.setHealth(life.getHealth() + Double.parseDouble(h[3]) * 0.25);
+		life.setRelation(life.getRelation() + Double.parseDouble(h[4]) * 0.25);
+		life.setKnowledge(life.getKnowledge() + Double.parseDouble(h[5]) * 0.25);
+		if (life.getCurrentAge() >= 18 && (life.getIncome() > 0 || life.getAssets() > 0)) {
+			double cost = medIncome(life.getCurrentCountry(), stat) * Double.parseDouble(h[6]);
+			life.setAssets(life.getAssets() - Math.round(cost));
+			book(life, "취미 (" + h[1] + ")", -cost);
+		}
+	}
+
+	// ================= 병역 (원작 service · KR_SVC, 한국 남성 · 북한) =================
+	//   한국: 19~28세에 학교를 다니지 않으면 통지서. 판정은 해마다 비율이 다름 (원작 KR_SVC: 보충역·면제 비율)
+	//     보충역 비율 ×1.4 (중졸 이하) / ×0.85 (대학) / ×1.3 (건강 45 미만)
+	//     현역 복무: 육군 1968년 전 36개월 → 2020년부터 18개월, 해군·공군은 조금 더 김 / 보충역 12~28개월 (원작 krMonths)
+	//     복무 중: 일자리 제안 없음, 하던 일은 그만둠, 해마다 행복 −2 · 관계 −1 · 건강 +1 (보충역은 행복 −1만)
+	//   북한: 17세에 입대해 약 10년 복무 (창 없이)
+	//   상태는 LIFE.OWNS 에 SVC-ON-전역나이-종류-개월 / SVC-DONE / SVC-EX (DB 구조 그대로)
+	private static final double[][] KR_SVC = { // {부터, 까지, 보충역 비율, 면제 비율}
+			{ 1953, 1968, 0.10, 0.30 }, { 1969, 1973, 0.13, 0.28 }, { 1974, 1975, 0.20, 0.28 }, { 1976, 1991, 0.27, 0.24 },
+			{ 1992, 1994, 0.12, 0.08 }, { 1995, 2013, 0.07, 0 }, { 2014, 2014, 0.06, 0 }, { 2015, 9999, 0.11, 0 } };
+
+	private static String svcTok(LifeDTO life) {
+		if (life.getOwns() == null) {
+			return null;
+		}
+		for (String x : life.getOwns().split(",")) {
+			if (x.trim().startsWith("SVC-")) {
+				return x.trim();
+			}
+		}
+		return null;
+	}
+
+	// 복무 중 (현역·보충역 모두 일자리 제안 없음)
+	private static boolean svcActive(LifeDTO life) {
+		String t = svcTok(life);
+		return t != null && t.startsWith("SVC-ON-");
+	}
+
+	private void setSvcTok(LifeDTO life, String tok) {
+		java.util.LinkedHashSet<String> owns = ownSet(life);
+		owns.removeIf(x -> x.startsWith("SVC-"));
+		if (tok != null) {
+			owns.add(tok);
+		}
+		life.setOwns(String.join(",", owns));
+	}
+
+	private static int krArmyMonths(int y) {
+		return y < 1977 ? 36 : y < 1984 ? 33 : y < 1993 ? 30 : y < 2003 ? 26 : y < 2011 ? 24 : y < 2020 ? 21 : 18;
+	}
+
+	private static int krNavyMonths(int y) {
+		return y < 1979 ? 39 : y < 1990 ? 35 : y < 1993 ? 32 : y < 2003 ? 28 : y < 2011 ? 26 : y < 2020 ? 23 : 20;
+	}
+
+	private static int krAirMonths(int y) {
+		return y < 1979 ? 39 : y < 1993 ? 35 : y < 2003 ? 30 : y < 2011 ? 27 : y < 2020 ? 24 : 21;
+	}
+
+	private static int krSupMonths(int y) {
+		return y <= 1981 ? 12 : y <= 1985 ? 14 : y <= 1994 ? 18 : y <= 2002 ? 28 : y <= 2010 ? 26 : y <= 2019 ? 24 : 21;
+	}
+
+	private static String krSupName(int y) {
+		return y <= 1994 ? "방위병" : y <= 2013 ? "공익근무요원" : "사회복무요원";
+	}
+
+	// 통지서를 띄울지 (현역·보충역 선택 번호, 아니면 -1). 면제는 여기서 한 줄 남기고 끝
+	private int svcPick(LifeDTO life, EngState s, int lived) {
+		if (!"KOR".equals(life.getCurrentCountry()) || !"M".equals(life.getGender()) || svcTok(life) != null
+				|| lived < 19 || lived > 28 || "ENROLLED".equals(life.getSchoolStatus())
+				|| (s.svcDelayAt != null && s.svcDelayAt == lived)) {
+			return -1;
+		}
+		int y = life.getBirthYear() + lived;
+		if (y < 1953) {
+			return -1;
+		}
+		if (s.svcKind == null) {
+			double sup = 0.07, ex = 0;
+			for (double[] k : KR_SVC) {
+				if (y >= k[0] && y <= k[1]) {
+					sup = k[2];
+					ex = k[3];
+				}
+			}
+			int lv = levelIndex(life.getEduLevel());
+			sup = clamp(sup * (lv <= 1 ? 1.4 : lv >= 3 ? 0.85 : 1) * (life.getHealth() < 45 ? 1.3 : 1), 0, 0.8);
+			double rr = random.nextDouble();
+			s.svcKind = rr < ex ? "ex" : rr < ex + sup ? "sup" : "act";
+		}
+		if ("ex".equals(s.svcKind)) {
+			setSvcTok(life, "SVC-EX");
+			String t = "신체검사 결과 병역이 면제되었다.";
+			saveEventLog(life, lived, null, null, t);
+			addYearNote(life, t);
+			return -1;
+		}
+		return EngineChoice.indexOf("sup".equals(s.svcKind) ? "SVC_SUP" : "SVC_ACT");
+	}
+
+	private String svcBody(LifeDTO life, String key) {
+		int y = life.getBirthYear() + life.getCurrentAge() - 1;
+		if ("SVC_SUP".equals(key)) {
+			return "병역판정검사에서 보충역 판정을 받아 " + krSupName(y) + "으로 소집돼요. 기초 군사훈련을 받은 뒤 집에서 출퇴근하며 약 "
+					+ krSupMonths(y) + "개월 복무해요.";
+		}
+		return "대한민국에서는 남성에게 병역 의무가 있어요. 육군 복무 기간은 약 " + krArmyMonths(y) + "개월이에요. 해군(약 "
+				+ krNavyMonths(y) + "개월)이나 공군(약 " + krAirMonths(y) + "개월)에 지원할 수도 있어요.";
+	}
+
+	private String svcChoose(LifeDTO life, EngState s, String act, int age) {
+		int y = life.getBirthYear() + age;
+		if ("SVC_DELAY".equals(act)) {
+			s.svcDelayAt = age; // 그해엔 다시 묻지 않고, 다음 해 끝에 다시 통지서
+			return "SVC_SUP".equals(s.svcKind) || "sup".equals(s.svcKind) ? "소집을 1년 미뤘다." : "입대를 1년 미뤘다.";
+		}
+		String kind;
+		int months;
+		String text;
+		if ("SVC_SUP".equals(act)) {
+			kind = "S";
+			months = krSupMonths(y);
+			text = "보충역으로 소집되어 집에서 출퇴근하며 복무를 시작했다. " + krSupName(y) + "으로 약 " + months + "개월 복무한다.";
+		} else {
+			kind = "A";
+			months = krArmyMonths(y);
+			String fail = null;
+			if ("SVC_NAVY".equals(act)) {
+				double p = y < 2005 ? 0.6 : y < 2020 ? 0.45 : 0.85;
+				if (random.nextDouble() < p) {
+					kind = "N";
+					months = krNavyMonths(y);
+				} else {
+					fail = "해군";
+				}
+			} else if ("SVC_AIR".equals(act)) {
+				double p = y < 2005 ? 0.5 : y < 2020 ? 0.35 : 0.5;
+				if (random.nextDouble() < p) {
+					kind = "F";
+					months = krAirMonths(y);
+				} else {
+					fail = "공군";
+				}
+			}
+			String branch = "N".equals(kind) ? "해군" : "F".equals(kind) ? "공군" : "육군";
+			text = (fail != null ? fail + "에 지원했지만 떨어져 육군으로 입대했다." : branch + "으로 입대했다.") + " 약 " + months + "개월 복무한다.";
+			if ("EMPLOYED".equals(life.getJobStatus())) {
+				life.setJobStatus("UNEMPLOYED");
+				life.setJobYears(0);
+				text = text + " 하던 일은 그만두었다.";
+			}
+		}
+		int end = life.getCurrentAge() + (int) Math.ceil(months / 12.0);
+		setSvcTok(life, "SVC-ON-" + end + "-" + kind + "-" + months);
+		return text;
+	}
+
+	// 해마다: 복무 중 효과, 기간이 끝나면 전역 / 북한은 17세에 입대해 약 10년
+	private void svcYear(LifeDTO life) {
+		if (!"PLAYING".equals(life.getStatus()) || !"M".equals(life.getGender())) {
+			return;
+		}
+		int age = life.getCurrentAge();
+		String t = svcTok(life);
+		if (t == null && "PRK".equals(life.getCurrentCountry()) && age == 17) {
+			setSvcTok(life, "SVC-ON-" + (age + 10) + "-A-120");
+			String n = "군에 입대했다. 10년 가까이 복무하게 된다.";
+			saveEventLog(life, age, null, null, n);
+			addYearNote(life, n);
+			return;
+		}
+		if (t == null || !t.startsWith("SVC-ON-")) {
+			return;
+		}
+		String[] p = t.split("-");
+		int end = Integer.parseInt(p[2]);
+		boolean sup = "S".equals(p[3]);
+		if (age >= end) {
+			setSvcTok(life, "SVC-DONE");
+			life.setHappiness(life.getHappiness() + 3);
+			String n = sup ? "소집 해제되었다. 약 " + p[4] + "개월의 복무를 마쳤다." : "약 " + p[4] + "개월의 복무를 마치고 전역했다.";
+			saveEventLog(life, age, null, null, n);
+			addYearNote(life, n);
+			return;
+		}
+		if (sup) {
+			life.setHappiness(life.getHappiness() - 1);
+		} else {
+			life.setHappiness(life.getHappiness() - 2);
+			life.setRelation(life.getRelation() - 1);
+			life.setHealth(life.getHealth() + 1);
+		}
+	}
+
+	// ================= 대학 학비 (원작 TUI · FAM_PAY · STU_LOAN 단순화) =================
+	//   한 해 학비 = 그 나라 중위 소득 × (고소득국 25% · 중앙아시아 15% · 그 외 12% · 남아시아 10%)
+	//   부모님 몫 = 학비 × 집안 형편별 (1분위 5% · 2분위 20% · 3분위 45% · 4분위 75% · 5분위 100%, 원작 FAM_PAY)
+	//   나머지: 사회주의 시절(중국 1989년 전·베트남 1990년 전·북한)은 국가 장학금 →
+	//           학자금 대출이 있는 나라·해(한국 2009년~, 일본 1953년~, 중국 1999년~, 원작 STU_LOAN)는 대출 →
+	//           그 밖에는 성적 장학금(지식이 높을수록, 최대 60%) 아니면 모은 돈으로 (모자라면 빚)
+	private static final double[] FAM_PAY = { 0, 0.05, 0.2, 0.45, 0.75, 1 };
+
+	private double tuitionOf(LifeDTO life, CountryStatDTO stat, double med) {
+		String g = groupOf(life.getCurrentCountry(), stat);
+		double k = "hi".equals(g) ? 0.25 : "eca".equals(g) ? 0.15 : "sa".equals(g) ? 0.10 : 0.12;
+		return med * k;
+	}
+
+	private boolean freeUni(LifeDTO life) {
+		int y = life.getBirthYear() + life.getCurrentAge();
+		String cc = life.getCurrentCountry();
+		return "PRK".equals(cc) || "CHN".equals(cc) && y < 1989 || "VNM".equals(cc) && y < 1990;
+	}
+
+	private boolean stuLoanOK(LifeDTO life) {
+		int y = life.getBirthYear() + life.getCurrentAge();
+		String cc = life.getCurrentCountry();
+		return "KOR".equals(cc) && y >= 2009 || "JPN".equals(cc) && y >= 1953 || "CHN".equals(cc) && y >= 1999;
+	}
+
+	// 부모님이 대 줄 몫 (부모님이 안 계시면 0)
+	private double famPay(LifeDTO life) {
+		return "N".equals(life.getParentAlive()) ? 0 : FAM_PAY[(int) clamp(life.getWealthClass(), 1, 5)];
+	}
+
+	// 진학 선택 창에 붙일 학비 안내 한 줄
+	private String uniFeeNote(LifeDTO life, CountryStatDTO stat) {
+		if (freeUni(life)) {
+			return "학비는 나라가 대 줘요 (국가 장학금·기숙사).";
+		}
+		double tui = tuitionOf(life, stat, medIncome(life.getCurrentCountry(), stat));
+		int fp = (int) Math.round(famPay(life) * 100);
+		String rest = fp >= 100 ? "" : stuLoanOK(life) ? " 나머지는 학자금 대출을 받아요." : " 나머지는 장학금을 받거나 모은 돈으로 내야 해요.";
+		return "학비는 한 해 약 " + won(life, tui) + ". " + (fp > 0 ? "부모님이 " + fp + "%를 대 주세요." : "부모님 도움은 어려워요.") + rest;
+	}
+
+	private void uniFees(LifeDTO life, CountryStatDTO stat, double med) {
+		EngState es = engState(life);
+		String key = "FEE_" + life.getEduLevel();
+		boolean first = !es.done.containsKey(key);
+		es.done.put(key, life.getCurrentAge());
+		if (freeUni(life)) {
+			if (first) {
+				addYearNote(life, "학비는 나라가 대 주었다. 기숙사에서 지내며 공부했다.");
+			}
+			return;
+		}
+		double tui = tuitionOf(life, stat, med);
+		double fam = tui * famPay(life);
+		double rest = tui - fam;
+		String how;
+		if (rest <= 0) {
+			how = "학비는 부모님이 모두 대 주셨다.";
+		} else if (stuLoanOK(life)) {
+			life.setAssets(life.getAssets() - Math.round(rest));
+			book(life, "학자금 대출", -rest);
+			how = (fam > 0 ? "학비 일부는 부모님이 대 주셨고, " : "") + "나머지는 학자금 대출을 받았다.";
+		} else if (random.nextDouble() < clamp((life.getKnowledge() - 55) / 50, 0.05, 0.6)) {
+			how = "성적 장학금을 받아 " + (fam > 0 ? "부모님 도움과 함께 " : "") + "학비를 해결했다.";
+		} else {
+			life.setAssets(life.getAssets() - Math.round(rest));
+			book(life, "대학 학비 (내가 낸 몫)", -rest);
+			how = (fam > 0 ? "부모님이 학비 일부를 보태 주셨고, " : "") + "나머지는 모은 돈과 아르바이트로 냈다.";
+		}
+		if (first) {
+			String t = ("GRAD".equals(life.getEduLevel()) ? "대학원 " : "대학 ") + how;
+			saveEventLog(life, life.getCurrentAge(), null, null, t);
+			addYearNote(life, t);
+		}
+	}
+
+	// ================= 반려동물 (원작 petq · petYear) =================
+	//   LIFE.OWNS 에 "PET-종류-이름-들인나이-수명" 한 개 (DB 구조 그대로) · 종류 d 강아지 / c 고양이
+	//   수명: 강아지 10~15년, 고양이 12~18년 (원작 PET_LIFE) · 이름은 나라별 흔한 이름
+	//   돌봄 비용: 그 나라 중위 소득 × (강아지 3% · 고양이 2%) × (고소득국 1, 그 외 0.6) (원작 petCost), 18세부터 내가 냄
+	private static final Map<String, String[]> PET_NAMES = Map.of(
+			"KOR", new String[] { "보리", "콩이", "초코", "두부", "누리" },
+			"JPN", new String[] { "하나", "모모", "소라", "무기", "코코" },
+			"CHN", new String[] { "더우더우", "추추", "마오마오", "화화" },
+			"_", new String[] { "루나", "코코", "밀로", "벨라", "맥스" });
+
+	// 그 나라에서 개·고양이를 키우는 집 비율 (원작 petOwn 대략값: 고소득국 높고 남아시아 낮음)
+	private double petOwnRate(LifeDTO life) {
+		String g = groupOf(life.getCurrentCountry(), yearStat(life));
+		switch (g) {
+		case "hi": return 0.45;
+		case "eca": return 0.35;
+		case "sa": return 0.08;
+		case "mena": return 0.12;
+		default: return 0.22;
+		}
+	}
+
+	// 원작 PET_LIFE · PET_COSTK · PET_SM (종류: d 강아지 · c 고양이 · h 햄스터 · r 토끼 · b 앵무새 · f 물고기)
+	private static final Map<String, int[]> PET_LIFE = Map.of("d", new int[] { 10, 15 }, "c", new int[] { 12, 18 },
+			"h", new int[] { 2, 3 }, "r", new int[] { 8, 12 }, "b", new int[] { 6, 12 }, "f", new int[] { 4, 9 });
+	private static final Map<String, Double> PET_COSTK = Map.of("d", 0.03, "c", 0.02, "h", 0.006, "r", 0.01, "b", 0.008, "f", 0.008);
+	private static final Map<String, String> PET_WORD = Map.of("d", "강아지", "c", "고양이", "h", "햄스터", "r", "토끼", "b", "앵무새", "f", "물고기");
+
+	// 그 나라에서 흔한 작은 동물 하나 (원작 PET_SM: 권역별 비율)
+	private String petSmallKind(LifeDTO life) {
+		String g = groupOf(life.getCurrentCountry(), yearStat(life));
+		String[] k;
+		double[] w;
+		if ("sa".equals(g) || "mena".equals(g)) {
+			k = new String[] { "b", "f", "r" };
+			w = new double[] { 0.55, 0.3, 0.15 };
+		} else if ("hi".equals(g)) {
+			k = new String[] { "f", "h", "b", "r" };
+			w = new double[] { 0.4, 0.25, 0.2, 0.15 };
+		} else if ("eca".equals(g)) {
+			k = new String[] { "f", "h", "b", "r" };
+			w = new double[] { 0.35, 0.25, 0.25, 0.15 };
+		} else {
+			k = new String[] { "f", "b", "h", "r" };
+			w = new double[] { 0.45, 0.25, 0.2, 0.1 };
+		}
+		double x = random.nextDouble(), sum = 0;
+		for (int i = 0; i < k.length; i++) {
+			sum += w[i];
+			if (x < sum) {
+				return k[i];
+			}
+		}
+		return k[0];
+	}
+
+	// 한 해 돌봄 비용 (원작 petCost): 중위 소득 × 종류별 비율 × (고소득국 1, 그 외 0.6)
+	private double petCost(LifeDTO life, String kind) {
+		CountryStatDTO stat = yearStat(life);
+		return medIncome(life.getCurrentCountry(), stat) * PET_COSTK.getOrDefault(kind, 0.02)
+				* ("hi".equals(groupOf(life.getCurrentCountry(), stat)) ? 1 : 0.6);
+	}
+
+	// 이름 다듬기 (원작 petNameClean): 12자까지, OWNS 구분자(쉼표·하이픈)와 따옴표·꺾쇠 빼고
+	private static String petNameClean(String n) {
+		if (n == null) {
+			return "";
+		}
+		String t = java.text.Normalizer.normalize(n, java.text.Normalizer.Form.NFC)
+				.replaceAll("[\\p{Cntrl}\\u200b-\\u200f\\u202a-\\u202e,\\-<>\"'`&\\\\]", "").replaceAll("\\s+", " ").trim();
+		return t.length() > 12 ? t.substring(0, 12).trim() : t;
+	}
+
+	private static String petEul(String w) {
+		return EngineChoice.eul(w);
+	}
+
+	// 들이기 (원작 petAdopt): 적은 이름이 없으면 그 나라 흔한 이름, 수명은 종류별 범위에서 하나 (언제 떠날지는 미리 알 수 없음)
+	private String petAdopt(LifeDTO life, String kind, int age, String typed) {
+		java.util.LinkedHashSet<String> owns = ownSet(life);
+		owns.removeIf(x -> x.startsWith("PET-"));
+		String name = petNameClean(typed);
+		if (name.isEmpty()) {
+			String[] pool = PET_NAMES.getOrDefault(life.getCurrentCountry(), PET_NAMES.get("_"));
+			name = pool[random.nextInt(pool.length)];
+		}
+		int[] r = PET_LIFE.getOrDefault(kind, PET_LIFE.get("c"));
+		int span = r[0] + random.nextInt(r[1] - r[0] + 1);
+		owns.add("PET-" + kind + "-" + name + "-" + age + "-" + span);
+		life.setOwns(String.join(",", owns));
+		boolean big = "d".equals(kind) || "c".equals(kind);
+		life.setHappiness(life.getHappiness() + (big ? 5 : 3));
+		life.setRelation(life.getRelation() + (big ? 2 : 1));
+		if ("f".equals(kind)) {
+			return "어항을 들였다. 물고기 이름은 " + ro(name) + " 지었다.";
+		}
+		return PET_WORD.getOrDefault(kind, "반려동물") + " " + iga(name) + " 가족이 되었다.";
+	}
+
+	// [이름, 종류(d·c), 들인 나이, 수명] 또는 null
+	private static String[] petOf(LifeDTO life) {
+		if (life.getOwns() == null) {
+			return null;
+		}
+		for (String x : life.getOwns().split(",")) {
+			String[] p = x.trim().split("-");
+			if (p.length == 5 && "PET".equals(p[0])) {
+				return new String[] { p[2], p[1], p[3], p[4] };
+			}
+		}
+		return null;
+	}
+
+	// 해마다: 돌봄 비용 · 작은 기쁨, 수명이 다하면 떠나보냄 (원작 petYear · petGone)
+	private void petYear(LifeDTO life, CountryStatDTO stat) {
+		String[] p = petOf(life);
+		if (p == null || !"PLAYING".equals(life.getStatus())) {
+			return;
+		}
+		int age = life.getCurrentAge();
+		int years = age - Integer.parseInt(p[2]);
+		String kindWord = PET_WORD.getOrDefault(p[1], "반려동물");
+		if (years >= Integer.parseInt(p[3])) {
+			java.util.LinkedHashSet<String> owns = ownSet(life);
+			owns.removeIf(x -> x.startsWith("PET-"));
+			life.setOwns(String.join(",", owns));
+			life.setHappiness(life.getHappiness() - 7);
+			life.setRelation(life.getRelation() - 1);
+			String t = iga(p[0]) + " " + years + "살로 무지개다리를 건넜다. 함께한 " + kindWord + "의 빈자리가 오래 남았다.";
+			saveEventLog(life, age, null, null, t);
+			addYearNote(life, t);
+			return;
+		}
+		boolean big = "d".equals(p[1]) || "c".equals(p[1]);
+		life.setHappiness(life.getHappiness() + (big ? 0.6 : 0.35)); // 원작 petYear
+		life.setRelation(life.getRelation() + (big ? 0.3 : 0.1));
+		if (age >= 18 && (life.getIncome() > 0 || life.getAssets() > 0)) {
+			double cost = petCost(life, p[1]);
+			life.setAssets(life.getAssets() - Math.round(cost));
+			book(life, "반려동물 돌봄 비용", -cost);
+		}
+	}
+
+	// 받침에 따라 이/가, (으)로
+	private static String iga(String w) {
+		char ch = w.charAt(w.length() - 1);
+		if (ch < 0xAC00 || ch > 0xD7A3) {
+			return w + "이(가)";
+		}
+		return w + ((ch - 0xAC00) % 28 == 0 ? "가" : "이");
+	}
+
+	private static String ro(String w) {
+		char ch = w.charAt(w.length() - 1);
+		if (ch < 0xAC00 || ch > 0xD7A3) {
+			return w + "(으)로";
+		}
+		int jong = (ch - 0xAC00) % 28;
+		return w + (jong == 0 || jong == 8 ? "로" : "으로");
+	}
+
+	// 잠시 멈춤에 적은 한 줄 (원작 reflect): 200자까지, 따옴표로 감싸 인생 기록에 남김 (DB 구조 그대로, LIFE_EVENT_LOG 한 줄)
+	//   atAge: 화면이 보고 있는 나이 (서버 나이와 한 살 차이까지만, 없으면 지금 나이)
+	public String saveNote(LifeDTO life, String text, Integer atAge) {
+		if (text == null || !"PLAYING".equals(life.getStatus())) {
+			return null;
+		}
+		String t = text.replaceAll("\\s+", " ").trim();
+		if (t.isEmpty()) {
+			return null;
+		}
+		if (t.length() > 200) {
+			t = t.substring(0, 200);
+		}
+		int age = life.getCurrentAge();
+		if (atAge != null && Math.abs(atAge - age) <= 1) {
+			age = atAge;
+		}
+		String line = "“" + t + "”";
+		saveEventLog(life, age, null, null, line);
+		return line;
+	}
+
 	// 직업을 제안받을 수 있는 상태인지: 성인(JOB_MIN_AGE) 이상, 학교 안 다니고, 일자리 없고, 은퇴 나이 전
 	private boolean canGetJob(LifeDTO life, CountryStatDTO stat) {
 		boolean noJob = life.getJobStatus() == null || "UNEMPLOYED".equals(life.getJobStatus());
-		return "PLAYING".equals(life.getStatus()) && life.getCurrentAge() >= JOB_MIN_AGE
+		return "PLAYING".equals(life.getStatus()) && life.getCurrentAge() >= JOB_MIN_AGE && !svcActive(life)
 				&& !"ENROLLED".equals(life.getSchoolStatus()) && noJob && life.getCurrentAge() < retireAge(life, stat);
 	}
 
@@ -2741,7 +3700,7 @@ public class EngineService {
 		double gdp = gdpOf(stat);
 		for (JobDTO j : offerJobs(life)) {
 			JobDTO c = j.copy();
-			c.setYearIncome(Math.round(gdp * j.getIncomeRate())); // moneyStep 소득 = 1인당 GDP × 배율 (±20%는 빼고 가운데 값)
+			c.setYearIncome(Math.round(jobPay(gdp, j.getIncomeRate(), life.getCurrentCountry(), stat))); // moneyStep 소득과 같은 식 (±20%는 빼고 가운데 값)
 			offers.add(c);
 		}
 		if (!offers.isEmpty()) {
@@ -2839,7 +3798,7 @@ public class EngineService {
 		boolean retired = "RETIRED".equals(life.getJobStatus());
 		if ("EMPLOYED".equals(life.getJobStatus())) {
 			// 소득 = 1인당 GDP × 소득 배율 × 랜덤(±20%), 일에 몰두하면 ×1.1 (원작)
-			income = gdp * life.getIncomeRate() * (0.8 + random.nextDouble() * 0.4);
+			income = jobPay(gdp, life.getIncomeRate(), cc, stat) * (0.8 + random.nextDouble() * 0.4);
 			if ("WORK".equals(focus)) {
 				income = income * 1.1;
 			}
@@ -2865,8 +3824,11 @@ public class EngineService {
 		}
 		life.setIncome(Math.round(income));
 
-		// 18세 미만·학생은 집에서 돌봐 줌 (생활비·저축 없음)
+		// 18세 미만·학생은 집에서 돌봐 줌 (생활비·저축 없음), 대학·대학원생은 학비만 (원작 학비·부모 도움·학자금 대출)
 		if (age < 18 || "ENROLLED".equals(life.getSchoolStatus())) {
+			if ("ENROLLED".equals(life.getSchoolStatus()) && ("UNI".equals(life.getEduLevel()) || "GRAD".equals(life.getEduLevel()))) {
+				uniFees(life, stat, med);
+			}
 			return;
 		}
 
@@ -2899,6 +3861,11 @@ public class EngineService {
 				if ("SELF_DEV".equals(focus)) {
 					change -= income * 0.02;
 					book(life, "자기계발 비용", -income * 0.02);
+				}
+				// 건강 관리: 운동·검진에 소득의 2% (명세서 C04-4)
+				if ("HEALTH".equals(focus)) {
+					change -= income * 0.02;
+					book(life, "건강 관리 비용", -income * 0.02);
 				}
 				// 최소 생활비보다 적게 벌면 모자란 돈의 절반이 빠짐
 				if (income < minLive) {
@@ -3010,7 +3977,13 @@ public class EngineService {
 		}
 
 		fixStats(life);
-		life.setEvents(events); // [화면용] 올해 일어난 일
+		// [화면용] 올해 일어난 일: ④ 돈 계산에서 먼저 남긴 줄(대학 학비 등)을 앞에 두고 이어 붙임
+		List<EventResultDTO> all = new ArrayList<>();
+		if (life.getEvents() != null) {
+			all.addAll(life.getEvents());
+		}
+		all.addAll(events);
+		life.setEvents(all);
 	}
 
 	// 역사 사건의 실직·학업 중단 (C10 → C06, 명세서 C06 3·8번)
@@ -3176,8 +4149,13 @@ public class EngineService {
 	// 선택 이벤트는 작년(나이+1 하기 전)에 일어났으므로 그 나이로 기록
 	@Transactional
 	public LifeDTO chooseEvent(LifeDTO life, int choiceId) {
+		return chooseEvent(life, choiceId, null);
+	}
+
+	// name: 반려동물 이름처럼 창에서 적은 한 줄 (원작 petNameAsk, 없으면 null)
+	public LifeDTO chooseEvent(LifeDTO life, int choiceId, String name) {
 		if (choiceId < 0) {
-			return chooseEngine(life, choiceId); // 엔진 선택지 (C06-4, 음수 번호)
+			return chooseEngine(life, choiceId, name); // 엔진 선택지 (C06-4, 음수 번호)
 		}
 		if (!life.getStatus().equals("PLAYING") || life.getPendingEventId() == null) {
 			return null; // 고를 선택이 없음
@@ -3312,6 +4290,7 @@ public class EngineService {
 		list.add(r);
 		list.addAll(extra);
 		life.setEvents(list); // [화면용] 고른 결과
+		spouseNote(life, age); // 청혼을 받아들이는 등 고른 결과로 결혼했으면 결혼 상대 소개
 
 		engineDao.updateLifeYear(life);
 		fillRegion(life);
@@ -3673,10 +4652,10 @@ public class EngineService {
 			for (DeathCauseDTO d : list) {
 				sum += d.getRatio();
 				if (pick < sum) {
-					return d.getCauseName();
+					return causeLabel(d.getCauseName(), age);
 				}
 			}
-			return list.get(list.size() - 1).getCauseName();
+			return causeLabel(list.get(list.size() - 1).getCauseName(), age);
 		}
 
 		// 데이터가 없을 때 임시 원인
@@ -3690,6 +4669,14 @@ public class EngineService {
 			return "질병";
 		}
 		return "노환";
+	}
+
+	// 어린이(15세 미만) 사망 원인 이름 다듬기: 통계 분류 "에이즈 등 성매개 감염"은 아이에겐 모자 감염
+	private String causeLabel(String name, int age) {
+		if (name != null && age < 15 && name.contains("성매개")) {
+			return "에이즈(모자 감염)";
+		}
+		return name;
 	}
 
 	// 최종 결과값 (C07): 평균 소득, 인생 점수
@@ -3744,6 +4731,10 @@ public class EngineService {
 		double carryDeath;  // 선택 결과의 사망 확률 가산 (참전 중상 0.05 · 시위 진압 0.02 …), 다음 해 사망 판정에 더함
 		String carryCause;  // 그때의 사망 원인 (전쟁, 시위 진압)
 		String schoolNote;  // 진학 첫해 낙방 기록 (졸업 문장 뒤에 남기려고 잠시 보관)
+		String svcKind;     // 병역 판정 (act 현역 · sup 보충역 · ex 면제), 처음 통지서 받을 때 정함
+		Integer svcDelayAt; // 입대를 미룬 해 (그해엔 다시 묻지 않음)
+		boolean spouseNoted; // 결혼 상대 소개 줄을 남겼는지 (인생 기록 '결혼 상대 ' 로 되살림)
+		String petSmall;     // 이번 반려동물 창의 '작은 동물' 종류 (h 햄스터 · r 토끼 · b 앵무새 · f 물고기)
 	}
 
 	private static class EngPend {
@@ -3770,6 +4761,19 @@ public class EngineService {
 					continue;
 				}
 				String t = g.getLogText();
+				if (t.startsWith("결혼 상대 ")) {
+					s.spouseNoted = true;
+				}
+				if (t.startsWith("반려동물은 들이지 않기로 했다")) {
+					s.done.put("PET_ADOPT", 99);
+				}
+				if (t.startsWith(QUEST_DONE)) {
+					s.done.put("Q:" + t.substring(QUEST_DONE.length()).trim(), g.getAge());
+				}
+				// 학비 안내는 대학·대학원마다 한 번 (uniFees)
+				if ((t.startsWith("대학 ") || t.startsWith("대학원 ")) && (t.contains("학비") || t.contains("학자금"))) {
+					s.done.put(t.startsWith("대학원 ") ? "FEE_GRAD" : "FEE_UNI", g.getAge());
+				}
 				for (EngineChoice.Dec d : EngineChoice.ALL) {
 					if (d.failText != null && t.startsWith(d.failText)) {
 						markEngineDone(s, d, g.getAge());
@@ -3840,7 +4844,10 @@ public class EngineService {
 			int nx = s.schoolNext;
 			s.schoolNext = null;
 			int di = EngineChoice.indexOf("SCHOOL_" + levels[nx]);
-			if (s.pend == null && !life.isNeedChoice() && !life.isNeedDestination() && life.getPendingEventId() == null) {
+			boolean free = s.pend == null && !life.isNeedChoice() && !life.isNeedDestination() && life.getPendingEventId() == null;
+			// 그해에만 뜨는 역사 현장(4·19 등)이 겹치면 역사 현장을 띄우고 진학은 바로 (1944년생 1960년 고교 진학과 겹쳐 4·19가 안 뜨던 것)
+			int hist = free ? pickEngine(life, s, lived, EngineChoice.HIST) : -1;
+			if (free && hist < 0) {
 				openEngineChoice(life, s, di, lived);
 				if (s.pend != null) {
 					return;
@@ -3854,16 +4861,44 @@ public class EngineService {
 			String t = d.opts[0].results[0];
 			saveEventLog(life, lived, null, null, t);
 			addYearNote(life, t);
+			if (hist >= 0) {
+				openEngineChoice(life, s, hist, lived);
+			}
 			return;
 		}
-		if (!"PLAYING".equals(life.getStatus()) || life.isNeedChoice() || life.isNeedJob() || life.isNeedDestination()
+		if (!"PLAYING".equals(life.getStatus()) || life.isNeedChoice() || life.isNeedDestination()
 				|| life.getPendingEventId() != null) {
 			return;
 		}
 		if (s.pend != null) {
 			return;
 		}
-		int pick = pickEngine(life, s, lived, EngineChoice.HIST); // 4·19 · 서울의 봄 · 6월 항쟁 (그해·한국에서만)
+		// 4·19 · 서울의 봄 · 6월 항쟁 (그해·한국에서만): 일자리 제안 창이 있어도 먼저 띄움
+		//   (화면은 선택 창 → 일자리 창 순서로 보여 줌, 18세 첫 제안과 1960년이 겹쳐 4·19가 안 뜨던 것)
+		int pick = pickEngine(life, s, lived, EngineChoice.HIST);
+		if (pick >= 0) {
+			openEngineChoice(life, s, pick, lived);
+			return;
+		}
+		// 병역 (한국 남성): 일자리 제안이 있어도 먼저 (입대하면 그 일은 못 함)
+		pick = svcPick(life, s, lived);
+		if (pick >= 0) {
+			openEngineChoice(life, s, pick, lived);
+			return;
+		}
+		// 취미 고르기 (원작 hobby: 7·15·27·50세에 한 번씩)
+		if ((lived == 7 || lived == 15 || lived == 27 || lived == 50) && !s.done.containsKey("HOBBY@" + lived)) {
+			s.done.put("HOBBY@" + lived, 1);
+			openEngineChoice(life, s, EngineChoice.indexOf("HOBBY"), lived);
+			if (s.pend != null) {
+				return;
+			}
+		}
+		if (life.isNeedJob()) {
+			return;
+		}
+		// 돈 굴리기 · 배우자 주식 권유 · 유언장 (원작 invest · pstock · will)
+		pick = moneyPick(life, s, lived);
 		if (pick >= 0) {
 			openEngineChoice(life, s, pick, lived);
 			return;
@@ -3893,6 +4928,37 @@ public class EngineService {
 		}
 	}
 
+	// 돈 결정 (원작 조건)
+	//   돈 굴리기: 굴리는 방식을 정한 적 없고 모은 돈이 중위 소득의 30%를 넘으면 한 번 (고를 수 있는 곳이 2개 이상일 때)
+	//   유언장: 50세부터, 재산이 중위 소득의 절반을 넘으면 해마다 20%로 한 번
+	//   배우자 주식 권유: 결혼했고 모은 돈이 중위 소득의 30%를 넘으면 해마다 3%로 한 번
+	private int moneyPick(LifeDTO life, EngState s, int lived) {
+		CountryStatDTO stat = yearStat(life);
+		double med = medIncome(life.getCurrentCountry(), stat);
+		long a = life.getAssets();
+		EngineChoice.Dec inv = EngineChoice.byKey("INVEST");
+		if (lived >= 20 && life.getInvestType() == null && a > med * 0.3 && engineOk(life, s, inv, lived)) {
+			int n = 0;
+			for (String t : new String[] { "DEPOSIT", "MIX", "STOCK", "PROPERTY" }) {
+				if (investWhy(life, stat, t) == null) {
+					n++;
+				}
+			}
+			if (n >= 2) {
+				return EngineChoice.indexOf("INVEST");
+			}
+		}
+		EngineChoice.Dec will = EngineChoice.byKey("WILL");
+		if (a > med * 0.5 && engineOk(life, s, will, lived) && random.nextDouble() < 0.2) {
+			return EngineChoice.indexOf("WILL");
+		}
+		EngineChoice.Dec ps = EngineChoice.byKey("PSTOCK");
+		if (a > med * 0.3 && engineOk(life, s, ps, lived) && investWhy(life, stat, "STOCK") == null && random.nextDouble() < 0.03) {
+			return EngineChoice.indexOf("PSTOCK");
+		}
+		return -1;
+	}
+
 	// 선택 창 만들기: 윤아님 선택 이벤트와 같은 모양 (eventId ENG_키, eventType SMALL, 선택지 번호는 음수)
 	private void openEngineChoice(LifeDTO life, EngState s, int decIdx, int lived) {
 		EngineChoice.Dec d = EngineChoice.ALL.get(decIdx);
@@ -3902,12 +4968,44 @@ public class EngineService {
 		e.setTitle(d.title);
 		e.setChoice(true);
 		e.setLogText(d.bodies[random.nextInt(d.bodies.length)]);
+		if (d.key.startsWith("SVC_")) {
+			e.setLogText(svcBody(life, d.key));
+		}
+		if ("SCHOOL_UNI".equals(d.key)) {
+			e.setLogText(e.getLogText() + " " + uniFeeNote(life, yearStat(life))); // 원작처럼 학비 · 부모님 도움 · 대출 안내
+		}
+		// 돈 결정은 지금 금액을 넣어 (원작 invest · will · pstock 본문)
+		if ("INVEST".equals(d.key)) {
+			e.setLogText("모은 돈이 " + won(life, life.getAssets()) + " (한국 체감)이 되었어요. 여유 자금을 어디에 둘까요? 나중에 '돈 쓰기'에서 언제든 바꿀 수 있어요.");
+		} else if ("WILL".equals(d.key)) {
+			e.setLogText("남길 것을 생각할 나이가 되었어요. 지금 재산은 약 " + won(life, life.getAssets()) + "이에요. 유언장이 없으면 법이 정한 순서대로 나뉘어요."
+					+ ("KOR".equals(life.getCurrentCountry()) ? " 한국에서는 유언 없이 세상을 떠나면 배우자가 자녀 몫의 1.5배를 받고 자녀들은 똑같이 나눠요 (민법 1009조)." : ""));
+		} else if ("PSTOCK".equals(d.key)) {
+			e.setLogText("배우자가 아는 사람에게 확실한 종목이라는 이야기를 들었다며, 모아 둔 돈의 절반인 " + won(life, Math.max(0, life.getAssets()) * 0.5) + "을 넣자고 해요. 개인 투자자는 대개 시장 평균보다 낮은 수익을 내요.");
+		}
 		boolean pays = engineCostPays(life, lived);
 		double med = medIncome(life.getCurrentCountry(), yearStat(life));
 		List<EventChoiceDTO> cs = new ArrayList<>();
 		for (int i = 0; i < d.opts.length; i++) {
 			EngineChoice.Opt o = d.opts[i];
 			if (o.show != null && !o.show.test(life)) {
+				continue;
+			}
+			// 돈 굴리기: 그 나라·그해에 못 하는 곳(증권시장 없음 등)은 빼고
+			if (o.act != null && o.act.startsWith("INV_") && investWhy(life, yearStat(life), o.act.substring(4)) != null) {
+				continue;
+			}
+			// 반려동물 (원작 petq): '한 해 약 ○○ · 10~15년 함께' / 작은 동물은 그 나라에서 흔한 것 하나 (원작 petSmall)
+			if ("PET_DOG".equals(o.act) || "PET_CAT".equals(o.act) || "PET_SMALL".equals(o.act)) {
+				String k = "PET_DOG".equals(o.act) ? "d" : "PET_CAT".equals(o.act) ? "c" : (s.petSmall = petSmallKind(life));
+				int[] span = PET_LIFE.get(k);
+				String head = "PET_SMALL".equals(o.act) ? ("f".equals(k) ? "어항을 들여 물고기를 키운다" : petEul(PET_WORD.get(k)) + " 들인다") : o.label;
+				EventChoiceDTO c = new EventChoiceDTO();
+				c.setChoiceId(EngineChoice.choiceId(decIdx, i));
+				c.setEventId(e.getEventId());
+				c.setChoiceOrder(cs.size() + 1);
+				c.setChoiceText(head + " (한 해 약 " + won(life, petCost(life, k)) + " · " + span[0] + "~" + span[1] + "년 함께)");
+				cs.add(c);
 				continue;
 			}
 			EventChoiceDTO c = new EventChoiceDTO();
@@ -3920,6 +5018,13 @@ public class EngineService {
 			c.setEffKnowledge(o.kn);
 			c.setEffRelation(o.re);
 			cs.add(c);
+		}
+		if ("HOBBY".equals(d.key) && cs.size() > 4) {
+			java.util.Collections.shuffle(cs, random);
+			cs = new ArrayList<>(cs.subList(0, 4));
+			for (int i = 0; i < cs.size(); i++) {
+				cs.get(i).setChoiceOrder(i + 1);
+			}
 		}
 		if (cs.size() < 2) {
 			return; // 고를 게 하나뿐이면 띄우지 않음
@@ -3965,7 +5070,7 @@ public class EngineService {
 	}
 
 	// 엔진 선택지 고르기 (POST /api/engine/choice 에 음수 choiceId)
-	private LifeDTO chooseEngine(LifeDTO life, int choiceId) {
+	private LifeDTO chooseEngine(LifeDTO life, int choiceId, String petName) {
 		if (!"PLAYING".equals(life.getStatus()) || !engineChoiceWaiting(life)) {
 			return null;
 		}
@@ -3992,6 +5097,9 @@ public class EngineService {
 		int age = p.age;
 		long startAssets = life.getAssets();
 		life.setMoneyFlow(new ArrayList<>());
+		// 고른 뒤 능력치가 얼마나 바뀌었는지 (원작처럼 결과 줄에 효과 칩)
+		double hl0 = life.getHealth(), h0 = life.getHappiness(), kn0 = life.getKnowledge(), re0 = life.getRelation();
+		boolean invested = false;
 
 		boolean bad = o.badP > 0 && random.nextDouble() < o.badP;
 		if (bad && d.badDeath > 0) {
@@ -4015,6 +5123,48 @@ public class EngineService {
 		if (o.temper != null) {
 			s.temper = o.temper;
 		}
+		// 취미 (원작 hobby): 고른 취미는 OWNS 에 HOB-코드 하나 (새로 고르면 바뀜)
+		if (o.act != null && o.act.startsWith("HOB_")) {
+			java.util.LinkedHashSet<String> owns = ownSet(life);
+			owns.removeIf(x -> x.startsWith("HOB-"));
+			owns.add("HOB-" + o.act.substring(4));
+			life.setOwns(String.join(",", owns));
+		}
+		// 병역 (원작 service)
+		if (o.act != null && o.act.startsWith("SVC_")) {
+			text = svcChoose(life, s, o.act, age);
+		}
+		// 반려동물 (원작 petq): 조르기는 허락받을 확률, 어른은 바로 들임
+		if ("PET_BEG".equals(o.act)) {
+			if (random.nextDouble() < clamp(0.25 + 0.08 * (life.getWealthClass() - 3) + petOwnRate(life) * 0.6, 0.1, 0.8)) {
+				text = text + " " + petAdopt(life, "d", age, petName);
+			} else {
+				life.setHappiness(life.getHappiness() - 2);
+				text = text + " 부모님은 아직은 안 된다고 하셨다.";
+			}
+		} else if ("PET_DOG".equals(o.act) || "PET_CAT".equals(o.act)) {
+			text = petAdopt(life, "PET_DOG".equals(o.act) ? "d" : "c", age, petName);
+		} else if ("PET_SMALL".equals(o.act)) {
+			text = petAdopt(life, s.petSmall != null ? s.petSmall : petSmallKind(life), age, petName);
+		} else if ("PET_NEVER".equals(o.act)) {
+			s.done.put("PET_ADOPT", 99); // 다시 묻지 않음 (원작 never)
+		}
+		// 돈 굴리기 (원작 invest): 고른 곳에 맡김 ('돈 쓰기'의 굴리기와 같은 값)
+		if (o.act != null && o.act.startsWith("INV_")) {
+			life.setInvestType(o.act.substring(4));
+			invested = true;
+		}
+		// 배우자 주식 권유 (원작 pstock): 모은 돈의 절반, 45% 크게 잃음 · 30% 제자리 · 25% 꽤 벎
+		if ("PSTOCK_GO".equals(o.act)) {
+			text = text + " " + pstock(life);
+		}
+		// 유언장 (원작 will): OWNS 에 WILL-방식-나이 하나 (세상을 떠날 때 inheritText 가 읽음)
+		if (o.act != null && o.act.startsWith("WILL_") && !"WILL_LAW".equals(o.act)) {
+			java.util.LinkedHashSet<String> owns = ownSet(life);
+			owns.removeIf(x -> x.startsWith("WILL-"));
+			owns.add("WILL-" + o.act.substring(5).toLowerCase() + "-" + age);
+			life.setOwns(String.join(",", owns));
+		}
 		if (o.act != null && d.key.startsWith("SCHOOL_")) {
 			int nx = java.util.Arrays.asList(levels).indexOf(d.key.substring("SCHOOL_".length()));
 			if ("ENROLL".equals(o.act) && nx >= 0) {
@@ -4032,14 +5182,105 @@ public class EngineService {
 		life.setPendingEvent(null);
 		life.setChoiceCosts(null);
 		List<EventResultDTO> list = new ArrayList<>();
-		list.add(noteEvent(text));
+		EventResultDTO res = noteEvent(text);
+		res.setEffHealth((int) Math.round(life.getHealth() - hl0));
+		res.setEffHappiness((int) Math.round(life.getHappiness() - h0));
+		res.setEffKnowledge((int) Math.round(life.getKnowledge() - kn0));
+		res.setEffRelation((int) Math.round(life.getRelation() - re0));
+		list.add(res);
 		life.setEvents(list);
 		if ("QUIT".equals(o.act)) {
 			showOffers(life, yearStat(life)); // 학교 대신 일을 고르면 바로 일자리 제안 (JOB_MIN_AGE 이상일 때만)
 		}
 		engineDao.updateLifeYear(life);
+		if (invested) {
+			engineDao.updateShop(life); // INVEST_TYPE 은 updateShop 이 저장
+		}
 		fillRegion(life);
 		return life;
+	}
+
+	// 배우자 주식 권유 결과 (원작 pstock 확률·크기 그대로)
+	private String pstock(LifeDTO life) {
+		double t = Math.max(0, life.getAssets()) * 0.5;
+		double n = random.nextDouble();
+		if (n < 0.45) {
+			long loss = Math.round(t * (0.3 + random.nextDouble() * 0.4));
+			life.setAssets(life.getAssets() - loss);
+			book(life, "주식 (배우자 권유)", -loss);
+			life.setHappiness(life.getHappiness() - 8);
+			life.setRelation(life.getRelation() - 4);
+			fixStats(life);
+			return "주가가 곤두박질쳤다. 넣은 돈의 상당 부분을 잃었다. (−" + won(life, loss) + ")";
+		}
+		if (n < 0.75) {
+			life.setHappiness(life.getHappiness() - 1);
+			fixStats(life);
+			return "주가는 오르락내리락하다 제자리로 돌아왔다. 마음고생만 했다.";
+		}
+		long gain = Math.round(t * (0.15 + random.nextDouble() * 0.35));
+		life.setAssets(life.getAssets() + gain);
+		book(life, "주식 (배우자 권유)", gain);
+		life.setHappiness(life.getHappiness() + 5);
+		life.setRelation(life.getRelation() + 2);
+		fixStats(life);
+		return "주가가 올라 꽤 벌었다. (+" + won(life, gain) + ")";
+	}
+
+	// 세상을 떠날 때 재산이 어떻게 나뉘었는지 (원작 상속: 유언장 · 나라별 법 · 빚)
+	private String inheritText(LifeDTO life) {
+		long a = life.getAssets();
+		boolean sp = "Y".equals(life.getMarriedYn());
+		int kids = life.getChildCount();
+		if (a <= 0) {
+			return kids > 0 ? "남긴 재산보다 빚이 많아 자녀들은 상속을 포기했다. 빚은 대물림되지 않았다."
+					: "남긴 재산보다 빚이 많아, 남은 것은 빚을 갚는 데 쓰였다.";
+		}
+		String amt = "남긴 재산은 약 " + won(life, a) + ".";
+		String will = null;
+		int at = 0;
+		for (String x : ownSet(life)) {
+			if (x.startsWith("WILL-")) {
+				String[] p = x.split("-");
+				will = p[1];
+				at = p.length > 2 ? Integer.parseInt(p[2]) : 0;
+			}
+		}
+		boolean heirs = sp || kids > 0;
+		if (will != null) {
+			String how;
+			switch (will) {
+			case "spouse":
+				how = sp ? "배우자가 먼저 물려받고, 나머지는 자녀들에게 갔다." : "배우자가 먼저 떠나, 자녀들이 물려받았다.";
+				break;
+			case "fam":
+				how = "가족이 똑같이 나눠 가졌다.";
+				break;
+			case "give":
+				how = "5분의 1은 구호 단체에, 나머지는 " + (heirs ? "가족에게 갔다." : "형제자매와 친척에게 갔다.");
+				break;
+			default:
+				how = "모두 구호 단체에 남겼다.";
+			}
+			return amt + " " + at + "세에 쓴 유언장대로 나뉘었다. " + how;
+		}
+		String cc = life.getCurrentCountry();
+		if (!heirs) {
+			return amt + " 물려받을 배우자도 자녀도 없어, 재산은 형제자매와 친척에게 돌아갔다.";
+		}
+		if (sp && kids > 0) {
+			if ("KOR".equals(cc)) {
+				return amt + " 유언장이 없어 민법에 따라 나뉘었다. 배우자는 자녀 몫의 1.5배를 받았다 (민법 1009조).";
+			}
+			if ("JPN".equals(cc)) {
+				return amt + " 유언장이 없어 일본 민법에 따라 배우자가 절반, 자녀들이 나머지 절반을 똑같이 나눴다.";
+			}
+			return amt + " 유언장이 없어 법이 정한 몫대로 배우자와 자녀들에게 나뉘었다.";
+		}
+		if (sp) {
+			return amt + " 유언장이 없어 법에 따라 배우자가 물려받았다.";
+		}
+		return amt + (kids > 1 ? " 유언장이 없어 자녀들이 똑같이 나눴다." : " 유언장이 없어 자녀가 모두 물려받았다.");
 	}
 
 	// 돈·신용이 모자라 고를 수 없는 선택지는 화면에서 빼기 (고를 수 있는 게 하나도 안 남으면 그대로 둠)

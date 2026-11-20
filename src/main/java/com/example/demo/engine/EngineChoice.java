@@ -23,6 +23,37 @@ public class EngineChoice {
 	public static final String HUM = "HUM";
 	public static final String HIST = "HIST";     // 역사 현장 선택 (그해·그 나라에서만, rollEngineChoice 가 먼저 띄움)
 	public static final String SCHOOL = "SCHOOL"; // 무작위로 뽑지 않음 (schoolStep 이 붙었을 때만 띄움)
+	public static final String SVC = "SVC";       // 병역 (한국 남성, EngineService.svcPick 이 직접 띄움)
+	public static final String HOBBY = "HOBBY";   // 취미 고르기 (7·15·27·50세, EngineService 가 직접 띄움, 원작 hobby)
+	public static final String MONEY = "MONEY";   // 돈 굴리기·배우자 주식 권유·유언장 (원작 invest · pstock · will, EngineService.moneyPick 이 직접 띄움)
+
+	// 취미 (원작 HOBBIES): 코드 → {이름, 해마다 행복, 건강, 관계, 지식(×0.25로 적용), 비용(중위 소득 비율)}
+	public static final String[][] HOBBIES = {
+			{ "sport", "운동", "3", "4", "2", "0", "0.01" },
+			{ "music", "노래·악기 연주", "4", "0", "2", "1", "0.01" },
+			{ "dance", "춤", "4", "2", "2", "0", "0.005" },
+			{ "screen", "텔레비전·영화 보기", "3", "-1", "0", "0", "0.005" },
+			{ "sns", "스마트폰·SNS", "2", "-1", "2", "0", "0.01" },
+			{ "games", "비디오 게임", "4", "-1", "1", "1", "0.02" },
+			{ "reading", "독서", "2", "0", "0", "4", "0.01" },
+			{ "fishing", "낚시", "3", "1", "1", "0", "0.01" },
+			{ "cooking", "요리", "3", "1", "2", "1", "0.01" },
+			{ "garden", "텃밭 가꾸기", "3", "2", "0", "0", "0.005" },
+			{ "hiking", "등산·산책", "3", "3", "1", "0", "0.005" },
+			{ "travel", "여행", "5", "0", "1", "2", "0.06" },
+			{ "art", "그림 그리기", "3", "0", "1", "2", "0.01" },
+			{ "karaoke", "노래방", "4", "0", "3", "0", "0.02" },
+			{ "calli", "서예", "3", "0", "1", "2", "0.005" },
+			{ "gym", "헬스", "2", "5", "0", "0", "0.03" } };
+
+	public static String[] hobbyOf(String code) {
+		for (String[] h : HOBBIES) {
+			if (h[0].equals(code)) {
+				return h;
+			}
+		}
+		return null;
+	}
 
 	// 선택지 하나
 	public static class Opt {
@@ -56,7 +87,9 @@ public class EngineChoice {
 		}
 
 		Opt when(Predicate<LifeDTO> p) {
-			return new Opt(label, h, hl, re, kn, cost, results, badP, badEff, temper, p);
+			Opt o = new Opt(label, h, hl, re, kn, cost, results, badP, badEff, temper, p);
+			o.act = act; // act 를 먼저 붙인 선택지도 그대로 (예전엔 빠져서 취미 HOB_ 가 저장되지 않았음)
+			return o;
 		}
 
 		Opt act(String a) {
@@ -95,6 +128,21 @@ public class EngineChoice {
 		}
 	}
 
+	// 취미 선택지 하나 (고르면 그해 행복 +1, 이후 해마다 효과는 EngineService.hobbyYear)
+	static Opt hob(String code, Predicate<LifeDTO> p) {
+		String[] h = hobbyOf(code);
+		return new Opt(h[1], 1, 0, 0, 0, 0, eul(h[1]) + " 취미로 삼았다.").act("HOB_" + code).when(p);
+	}
+
+	// 을/를 (받침 있으면 '을', 영문으로 끝나면 '를')
+	static String eul(String w) {
+		char ch = w.charAt(w.length() - 1);
+		if (ch < 0xAC00 || ch > 0xD7A3) {
+			return w + "를";
+		}
+		return w + ((ch - 0xAC00) % 28 == 0 ? "를" : "을");
+	}
+
 	// ===== 처지 판단 (LifeDTO 만 보고) =====
 	static boolean inSchool(LifeDTO l) {
 		return "ENROLLED".equals(l.getSchoolStatus());
@@ -126,6 +174,11 @@ public class EngineChoice {
 				|| EngineStory.had(l.getLifeId(), "era_mobile");
 	}
 
+	// 반려동물이 있는지 (OWNS 에 PET-종류-이름-들인나이-수명 토큰)
+	static boolean hasPet(LifeDTO l) {
+		return l.getOwns() != null && l.getOwns().contains("PET-");
+	}
+
 	static boolean schooled(LifeDTO l) {
 		return l.getEduLevel() != null && !"NONE".equals(l.getEduLevel()) || inSchool(l);
 	}
@@ -148,7 +201,7 @@ public class EngineChoice {
 				new String[] { "수업이 끝났는데 해는 아직 한참 남았어요. 오늘은 무엇을 할까요?", "학교를 나서는데 친구들이 같이 놀자고 불러요." },
 				new Opt("친구들과 해 질 때까지 뛰어논다", 2, 1, 3, 0, 0, "해 질 녘까지 친구들과 뛰어놀았다."),
 				new Opt("도서관에 들러 책을 읽는다", 1, 0, 0, 3, 0, "도서관 창가에 앉아 책 한 권을 끝까지 읽었다."),
-				new Opt("집에 가서 집안일을 돕는다", 0, 0, 2, 0, 0, "집에 가서 빨래를 개고 집안일을 도왔다. 부모님이 고맙다고 하셨다.")));
+				new Opt("집에 가서 집안일을 돕는다", 0, 0, 2, 0, 0, "집에 가서 빨래를 개고 집안일을 도왔다. 식구들이 고맙다고 했다.")));
 		ALL.add(new Dec("WALLET", KID, 7, 14, 1, 99, l -> true, "주운 지갑",
 				new String[] { "길에서 지갑을 주웠어요. 안에 돈이 꽤 들어 있어요." },
 				new Opt("어른께 알리고 주인을 찾아 준다", 3, 0, 2, 0, 0, "주인을 찾아 주었다. 몇 번이고 고맙다는 인사를 들었다."),
@@ -175,22 +228,116 @@ public class EngineChoice {
 				new Opt("의사", 1, 0, 0, 2, 0, "공책에 '의사'라고 적고 한참을 바라보았다."),
 				new Opt("아직 모르겠다", 0, 0, 0, 0, 0, "한참을 고민하다 '아직 모르겠다'고 솔직하게 적었다.")));
 
+		// ---------- 병역 (원작 service, 한국 남성) ----------
+		// 현역: 육군 입대 / 해군·공군 지원(붙을 가능성은 해마다 다름, 떨어지면 육군) / 1년 미루기(27세까지)
+		// 보충역(방위병·공익·사회복무): 집에서 출퇴근 / 1년 미루기 · 면제는 창 없이 한 줄
+		// 복무 기간·결과 문장은 EngineService.chooseEngine 이 그해 기준으로 만듦
+		ALL.add(new Dec("SVC_ACT", SVC, 18, 30, 99, 0, l -> true, "입영 통지서",
+				new String[] { "병역 의무가 있어요." },
+				new Opt("육군으로 입대한다", 0, 0, 0, 0, 0, "육군으로 입대했다.").act("SVC_GO"),
+				new Opt("해군에 지원한다 (떨어지면 육군)", 0, 0, 0, 0, 0, "해군에 지원했다.").act("SVC_NAVY"),
+				new Opt("공군에 지원한다 (떨어지면 육군)", 0, 0, 0, 0, 0, "공군에 지원했다.").act("SVC_AIR"),
+				new Opt("입대를 1년 미룬다", 0, 0, 0, 0, 0, "입대를 1년 미뤘다.").act("SVC_DELAY").when(l -> l.getCurrentAge() < 27)));
+		ALL.add(new Dec("SVC_SUP", SVC, 18, 30, 99, 0, l -> true, "소집 통지서",
+				new String[] { "보충역 판정을 받았어요." },
+				new Opt("소집에 응한다 (집에서 출퇴근)", 0, 0, 0, 0, 0, "보충역으로 소집되어 집에서 출퇴근하며 복무를 시작했다.").act("SVC_SUP"),
+				new Opt("소집을 1년 미룬다", 0, 0, 0, 0, 0, "소집을 1년 미뤘다.").act("SVC_DELAY").when(l -> l.getCurrentAge() < 27)));
+
+		// ---------- 취미 (원작 hobby, 7·15·27·50세) ----------
+		// 고를 수 있는 것 가운데 4개만 보여 줌 (EngineService.openEngineChoice), 고른 취미는 해마다 조금씩 효과·비용
+		ALL.add(new Dec("HOBBY", HOBBY, 6, 99, 99, 0, l -> true, "취미를 하나 가져 볼까?",
+				new String[] { "남는 시간에 즐겨 할 것이 있으면 좋겠어요.", "요즘 마음이 가는 것이 있어요." },
+				hob("sport", l -> true),
+				hob("music", l -> true),
+				hob("dance", l -> true),
+				hob("screen", l -> year(l) >= 1965),
+				hob("sns", l -> year(l) >= 2010 && hasPhone(l)),
+				hob("games", l -> year(l) >= 1985 && l.getWealthClass() >= 3),
+				hob("reading", l -> schooled(l)),
+				hob("fishing", l -> l.getCurrentAge() >= 10),
+				hob("cooking", l -> l.getCurrentAge() >= 12),
+				hob("garden", l -> l.getCurrentAge() >= 25),
+				hob("hiking", l -> true),
+				hob("travel", l -> l.getCurrentAge() >= 20 && year(l) >= 1985 && l.getWealthClass() >= 3),
+				hob("art", l -> true),
+				hob("karaoke", l -> l.getCurrentAge() >= 15 && year(l) >= 1990 && java.util.Set.of("KOR", "JPN", "PHL", "VNM", "THA", "CHN", "PRK").contains(l.getCurrentCountry())),
+				hob("calli", l -> schooled(l) && java.util.Set.of("CHN", "JPN", "KOR").contains(l.getCurrentCountry())),
+				hob("gym", l -> l.getCurrentAge() >= 18 && year(l) >= 1990 && "Y".equals(l.getIsUrban()))));
+
+		// ---------- 반려동물 (원작 petq) ----------
+		// 아이(6~14세): 강아지를 키우고 싶다고 조름 → 허락은 집안 형편·그 나라 반려동물 비율에 달림 (EngineService.chooseEngine)
+		// 어른(20~70세): 강아지·고양이를 들일지 고름. 들이면 해마다 돌봄 비용, 수명이 다하면 무지개다리 (EngineService.petYear)
+		// 원작처럼 이름을 직접 적을 수 있음 (화면: ENG_PET_ 창에 이름 칸, 비우면 그 나라 흔한 이름)
+		// 선택지 아래 줄(한 해 비용 · 함께하는 햇수)은 EngineService.openEngineChoice 가 붙임
+		ALL.add(new Dec("PET_BEG", KID, 6, 14, 2, 3, l -> !hasPet(l) && year(l) >= 1960, "강아지를 키우고 싶어요",
+				new String[] { "친구 집 강아지를 보고 온 날부터 부모님께 조르고 있어요.",
+						"이웃집 개가 새끼를 낳았다는 말을 듣고부터 부모님께 조르고 있어요.",
+						"친구가 강아지와 산책하는 모습을 본 뒤로 부모님께 조르고 있어요." },
+				new Opt("조르고 또 조른다 (허락은 집안 형편에 달려 있어요)", 0, 0, 0, 0, 0, "강아지를 키우게 해 달라고 조르고 또 졸랐다.").act("PET_BEG"),
+				new Opt("꾹 참는다", -1, 0, 0, 0, 0, "강아지를 키우고 싶은 마음을 꾹 참았다. 크면 꼭 키우겠다고 마음먹었다.")));
+		ALL.add(new Dec("PET_ADOPT", ADULT, 20, 75, 3, 5, l -> !hasPet(l) && year(l) >= 1970, "반려동물을 들일까?",
+				new String[] { "이웃집에서 태어난 새끼들이 새 가족을 찾고 있어요.",
+						"보호소에서 새 가족을 기다리는 동물들을 보았어요.",
+						"동네에서 자주 마주치던 길고양이가 자꾸 눈에 밟혀요.",
+						"친구네 동물을 며칠 맡아 돌보고 나니, 집에 동물이 있으면 어떨까 싶어졌어요." },
+				new Opt("강아지를 들인다", 0, 0, 0, 0, 0, "강아지를 들였다.").act("PET_DOG"),
+				new Opt("고양이를 들인다", 0, 0, 0, 0, 0, "고양이를 들였다.").act("PET_CAT"),
+				new Opt("작은 동물을 들인다", 0, 0, 0, 0, 0, "작은 동물을 들였다.").act("PET_SMALL"),
+				new Opt("지금은 아니다", 0, 0, 0, 0, 0, "지금은 들이지 않기로 했다. 끝까지 돌볼 자신이 생기면 그때 생각하기로 했다."),
+				new Opt("반려동물은 들이지 않는다 (다시 묻지 않아요)", 0, 0, 0, 0, 0, "반려동물은 들이지 않기로 했다.").act("PET_NEVER")));
+
+		// ---------- 돈·유언 (원작 invest · pstock · will) ----------
+		// 본문(금액)은 EngineService.openEngineChoice 가 채움, 고른 뒤 처리는 chooseEngine (INV_ · PSTOCK_ · WILL_)
+		// 결과 문장 앞부분이 늘 같아서, 서버를 다시 켜도 인생 기록에서 이미 고른 것을 찾음
+		ALL.add(new Dec("INVEST", MONEY, 18, 90, 1, 99, l -> true, "모은 돈을 어떻게 굴릴까?",
+				new String[] { "모은 돈을 어디에 둘까요?" },
+				new Opt("예금에 넣는다 (물가 빼고 연 1~1.5% · 거의 안전)", 0, 0, 0, 0, 0, "모은 돈을 예금에 맡기기로 했다.").act("INV_DEPOSIT"),
+				new Opt("주식·채권 반반 펀드에 넣는다 (평균 연 3.5% · 출렁임 중간)", 0, 0, 0, 0, 0, "모은 돈을 주식·채권 반반 펀드에 맡기기로 했다.").act("INV_MIX"),
+				new Opt("주식에 투자한다 (평균 연 5% · 폭락할 수도)", 0, 0, 0, 0, 0, "모은 돈을 주식 (지수)에 맡기기로 했다.").act("INV_STOCK"),
+				new Opt("부동산에 투자한다 (평균 연 3.5% · 변동 중간)", 0, 0, 0, 0, 0, "모은 돈을 부동산 펀드에 맡기기로 했다.").act("INV_PROPERTY")));
+		ALL.add(new Dec("PSTOCK", MONEY, 25, 75, 1, 99, l -> "Y".equals(l.getMarriedYn()), "배우자가 주식에 크게 넣자고 해요",
+				new String[] { "배우자가 아는 사람에게 확실한 종목이라는 이야기를 들었다며, 모아 둔 돈의 절반을 넣자고 해요." },
+				new Opt("믿고 넣어 본다 (크게 벌거나 크게 잃음)", 0, 0, 0, 0, 0, "배우자의 말을 믿고 모아 둔 돈의 절반을 주식에 넣었다.").act("PSTOCK_GO"),
+				new Opt("위험하다고 말린다 (사이가 조금 서먹해짐)", 0, 0, -1, 0, 0, "한바탕 언쟁 끝에 주식 이야기는 없던 일이 되었다.")));
+		ALL.add(new Dec("WILL", MONEY, 50, 110, 1, 99, l -> true, "유언장을 쓸까?",
+				new String[] { "남길 것을 생각할 나이가 되었어요." },
+				new Opt("쓰지 않고 법에 맡긴다", 0, 0, 0, 0, 0, "유언장은 쓰지 않기로 했다. 남은 사람들이 법대로 나누면 된다고 생각했다.").act("WILL_LAW"),
+				new Opt("배우자에게 먼저 남긴다", 2, 0, 0, 0, 0, "유언장을 썼다. 배우자에게 먼저 남기기로 했다.").act("WILL_SPOUSE")
+						.when(l -> "Y".equals(l.getMarriedYn()) && l.getChildCount() > 0),
+				new Opt("가족에게 똑같이 나눈다", 2, 0, 0, 0, 0, "유언장을 썼다. 가족이 똑같이 나누도록 했다.").act("WILL_FAM")
+						.when(l -> ("Y".equals(l.getMarriedYn()) ? 1 : 0) + l.getChildCount() >= 2),
+				new Opt("5분의 1을 구호 단체에 남긴다 (나머지는 가족에게)", 2, 0, 1, 0, 0, "유언장을 썼다. 재산의 5분의 1은 구호 단체에 남기기로 했다.").act("WILL_GIVE"),
+				new Opt("모두 구호 단체에 남긴다", 3, 0, 1, 0, 0, "유언장을 썼다. 남길 수 있는 만큼을 구호 단체에 남기기로 했다.").act("WILL_GIVEALL")
+						.when(l -> !"Y".equals(l.getMarriedYn()) && l.getChildCount() == 0)));
+
 		// ---------- 어른 (원작 SMALL) ----------
 		// 휴대폰이 있는 사람만 (돈 쓰기로 산 휴대폰, 또는 인생 기록에 '휴대전화·스마트폰이 생겼다'가 나온 사람)
 		ALL.add(new Dec("PHONE", ADULT, 13, 60, 1, 99, l -> year(l) >= 2012 && hasPhone(l), "잠들기 전 휴대폰",
 				new String[] { "누워서 휴대폰을 보다 보면 어느새 새벽이에요." },
 				new Opt("휴대폰을 멀리 두고 일찍 잔다", 0, 2, 0, 1, 0, "휴대폰을 침대 밖에 두고 잤다. 아침이 한결 가벼웠다."),
-				new Opt("계속 본다, 이게 쉬는 시간이다", 1, -1, 0, 0, 0, "오늘도 영상 몇 개만 더 보다가 늦게 잠들었다.")));
+				new Opt("조금만 더 본다, 이게 쉬는 시간이다", 1, -1, 0, 0, 0, "영상 몇 개만 더 본다는 게 또 늦게 잠들었다.")));
+		ALL.add(new Dec("COOK", ADULT, 20, 70, 1, 99, l -> true, "요리를 배워 볼까?",
+				new String[] { "늘 사 먹거나 대충 때우는 끼니가 마음에 걸려요." },
+				new Opt("동네 요리 강좌에 다닌다", 1, 1, 1, 0, 0.01, "동네 요리 강좌에 다니며 몇 가지 음식을 제대로 배웠다."),
+				new Opt("지금처럼 지낸다", 0, 0, 0, 0, 0, "요리는 다음에 배우기로 했다. 끼니는 오늘도 간단히 때웠다.")));
+		ALL.add(new Dec("TIDY", ADULT, 25, 80, 1, 99, l -> true, "물건으로 가득 찬 집",
+				new String[] { "언제부턴가 집 안에 물건이 쌓여 발 디딜 틈이 줄었어요." },
+				new Opt("주말에 날 잡고 싹 정리한다", 2, 0, 0, 0, 0, "주말 내내 쓰지 않는 물건을 정리했다. 집이 한결 넓어졌다."),
+				new Opt("언젠가 쓸 데가 있겠지, 그냥 둔다", -1, 0, 0, 0, 0, "버리지 못한 물건이 또 한 상자 늘었다.")));
+		ALL.add(new Dec("WALK", ADULT, 40, 85, 1, 99, l -> l.getHealth() < 70, "의사가 걸으라고 했어요",
+				new String[] { "건강검진에서 의사가 하루에 30분씩이라도 걸으라고 했어요." },
+				new Opt("매일 30분씩 걷는다", 1, 3, 0, 0, 0, "매일 저녁 30분씩 걸었다. 몸이 조금 가벼워졌다."),
+				new Opt("바빠서 시간이 없다", 0, -1, 0, 0, 0, "걷기는 마음뿐이었다. 한 해가 바쁘게 지나갔다.")));
 		ALL.add(new Dec("WEEKEND", ADULT, 18, 75, 2, 8, l -> true, "모처럼 쉬는 주말",
 				new String[] { "아무 약속도 없는 주말이에요. 무엇을 할까요?", "늦잠을 자고 일어나니 창밖이 맑아요." },
 				new Opt("오랜만에 친구들을 만난다", 2, 0, 3, 0, 0.01, "친구들과 늦게까지 이야기를 나눴다."),
 				new Opt("집에서 푹 쉰다", 1, 2, 0, 0, 0, "늦잠을 자고 아무것도 하지 않았다. 그것도 좋았다."),
 				new Opt("가족과 나들이를 간다", 2, 0, 3, 0, 0.01, "가족과 도시락을 싸 들고 가까운 공원에 다녀왔다.").when(EngineChoice::family),
-				new Opt("혼자 가 보고 싶던 곳에 간다", 3, 0, 0, 0, 0.01, "혼자 기차를 타고 가 보고 싶던 동네를 걸었다.").when(l -> !family(l))));
+				new Opt("혼자 가 보고 싶던 곳에 간다", 3, 0, 0, 0, 0.01, "혼자 가 보고 싶던 동네에 다녀왔다. 낯선 길을 걷는 것만으로 즐거웠다.").when(l -> !family(l))));
 		ALL.add(new Dec("HOLIDAY", ADULT, 22, 72, 2, 10, EngineChoice::working, "휴가를 어디서 보낼까?",
 				new String[] { "며칠 쉴 수 있게 되었어요." },
 				new Opt("부모님 댁에 다녀온다", 2, 0, 4, 0, 0, "부모님 댁에서 며칠을 보냈다. 어릴 적 방이 그대로였다.").when(EngineChoice::parents),
-				new Opt("가까운 바다나 산으로 떠난다", 4, 1, 0, 0, 0.03, "바다를 보며 오랜만에 숨을 돌렸다."),
+				new Opt("가까운 바닷가나 산으로 놀러 간다", 4, 1, 0, 0, 0.03, "가까운 바닷가와 산을 돌며 오랜만에 숨을 돌렸다."),
 				new Opt("해외여행을 간다", 6, 0, 0, 1, 0.12, "처음 가 보는 나라의 골목을 걸었다. 세상이 넓다는 걸 실감했다.")
 						.when(l -> year(l) >= 1990 && l.getAssets() > 0),
 				new Opt("집에서 쉰다", 0, 2, 0, 0, 0, "집에서 밀린 잠을 잤다.")));
@@ -203,7 +350,7 @@ public class EngineChoice {
 				new Opt("주말에 찾아뵌다", 2, 0, 4, 0, 0.01, "주말에 부모님을 찾아뵙고 저녁을 함께 먹었다."),
 				new Opt("전화로 안부를 여쭌다", 1, 0, 2, 0, 0, "전화로 안부를 여쭈었다. 목소리가 밝으셔서 마음이 놓였다."),
 				new Opt("다음에 연락드린다", 0, 0, -2, 0, 0, "다음에 연락드려야지 하고 미루다 한 해가 지나갔다.")));
-		ALL.add(new Dec("COOK", ADULT, 18, 35, 1, 99, l -> !married(l), "혼자 사는 저녁",
+		ALL.add(new Dec("DINNER", ADULT, 18, 35, 1, 99, l -> !married(l), "혼자 사는 저녁",
 				new String[] { "퇴근하고 돌아오니 배가 고파요. 저녁은 어떻게 할까요?" },
 				new Opt("장을 봐서 직접 해 먹는다", 1, 2, 0, 1, 0, "서툴지만 직접 장을 봐서 저녁을 해 먹었다. 생각보다 맛있었다."),
 				new Opt("간단히 사 먹는다", 1, -1, 0, 0, 0.005, "가까운 식당에서 간단히 저녁을 사 먹었다.")));
@@ -235,15 +382,15 @@ public class EngineChoice {
 	static {
 		// ---------- 진학 (원작 school2 · school3 · college) ----------
 		Dec m = new Dec("SCHOOL_MIDDLE", SCHOOL, 0, 99, 1, 99, l -> true, "중학교에 갈까?",
-				new String[] { "초등학교를 마쳤어요. 중학교에 갈 수 있게 됐는데, 집안일을 도울 손도 필요해요." },
+				new String[] { "초등학교를 마쳤어요. 중학교에 갈 수 있게 됐어요. 공부를 계속할까요?" },
 				new Opt("중학교에 간다", 1, 0, 0, 2, 0, "중학교에 진학했다. 새 교과서 냄새가 좋았다.").act("ENROLL"),
-				new Opt("학교를 그만두고 집안일을 돕는다", -2, 0, 2, -1, 0, "학교 대신 집안일을 돕기로 했다. 교복 입은 친구들이 지나갈 때마다 눈길이 갔다.").act("QUIT"));
+				new Opt("공부는 여기까지 하고 집안일을 돕는다", -2, 0, 2, -1, 0, "학교 대신 집안일을 돕기로 했다. 교복 입은 친구들이 지나갈 때마다 눈길이 갔다.").act("QUIT"));
 		m.failText = "집안 형편이 어려워 중학교에 가지 못했다.";
 		ALL.add(m);
 		Dec h = new Dec("SCHOOL_HIGH", SCHOOL, 0, 99, 1, 99, l -> true, "고등학교에 갈까?",
-				new String[] { "중학교를 마쳤어요. 고등학교에 갈 수 있지만, 집에 보탬이 될 손도 필요해요." },
+				new String[] { "중학교를 마쳤어요. 고등학교에 갈 수 있게 됐어요. 공부를 계속할까요?" },
 				new Opt("고등학교에 간다", 1, 0, 0, 2, 0, "고등학교에 진학했다. 공부가 한결 어려워졌다.").act("ENROLL"),
-				new Opt("학교를 그만두고 집안일을 돕는다", -1, 0, 1, 0, 0, "고등학교 대신 집안일을 거들며 지내기로 했다. 친구들 소식이 가끔 부러웠다.").act("QUIT"));
+				new Opt("공부는 여기까지 하고 집안일을 거든다", -1, 0, 1, 0, 0, "고등학교 대신 집안일을 거들며 지내기로 했다. 친구들 소식이 가끔 부러웠다.").act("QUIT"));
 		h.failText = "집안 형편이 어려워 고등학교에 가지 못했다.";
 		ALL.add(h);
 		Dec u = new Dec("SCHOOL_UNI", SCHOOL, 0, 99, 1, 99, l -> true, "대학에 갈까?",
@@ -312,14 +459,14 @@ public class EngineChoice {
 
 	// 선택지 번호 → 화면 choiceId (음수: 윤아님 EVENT_CHOICE 번호와 겹치지 않게)
 	public static int choiceId(int decIdx, int optIdx) {
-		return -(decIdx * 10 + optIdx + 1);
+		return -(decIdx * 100 + optIdx + 1); // 선택지가 10개 넘는 취미 때문에 100 단위 (예전 10 단위는 11번째부터 다음 선택과 겹쳤음)
 	}
 
 	public static int decIdxOf(int choiceId) {
-		return (-choiceId - 1) / 10;
+		return (-choiceId - 1) / 100;
 	}
 
 	public static int optIdxOf(int choiceId) {
-		return (-choiceId - 1) % 10;
+		return (-choiceId - 1) % 100;
 	}
 }

@@ -518,6 +518,20 @@
 		FROM JOB
 	</select>
 
+	<!-- 진행 화면 퀘스트 칸: 이 인생에서 고른 퀘스트 (읽기만, LIFE_QUEST·QUEST 는 민승님 데이터) -->
+	<select id="selectLifeQuests" parameterType="int" resultType="com.example.demo.engine.LifeQuestDTO">
+		SELECT q.QUEST_ID    AS questId,
+		       q.QUEST_NAME  AS questName,
+		       q.DESCRIPTION AS description,
+		       lq.ACHIEVED   AS achieved,
+		       q.QUEST_TYPE  AS questType,
+		       q.TARGET_VALUE AS targetValue
+		FROM LIFE_QUEST lq
+		JOIN QUEST q ON q.QUEST_ID = lq.QUEST_ID
+		WHERE lq.LIFE_ID = #{lifeId}
+		ORDER BY q.QUEST_ID
+	</select>
+
 	<select id="selectJob" parameterType="string" resultType="com.example.demo.engine.JobDTO">
 		SELECT JOB_ID       AS jobId,
 		       JOB_NAME     AS jobName,

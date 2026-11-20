@@ -70,4 +70,7 @@ public interface EngineDao {
 	// C06 직업
 	List<JobDTO> selectJobs();
 	JobDTO selectJob(String jobId);
+
+	// 진행 화면: 이 인생에서 고른 퀘스트 (LIFE_QUEST + QUEST 읽기만)
+	List<LifeQuestDTO> selectLifeQuests(int lifeId);
 }
