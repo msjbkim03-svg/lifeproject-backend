@@ -343,7 +343,8 @@ public class EventService {
 	        "INVEST", new String[] { " 투자는 성공적이었다.", " 하지만 투자는 실패해 손해를 봤다." },
 	        "PROTEST", new String[] { " 함께한 사람들과 변화를 이끌어 냈다.", " 하지만 진압 과정에서 크게 다쳤다." },
 	        "ENLIST", new String[] { " 무사히 살아 돌아왔다.", " 하지만 전투 중 크게 다쳤다." },
-	        "COUNSEL", new String[] { " 서로를 다시 이해하게 되었다.", " 하지만 끝내 마음을 돌리지 못하고 헤어졌다." });
+	        "COUNSEL", new String[] { " 서로를 다시 이해하게 되었다.", " 하지만 끝내 마음을 돌리지 못하고 헤어졌다." },
+	        "TREAT", new String[] { " 치료가 잘 되어 몸을 회복했다.", " 하지만 치료가 듣지 않아 병이 깊어졌다." });
 
 	// 결과 종류 묶기: TREAT_HOSPITAL, TREAT_HOME, TREAT_LOAN → TREAT
 	private String actionGroup(String action) {
@@ -388,6 +389,12 @@ public class EventService {
 		    r.setEffKnowledge(0);
 		    r.setEffRelation(-6);
 		    return -0.20;
+		case "TREAT": // 치료 실패: 병이 깊어짐 (치료 방법과 관계없이 같은 피해)
+		    r.setEffHealth(-15);
+		    r.setEffHappiness(-8);
+		    r.setDeathAdd(0.05);
+		    r.setDeathCause("질병");
+		    return wealth; // 치료비는 성공·실패와 관계없이 나감
 		default:
 			return wealth;
 		}
@@ -397,7 +404,9 @@ public class EventService {
 	private String afterAction(String action, boolean success) {
 	    if ("COUNSEL".equals(action) && !success)
 	        return "MARRIAGE_END"; // 상담 실패 → 이혼 (엔진이 결혼 상태 해제)
-	    return null; // 투자·참여는 상태 변화 없음 (치료는 4단계에서 추가)
+	    if ("TREAT_LOAN".equals(action))
+	        return "LOAN"; // 빚내서 치료 → 성공·실패와 관계없이 빚 (엔진이 재산에서 뺌)
+	    return null; // 투자·참여·병원·집 치료는 상태 변화 없음
 	}
 
 	// ===== 이민 목적지 (C10) =====
