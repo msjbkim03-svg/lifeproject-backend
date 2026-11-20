@@ -10,6 +10,7 @@ public class MemorialCardDTO {
 	private String birthCountry;
 	private String message;
 	private int tributeCount;
+	
 
 	public int getLifeId() { return lifeId; }
 	public void setLifeId(int lifeId) { this.lifeId = lifeId; }
