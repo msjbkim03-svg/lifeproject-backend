@@ -28,6 +28,16 @@ public class EventResultDTO {
 
 	private boolean needDestination; // 목적지를 골라야 하는지 (떠난다 선택 후)
 	private List<DestinationDTO> destinations; // 목적지 후보
+	
+	private boolean ai; // AI가 쓴 문장인지 (C11, LIFE_EVENT_LOG.IS_AI)
+
+	public boolean isAi() {
+		return ai;
+	}
+
+	public void setAi(boolean ai) {
+		this.ai = ai;
+	}
 
 	public String getEventId() {
 		return eventId;
