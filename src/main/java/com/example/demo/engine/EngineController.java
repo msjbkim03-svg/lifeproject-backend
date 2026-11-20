@@ -189,6 +189,22 @@ public class EngineController {
 		return ResponseEntity.ok(out);
 	}
 
+	// C03 잠시 멈춤 (원작 reflect): 5·15·30·50·70세에 적은 한 줄을 인생 기록에 남김
+	//   POST /api/engine/note  { lifeId, text, atAge, guestToken }  → 남긴 문장 (따옴표 포함)
+	@PostMapping("/api/engine/note")
+	public ResponseEntity<?> note(@RequestBody EngineRequestDTO req,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		LifeDTO life = engineService.loadMyLife(req.getLifeId(), loginMemberId(auth), req.getGuestToken());
+		if (life == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		String out = engineService.saveNote(life, req.getText(), req.getAtAge());
+		if (out == null) {
+			return ResponseEntity.badRequest().body("남길 글이 없거나 지금은 남길 수 없어요.");
+		}
+		return ResponseEntity.ok(out);
+	}
+
 	// C06-3 여유 자금 굴리기 방식  POST /api/engine/invest  { lifeId, investType, atAge, guestToken }
 	@PostMapping("/api/engine/invest")
 	public ResponseEntity<?> invest(@RequestBody EngineRequestDTO req,
@@ -233,7 +249,7 @@ public class EngineController {
 		if (blocked != null) {
 			return ResponseEntity.badRequest().body(blocked);
 		}
-		life = engineService.chooseEvent(life, req.getChoiceId());
+		life = engineService.chooseEvent(life, req.getChoiceId(), req.getText()); // text: 반려동물 이름 등 (없으면 null)
 		if (life == null) {
 			return ResponseEntity.badRequest()
 					.body("지금 고를 선택 이벤트가 없거나, 이 이벤트의 선택지가 아니에요.");
