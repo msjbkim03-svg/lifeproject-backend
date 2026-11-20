@@ -7,7 +7,7 @@ public class MemorialCardDTO {
 	private int birthYear;
 	private int deathYear;
 	private int deathAge;
-	private String birthCountry;
+	private String birthCountryName;
 	private String message;
 	private int tributeCount;
 	
@@ -27,8 +27,8 @@ public class MemorialCardDTO {
 	public int getDeathAge() { return deathAge; }
 	public void setDeathAge(int deathAge) { this.deathAge = deathAge; }
 
-	public String getBirthCountry() { return birthCountry; }
-	public void setBirthCountry(String birthCountry) { this.birthCountry = birthCountry; }
+	public String getBirthCountryName() { return birthCountryName; }
+	public void setBirthCountryName(String birthCountryName) { this.birthCountryName = birthCountryName; }
 
 	public String getMessage() { return message; }
 	public void setMessage(String message) { this.message = message; }

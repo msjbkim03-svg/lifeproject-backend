@@ -19,7 +19,7 @@ public class MyPageDTO {
 	// ===== 진행 중인 인생 (없으면 전부 null) =====
 	private Integer lifeId;     // 인생 번호 (int 는 null 을 못 담아서 Integer)
 	private String lifeName;    // 캐릭터 이름
-	private String countryName; // 지금 사는 나라
+	private String currentCountryName; // 지금 사는 나라
 	private Integer currentAge; // 지금 나이
 
 	public String getLoginId() { return loginId; }
@@ -52,8 +52,8 @@ public class MyPageDTO {
 	public String getLifeName() { return lifeName; }
 	public void setLifeName(String lifeName) { this.lifeName = lifeName; }
 
-	public String getCountryName() { return countryName; }
-	public void setCountryName(String countryName) { this.countryName = countryName; }
+	public String getCurrentCountryName() { return currentCountryName; }
+	public void setCurrentCountryName(String currentCountryName) { this.currentCountryName = currentCountryName; }
 
 	public Integer getCurrentAge() { return currentAge; }
 	public void setCurrentAge(Integer currentAge) { this.currentAge = currentAge; }

@@ -14,7 +14,7 @@
 				       l.BIRTH_YEAR                     AS birthYear,
 				       l.BIRTH_YEAR + NVL(l.DEATH_AGE, 0) AS deathYear,
 				       NVL(l.DEATH_AGE, 0)              AS deathAge,
-				       c.NAME_KO                        AS birthCountry,
+				       c.NAME_KO                        AS birthCountryName,
 				       p.MESSAGE                        AS message,
 				       NVL(p.TRIBUTE_COUNT, 0) AS tributeCount
 				FROM MEMORIAL_POST p
@@ -39,8 +39,8 @@
 		       l.BIRTH_YEAR                     AS birthYear,
 		       l.BIRTH_YEAR + NVL(l.DEATH_AGE, 0) AS deathYear,
 		       NVL(l.DEATH_AGE, 0)              AS deathAge,
-		       bc.NAME_KO                       AS birthCountry,
-		       cc.NAME_KO                       AS deathCountry,
+		       bc.NAME_KO                       AS birthCountryName,
+		       cc.NAME_KO                       AS deathCountryName,
 		       l.DEATH_CAUSE                    AS deathCause,
 		       NVL(l.CHILD_COUNT, 0)            AS childCount,
 		       l.IS_MARRIED                     AS isMarried,
