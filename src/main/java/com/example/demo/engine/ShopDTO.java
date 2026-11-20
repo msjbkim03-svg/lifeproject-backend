@@ -18,6 +18,8 @@ public class ShopDTO {
 	private Double krwPerUsd;          // 한국 체감 원
 	private String message;            // 방금 한 일 기록 문장 (사기·하기 뒤)
 	private Integer logAge;            // 그 기록의 나이
+	private Long houseValue;           // 내 집 시세 (집이 없으면 null)
+	private Long carValue;             // 자동차·오토바이 중고 시세
 
 	public List<ShopItemDTO> getItems() {
 		return items;
@@ -121,5 +123,21 @@ public class ShopDTO {
 
 	public void setLogAge(Integer logAge) {
 		this.logAge = logAge;
+	}
+
+	public Long getHouseValue() {
+		return houseValue;
+	}
+
+	public void setHouseValue(Long houseValue) {
+		this.houseValue = houseValue;
+	}
+
+	public Long getCarValue() {
+		return carValue;
+	}
+
+	public void setCarValue(Long carValue) {
+		this.carValue = carValue;
 	}
 }
