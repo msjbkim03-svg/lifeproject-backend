@@ -523,7 +523,9 @@
 		SELECT q.QUEST_ID    AS questId,
 		       q.QUEST_NAME  AS questName,
 		       q.DESCRIPTION AS description,
-		       lq.ACHIEVED   AS achieved
+		       lq.ACHIEVED   AS achieved,
+		       q.QUEST_TYPE  AS questType,
+		       q.TARGET_VALUE AS targetValue
 		FROM LIFE_QUEST lq
 		JOIN QUEST q ON q.QUEST_ID = lq.QUEST_ID
 		WHERE lq.LIFE_ID = #{lifeId}

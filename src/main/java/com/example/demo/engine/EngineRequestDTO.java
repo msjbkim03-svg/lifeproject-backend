@@ -13,6 +13,15 @@ public class EngineRequestDTO {
 	private String itemId;     // 돈 쓰기 항목 (C06-3: BUY_CAR, DO_TRIP …)
 	private String investType; // 여유 자금 굴리기 방식 (C06-3: DEPOSIT, STOCK …)
 	private Integer atAge;     // 화면이 보고 있는 나이 (C06-3 기록 나이)
+	private String text;       // 잠시 멈춤에 적은 한 줄 (C03, 원작 reflect)
+
+	public String getText() {
+		return text;
+	}
+
+	public void setText(String text) {
+		this.text = text;
+	}
 
 	public int getDecade() {
 		return decade;
