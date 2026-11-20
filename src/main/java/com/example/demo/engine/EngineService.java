@@ -614,6 +614,21 @@ public class EngineService {
 	// 진행 화면에 함께 보내는 값 (fillRegion 끝에서)
 	private void fillView(LifeDTO life, CountryStatDTO stat) {
 		life.setKrwPerUsd(krwPerUsd(stat));
+		// 직업 이름: DB(LIFE)에는 JOB_ID 만 있어서, 다시 읽은 인생(1년 진행·이어하기)에는 이름이 비어 화면에 '일하는 중'만 떴음 → 직업 목록에서 채움
+		if (life.getJobId() != null && life.getJobName() == null) {
+			for (JobDTO j : jobs()) {
+				if (j.getJobId().equals(life.getJobId())) {
+					life.setJobName(j.getJobName());
+					break;
+				}
+			}
+		}
+		// 이 인생에서 고른 퀘스트 (읽기만, 비회원·퀘스트 없는 인생은 빈 목록)
+		try {
+			life.setQuests(engineDao.selectLifeQuests(life.getLifeId()));
+		} catch (RuntimeException e) {
+			// 퀘스트 표가 없어도 진행은 되게
+		}
 		// 태어난 해 기대수명 (원작 e0): 화면의 '1년 ≈ n초'·인생 지도 기대수명 칸에 씀
 		//   DB에서 다시 읽은 인생(1년 진행·이어하기)에는 이 값이 없어서 태어난 나라·연대 통계에서 채움
 		if (life.getLifeExpectancy() == null) {
