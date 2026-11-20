@@ -73,6 +73,11 @@ public class LifeDTO {
 	private String investType;	// C06-3 여유 자금 굴리기 (CASH, DEPOSIT, BOND, MIX, STOCK, WORLD, PROPERTY, TRADE / null = 알아서)
 	private String owns;	// C06-3 가진 물건 코드 (쉼표: CAR,TV,HOUSE …)
 	private Long spouseIncome;	// [화면용] 배우자 소득 (엔진은 그 나라 중위 소득을 버는 배우자로 봄)
+	private Integer originClass;	// 태어날 때 가정형편 1~5 (ORIGIN_CLASS, wealthClass 는 부모님 형편이 바뀌면 따라 바뀜)
+	private Long houseValue;	// 내 집 시세 (HOUSE_VALUE, 구매력 달러, 집이 없으면 null)
+	private Double houseRate;	// [화면용] 올해 집값 변화율 (0.03 = +3%)
+	private Long carValue;	// [화면용] 자동차·오토바이 중고 시세 (순자산에는 안 들어 있음)
+	private List<String> alerts;	// [화면용] 올해 기록 가운데 '큰 사건' 경고등을 켤 문장들
 
 	public int getLifeId() {
 		return lifeId;
@@ -609,5 +614,55 @@ public class LifeDTO {
 
 	public void setOwns(String owns) {
 		this.owns = owns;
+	}
+
+	public Integer getOriginClass() {
+		return originClass;
+	}
+
+	public void setOriginClass(Integer originClass) {
+		this.originClass = originClass;
+	}
+
+	public Long getHouseValue() {
+		return houseValue;
+	}
+
+	public void setHouseValue(Long houseValue) {
+		this.houseValue = houseValue;
+	}
+
+	public Double getHouseRate() {
+		return houseRate;
+	}
+
+	public void setHouseRate(Double houseRate) {
+		this.houseRate = houseRate;
+	}
+
+	public Long getCarValue() {
+		return carValue;
+	}
+
+	public void setCarValue(Long carValue) {
+		this.carValue = carValue;
+	}
+
+	public List<String> getAlerts() {
+		return alerts;
+	}
+
+	public void setAlerts(List<String> alerts) {
+		this.alerts = alerts;
+	}
+
+	public void addAlert(String text) {
+		if (text == null) {
+			return;
+		}
+		if (alerts == null) {
+			alerts = new java.util.ArrayList<>();
+		}
+		alerts.add(text);
 	}
 }

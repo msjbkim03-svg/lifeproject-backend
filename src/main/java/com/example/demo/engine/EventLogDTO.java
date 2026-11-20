@@ -9,6 +9,8 @@ public class EventLogDTO {
 	private Integer choiceId;	// 고른 선택지 (선택 이벤트일 때, 아니면 null)
 	private String logText;	// 완성된 문장
 	private String isAi = "N";	// AI 서술 여부 Y, N (C11)
+	private String eventType;	// [화면용] 이벤트 종류 LIFE, HIST (GAME_EVENT, 엔진 기록은 null)
+	private String alert;	// [화면용] 큰 사건 경고등 Y, N (EngineService.bigHist 와 같은 기준)
 
 	public int getLifeId() {
 		return lifeId;
@@ -64,5 +66,21 @@ public class EventLogDTO {
 
 	public void setIsAi(String isAi) {
 		this.isAi = isAi;
+	}
+
+	public String getEventType() {
+		return eventType;
+	}
+
+	public void setEventType(String eventType) {
+		this.eventType = eventType;
+	}
+
+	public String getAlert() {
+		return alert;
+	}
+
+	public void setAlert(String alert) {
+		this.alert = alert;
 	}
 }

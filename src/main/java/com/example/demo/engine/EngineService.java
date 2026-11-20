@@ -446,6 +446,7 @@ public class EngineService {
 		life.setCurrentCountry(country.getCountryCode());
 		life.setGender(gender);
 		life.setWealthClass(wealthClass);
+		life.setOriginClass(wealthClass);
 		life.setIsUrban(isUrban);
 		life.setCurrentAge(0);
 		life.setStatus("PLAYING");
@@ -500,6 +501,7 @@ public class EngineService {
 			life.setCountryName(s.getNameKo());
 		}
 		fillView(life, s); // 한국 체감 원·소득 위치·가족과 삶·같은 1초에 태어난 사람들
+		fillWorth(life, s); // 재산 합계: 내 집 시세 · 탈것 중고 시세
 	}
 
 
@@ -868,8 +870,8 @@ public class EngineService {
 		f.motherDie = (int) Math.round(clamp(le + 8 + r.nextGaussian() * 12, f.motherAt + 1, 100));
 		f.fatherDie = (int) Math.round(clamp(le + 4 + r.nextGaussian() * 12, f.fatherAt + 1, 100));
 
-		f.motherJob = parentJob(r, life.getWealthClass(), urban, by, true);
-		f.fatherJob = parentJob(r, life.getWealthClass(), urban, by, false);
+		f.motherJob = parentJob(r, originOf(life), urban, by, true);
+		f.fatherJob = parentJob(r, originOf(life), urban, by, false);
 
 		// 형제자매: 어머니 자녀 수 - 나, 나는 그 가운데 아무 자리
 		double kids = kidsOfEra(cc, stat, by);
@@ -1492,6 +1494,7 @@ public class EngineService {
 		long startAssets = life.getAssets();
 		life.setMoneyFlow(new ArrayList<>()); // [화면용] 지난 1년 순자산 내역
 		life.setEvents(new ArrayList<>());    // [화면용] 올해 일어난 일 (돈 계산·이벤트·물건이 차례로 덧붙임)
+		life.setAlerts(new ArrayList<>());    // [화면용] 올해 '큰 사건' 경고등을 켤 문장
 
 		// ① 집중 효과 (C04): 고르지 않았으면 나이대 기본값
 		if (life.getStageCode() != null && life.getFocusCode() == null) {
@@ -1512,6 +1515,8 @@ public class EngineService {
 		// ⑤-1 전쟁 (원작 ERA_WAR): 그 나라·그해 전쟁이면 확률 없이 반드시 시작·끝 소식 / 결혼 상대 소개 (원작처럼 직업·소득)
 		warYear(life);
 		spouseNote(life, life.getCurrentAge());
+		// ⑤-1-2 집안 형편 변동: 부모님 일이 기울거나 잘 풀림 (11/20)
+		familyFortune(life);
 
 		// ⑤-2 돈 쓰기·투자 (C06-3): 모은 돈 굴리기 + 가진 물건 유지비
 		investStep(life, stat);
@@ -1602,6 +1607,11 @@ public class EngineService {
 		//    입학·진학·졸업·중퇴·은퇴 + 그해 처지에 맞는 일상 1~3줄(EngineStory) + 몇 살 고비마다 같은 해 태어난 또래 생존율
 		int lived = life.getCurrentAge() - 1; // 방금 지나간 해 (이벤트와 같은 나이로 기록)
 		List<EventResultDTO> yearEvents = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
+		if (lived == 0) {
+			String home = homeLine(life, stat);
+			saveEventLog(life, lived, null, null, home);
+			yearEvents.add(noteEvent(home));
+		}
 		for (String note : milestones(life, eduBefore, schoolBefore, jobBefore, jobIdBefore)) {
 			saveEventLog(life, lived, null, null, note);
 			yearEvents.add(noteEvent(note));
@@ -1817,6 +1827,9 @@ public class EngineService {
 			e.setEventType("HIST"); // 화면: 역사 사건 색 · 큰 사건 경고등
 			e.setTitle(name);
 			e.setLogText(t);
+			if (!ENDED_NEWS.matcher(t).find()) {
+				life.addAlert(t); // 전쟁이 시작했거나 이어지는 소식은 경고등 (끝난 소식은 빼고)
+			}
 			if (i == lines.size() - 1 && h != 0) {
 				e.setEffHappiness(h);
 				life.setHappiness(life.getHappiness() + h);
@@ -2203,12 +2216,15 @@ public class EngineService {
 		if (owns.contains("BIKE") && age < 70) {
 			life.setHealth(life.getHealth() + 0.4); // 타고 다니면 건강 조금
 		}
-		if (life.getAssets() <= 0 || age < 15) {
+		houseStep(life, stat);
+		// 굴리는 돈 = 순자산에서 내 집 시세를 뺀 몫 (집은 houseStep 이 따로 오르내림)
+		long money = life.getAssets() - (life.getHouseValue() == null ? 0 : life.getHouseValue());
+		if (money <= 0 || age < 15) {
 			return;
 		}
 		String t = investNow(life, stat);
 		double r = investReturn(t);
-		double gain = life.getAssets() * r;
+		double gain = money * r;
 		if (Math.round(gain) == 0) {
 			return;
 		}
@@ -2227,6 +2243,78 @@ public class EngineService {
 			ev.add(noteEvent(note));
 			life.setEvents(ev);
 		}
+	}
+
+	// ================= 내 집 시세 · 재산 합계 (11/20) =================
+	// 집값 = 중위 소득 × 5 (도시 ×1.4, 시골 ×0.7) - 원작과 같은 식, 산 뒤에는 HOUSE_VALUE 가 해마다 그 나라 집값 흐름만큼 오르내림
+	//   집값 흐름(물가 뺀 실질): 평균 +2%, 해마다 ±6% 출렁임 - 같은 나라·같은 해면 누구에게나 같은 값 (나라·연도로 씨앗)
+	//   + 실제 큰 흐름: 한국 1998 외환 위기·2023 하락, 2002·2006·2020·2021 급등 / 일본 1991~1995 거품 붕괴 /
+	//     아시아 외환 위기 1997~1998 (태국·인도네시아·말레이시아·홍콩) / 중국 2022~2024 / 세계 금융 위기 2008 (모든 나라)
+	private static final Map<String, Double> HOUSE_SHOCK = Map.ofEntries(
+			Map.entry("KOR1998", -0.15), Map.entry("KOR2002", 0.12), Map.entry("KOR2006", 0.12),
+			Map.entry("KOR2020", 0.10), Map.entry("KOR2021", 0.10), Map.entry("KOR2023", -0.10),
+			Map.entry("JPN1991", -0.08), Map.entry("JPN1992", -0.08), Map.entry("JPN1993", -0.08), Map.entry("JPN1994", -0.06),
+			Map.entry("JPN1995", -0.06), Map.entry("HKG1998", -0.30), Map.entry("CHN2022", -0.06), Map.entry("CHN2023", -0.06),
+			Map.entry("CHN2024", -0.06), Map.entry("THA1997", -0.15), Map.entry("IDN1998", -0.20), Map.entry("MYS1998", -0.12),
+			Map.entry("ALL2008", -0.06));
+
+	private double houseReturn(String cc, int year) {
+		Random g = new Random(cc.hashCode() * 1000003L + year);
+		double r = 0.02 + 0.06 * g.nextGaussian();
+		r = r + HOUSE_SHOCK.getOrDefault(cc + year, 0.0) + HOUSE_SHOCK.getOrDefault("ALL" + year, 0.0);
+		return clamp(r, -0.35, 0.4);
+	}
+
+	private double housePriceOf(LifeDTO life, CountryStatDTO stat) {
+		return medIncome(life.getCurrentCountry(), stat) * 5 * ("Y".equals(life.getIsUrban()) ? 1.4 : 0.7);
+	}
+
+	// 해마다 내 집 시세: 오르내린 만큼 순자산에도 더함 (주식처럼 '지난 1년 순자산' 내역에 한 줄, 5% 넘게 움직이면 인생 기록에도)
+	private void houseStep(LifeDTO life, CountryStatDTO stat) {
+		life.setHouseRate(null);
+		if (!ownSet(life).contains("HOUSE")) {
+			life.setHouseValue(null);
+			return;
+		}
+		if (life.getHouseValue() == null) {
+			life.setHouseValue(Math.round(housePriceOf(life, stat))); // 시세를 적기 전에 산 집
+		}
+		int age = life.getCurrentAge();
+		double r = houseReturn(life.getCurrentCountry(), life.getBirthYear() + age);
+		long v = life.getHouseValue();
+		long d = Math.round(v * r);
+		life.setHouseValue(Math.max(0, v + d));
+		life.setHouseRate(r);
+		if (d == 0) {
+			return;
+		}
+		life.setAssets(life.getAssets() + d);
+		book(life, d > 0 ? "내 집 시세 오름" : "내 집 시세 내림", d);
+		int pct = (int) Math.round(Math.abs(r) * 100);
+		if (pct < 5) {
+			return;
+		}
+		String note = (d > 0 ? "집값이 올라 내 집 시세가 " + pct + "% 뛰었다. (" : "집값이 떨어져 내 집 시세가 " + pct + "% 내렸다. (")
+				+ wonSigned(life, d) + ", 지금 시세 " + won(life, v + d) + ")";
+		saveEventLog(life, age, null, null, note);
+		List<EventResultDTO> ev = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
+		ev.add(noteEvent(note));
+		life.setEvents(ev);
+	}
+
+	// [화면용] 재산 합계: 내 집 시세(순자산 안에 들어 있음) · 자동차·오토바이 중고 시세(산 값을 이미 써서 순자산 밖)
+	private void fillWorth(LifeDTO life, CountryStatDTO stat) {
+		java.util.Set<String> owns = ownSet(life);
+		if (owns.contains("HOUSE") && life.getHouseValue() == null) {
+			life.setHouseValue(Math.round(housePriceOf(life, stat)));
+		}
+		long car = 0;
+		for (Object[] it : ITEMS) {
+			if (("CAR".equals(it[0]) || "MOTO".equals(it[0])) && owns.contains((String) it[0])) {
+				car = car + Math.round(((Integer) it[2]) * priceK(stat) * ("CAR".equals(it[0]) ? 0.35 : 0.4));
+			}
+		}
+		life.setCarValue(car > 0 ? car : null);
 	}
 
 	// 돈 쓰기·투자 창 목록
@@ -2281,7 +2369,7 @@ public class EngineService {
 		// 내 집 마련: 집값의 20%가 있으면 나머지는 대출 (이자는 갚는 동안 모두 합쳐 25%)
 		if (age >= 26) {
 			long price = housePrice;
-			ShopItemDTO d = new ShopItemDTO("BUY_HOUSE", "BUY", "내 집 마련", "행복 +10 · 집값의 20%가 있으면 나머지는 대출", price);
+			ShopItemDTO d = new ShopItemDTO("BUY_HOUSE", "BUY", "내 집 마련", "행복 +10 · 집값의 20%가 있으면 나머지는 대출 · 산 뒤엔 집값 따라 시세가 오르내려요", price);
 			d.setDone(owns.contains("HOUSE"));
 			if (d.isDone()) {
 				d.setOk(false);
@@ -2329,6 +2417,9 @@ public class EngineService {
 		out.setInvestType(now);
 		out.setOwns(String.join(",", owns));
 		out.setAssets(life.getAssets());
+		fillWorth(life, stat);
+		out.setHouseValue(life.getHouseValue());
+		out.setCarValue(life.getCarValue());
 		out.setCash(cash);
 		out.setHealth(life.getHealth());
 		out.setHappiness(life.getHappiness());
@@ -2389,6 +2480,7 @@ public class EngineService {
 			life.setAssets(life.getAssets() - interest); // 집값은 재산으로 남고(현금 → 집) 이자만 나감
 			life.setHappiness(life.getHappiness() + 10);
 			owns.add("HOUSE");
+			life.setHouseValue(price); // 이 값에서 해마다 집값 흐름만큼 오르내림 (houseStep)
 			text = "내 집을 마련했다. (집값 " + won(life, price) + (loan > 0 ? ", 대출 " + won(life, loan) + " · 이자 약 " + won(life, interest) : "") + ")";
 		} else if (it.getKind().equals("BUY")) {
 			String code = itemId.substring(4);
@@ -2715,6 +2807,10 @@ public class EngineService {
 			double z = invNorm(clamp(life.getKnowledge(), 0.5, 99.9) / 100);
 			kE = clamp(z - talW(age - 1) * tal, -1.4, 1.6);
 			double d = 0.075 * (knowEff(focus) - knowW0(age));
+			if (age <= 17) {
+				// 집안 형편: 넉넉하면 책·학원·과외, 어려우면 집안일·일손 돕기로 공부 시간이 줄어듦 (11/20)
+				d += 0.025 * (life.getWealthClass() - 3);
+			}
 			if (age <= 17 && !student) {
 				// 학교 밖 아이: 또래보다 뒤처짐 (혼자 공부하면 절반만)
 				double self = "STUDY".equals(focus) || "SELF_DEV".equals(focus) ? 1 : 0;
@@ -3976,6 +4072,12 @@ public class EngineService {
 			applyEvent(life, e, life.getCurrentAge(), null);
 		}
 
+		for (EventResultDTO e : events) {
+			if (bigHist(e)) {
+				life.addAlert(e.getLogText());
+			}
+		}
+
 		fixStats(life);
 		// [화면용] 올해 일어난 일: ④ 돈 계산에서 먼저 남긴 줄(대학 학비 등)을 앞에 두고 이어 붙임
 		List<EventResultDTO> all = new ArrayList<>();
@@ -3984,6 +4086,131 @@ public class EngineService {
 		}
 		all.addAll(events);
 		life.setEvents(all);
+	}
+
+	// ================= 집안 형편 (출신 가정 · 부모님 형편 변동, 11/20) =================
+
+	private static final String[] SPOON = { "", "흙수저", "동수저", "은수저", "금수저", "다이아수저" };
+
+	// 태어날 때 형편 (ORIGIN_CLASS, 예전 인생은 지금 형편)
+	private static int originOf(LifeDTO life) {
+		return life.getOriginClass() == null ? life.getWealthClass() : life.getOriginClass();
+	}
+
+	// 0세 기록 첫 줄: 부모님 일 + 집안 형편 (출신 가정이 화면에서 바로 느껴지게)
+	private String homeLine(LifeDTO life, CountryStatDTO stat) {
+		FamSeed f = famSeed(life, stat);
+		String jobs = "";
+		if (f.fatherJob != null && f.motherJob != null) {
+			jobs = "아버지는 " + f.fatherJob + ", 어머니는 " + f.motherJob + ieotda(f.motherJob) + " ";
+		}
+		boolean rural = !"Y".equals(life.getIsUrban());
+		switch (originOf(life)) {
+		case 1:
+			return jobs + (rural ? "끼니를 걱정하는 가난한 집이었다. 아이도 걸음마를 떼면 일손을 보태야 했다."
+					: "단칸방에 온 식구가 모여 사는 가난한 집이었다. 부모님은 새벽부터 밤까지 일했다.");
+		case 2:
+			return jobs + "넉넉하지 않은 집이었다. 부모님은 아껴 쓰고 또 아껴 썼다.";
+		case 4:
+			return jobs + "살림이 넉넉한 집이었다. 집에는 책과 장난감이 여럿 있었다.";
+		case 5:
+			return jobs + "손꼽히게 부유한 집이었다. 아이에게 필요한 것은 무엇이든 마련되었다.";
+		default:
+			return jobs + "그 나라에서 흔한, 살림이 그럭저럭 꾸려지는 집이었다.";
+		}
+	}
+
+	// 받침 있으면 '이었다.', 없으면 '였다.'
+	private static String ieotda(String w) {
+		char ch = w.charAt(w.length() - 1);
+		return ch >= 0xAC00 && ch <= 0xD7A3 && (ch - 0xAC00) % 28 != 0 ? "이었다." : "였다.";
+	}
+
+	// 부모님 형편 변동: 부모님이 살아 계시고 내가 40세 전이면 해마다
+	//   기울 확률 2.5% · 잘 풀릴 확률 2.5% (그해 경제 위기 사건이 있으면 기울 확률 ×4, 잘 풀릴 확률 0.5%)
+	//   가정형편(wealthClass)이 한 칸 바뀌면 진학 확률·대학 학비 도움·결혼 도움·지식·행복 목표·상속이 모두 따라 바뀜
+	//   태어날 때 형편은 ORIGIN_CLASS 에 그대로 남음 (신원 기록 '출신 가정')
+	private void familyFortune(LifeDTO life) {
+		int age = life.getCurrentAge();
+		if (!"PLAYING".equals(life.getStatus()) || age < 1 || age >= 40 || "N".equals(life.getParentAlive())) {
+			return;
+		}
+		if (life.getOriginClass() == null) {
+			life.setOriginClass(life.getWealthClass());
+		}
+		boolean crisis = econThisYear(life);
+		double down = 0.025 * (crisis ? 4 : 1);
+		double up = crisis ? 0.005 : 0.025;
+		int wc = life.getWealthClass();
+		double r = random.nextDouble();
+		int nw = wc;
+		if (r < down && wc > 1) {
+			nw = wc - 1;
+		} else if (r >= down && r < down + up && wc < 5) {
+			nw = wc + 1;
+		}
+		if (nw == wc) {
+			return;
+		}
+		String text;
+		boolean kid = age < 20;
+		if (nw < wc) {
+			if (crisis) {
+				text = "경제 위기로 부모님 일이 크게 흔들렸다. 집안 형편이 어려워졌다.";
+			} else if (wc >= 4) {
+				text = kid ? "부모님 사업이 기울어 큰 집을 팔고 작은 집으로 이사했다." : "부모님 사업이 기울어 고향 집 살림이 어려워졌다.";
+			} else {
+				text = kid ? "부모님이 하시던 일이 잘 안 풀려 집안 살림이 빠듯해졌다." : "부모님 가게가 문을 닫아 고향 집 살림이 빠듯해졌다.";
+			}
+			life.setHappiness(life.getHappiness() - (kid ? 4 : 2));
+		} else {
+			if (wc <= 2) {
+				text = kid ? "부모님이 차린 가게가 자리를 잡아 살림이 한결 펴졌다." : "부모님 장사가 잘되어 고향 집 살림이 펴졌다.";
+			} else {
+				text = kid ? "부모님 사업이 잘되어 집안 형편이 넉넉해졌다." : "부모님 사업이 크게 잘되어 집안 형편이 넉넉해졌다.";
+			}
+			life.setHappiness(life.getHappiness() + (kid ? 3 : 1));
+		}
+		text = text + " (" + SPOON[wc] + " → " + SPOON[nw] + ")";
+		life.setWealthClass(nw);
+		saveEventLog(life, age, null, null, text);
+		List<EventResultDTO> list = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
+		list.add(noteEvent(text));
+		life.setEvents(list);
+	}
+
+	// 올해 경제 위기(ECON 유형) 역사 사건이 있었는지
+	private boolean econThisYear(LifeDTO life) {
+		if (life.getEvents() == null) {
+			return false;
+		}
+		for (EventResultDTO e : life.getEvents()) {
+			if ("HIST".equals(e.getEventType()) && e.getEventId() != null) {
+				HistEffectDTO h = engineDao.selectHistEffect(e.getEventId());
+				if (h != null && "ECON".equals(h.getTypeCode())) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	// 큰 사건 경고등 기준 (화면 빨간 줄 + '큰 사건', 새로고침 때는 engine-mapper selectEventLogs 가 같은 기준)
+	//   역사 사건(HIST) 가운데 강도(GAME_EVENT.INTENSITY) 2 이상이거나, 목숨이 걸린 전쟁·재난 유형
+	//   전쟁이 끝났다·총성이 멎었다 같은 끝난 소식은 빼고, 엔진 전쟁 소식(warYear)은 시작·이어짐만
+	private static final java.util.regex.Pattern ENDED_NEWS = java.util.regex.Pattern.compile("끝났|멎었");
+
+	private boolean bigHist(EventResultDTO e) {
+		if (!"HIST".equals(e.getEventType()) || e.getEventId() == null || e.getLogText() == null
+				|| ENDED_NEWS.matcher(e.getLogText()).find()) {
+			return false;
+		}
+		HistEffectDTO h = engineDao.selectHistEffect(e.getEventId());
+		if (h == null) {
+			return false;
+		}
+		int k = h.getIntensity() == null ? 1 : h.getIntensity();
+		return k >= 2 || "WAR".equals(h.getTypeCode()) || "DISASTER".equals(h.getTypeCode());
 	}
 
 	// 역사 사건의 실직·학업 중단 (C10 → C06, 명세서 C06 3·8번)
@@ -4005,13 +4232,13 @@ public class EngineService {
 				&& random.nextDouble() < h.getJobLossAdd() * k) {
 			life.setJobStatus("UNEMPLOYED");
 			life.setJobYears(0);
-			saveEventLog(life, age, e.getEventId(), null, why + " 때문에 일자리를 잃었다.");
+			saveEventLog(life, age, null, null, why + " 때문에 일자리를 잃었다.");
 		}
 		if ("ENROLLED".equals(life.getSchoolStatus()) && h.getEduStopAdd() != null
 				&& random.nextDouble() < h.getEduStopAdd() * k) {
 			life.setSchoolStatus("DROPPED");
 			life.setDropReason(why + " 때문에 학교를 그만둠");
-			saveEventLog(life, age, e.getEventId(), null, why + " 때문에 학교를 그만두었다.");
+			saveEventLog(life, age, null, null, why + " 때문에 학교를 그만두었다.");
 		}
 	}
 

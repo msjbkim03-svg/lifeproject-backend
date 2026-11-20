@@ -104,12 +104,12 @@
 		INSERT INTO LIFE (
 			LIFE_ID, MEMBER_ID, GUEST_TOKEN, START_TYPE,
 			NAME, GENDER, BIRTH_COUNTRY, CURRENT_COUNTRY, BIRTH_YEAR,
-			WEALTH_CLASS, IS_URBAN,
+			WEALTH_CLASS, ORIGIN_CLASS, IS_URBAN,
 			HEALTH, HAPPINESS, KNOWLEDGE, RELATION
 		) VALUES (
 			#{lifeId}, #{memberId, jdbcType=NUMERIC}, #{guestToken, jdbcType=VARCHAR}, #{startType},
 			#{name}, #{gender}, #{birthCountry}, #{currentCountry}, #{birthYear},
-			#{wealthClass}, #{isUrban},
+			#{wealthClass}, #{wealthClass}, #{isUrban},
 			#{health}, #{happiness}, #{knowledge}, #{relation}
 		)
 	</insert>
@@ -153,6 +153,8 @@
 		       PENDING_EVENT_ID AS pendingEventId,
 		       INVEST_TYPE     AS investType,
 		       OWNS            AS owns,
+		       NVL(ORIGIN_CLASS, WEALTH_CLASS) AS originClass,
+		       HOUSE_VALUE     AS houseValue,
 		       STATUS          AS status
 		FROM LIFE
 		WHERE LIFE_ID = #{lifeId}
@@ -196,6 +198,8 @@
 		       PENDING_EVENT_ID AS pendingEventId,
 		       INVEST_TYPE     AS investType,
 		       OWNS            AS owns,
+		       NVL(ORIGIN_CLASS, WEALTH_CLASS) AS originClass,
+		       HOUSE_VALUE     AS houseValue,
 		       STATUS          AS status
 		FROM LIFE
 		WHERE STATUS = 'PLAYING'
@@ -234,6 +238,9 @@
 		    FOCUS_CODE     = #{focusCode, jdbcType=VARCHAR},
 		    PENDING_EVENT_ID = #{pendingEventId, jdbcType=VARCHAR},
 		    OWNS           = #{owns, jdbcType=VARCHAR},
+		    WEALTH_CLASS   = #{wealthClass},
+		    ORIGIN_CLASS   = #{originClass, jdbcType=NUMERIC},
+		    HOUSE_VALUE    = #{houseValue, jdbcType=NUMERIC},
 		    LAST_PLAYED_AT = SYSDATE
 		WHERE LIFE_ID = #{lifeId}
 	</update>
@@ -298,6 +305,7 @@
 		    ASSETS         = #{assets},
 		    INVEST_TYPE    = #{investType, jdbcType=VARCHAR},
 		    OWNS           = #{owns, jdbcType=VARCHAR},
+		    HOUSE_VALUE    = #{houseValue, jdbcType=NUMERIC},
 		    LAST_PLAYED_AT = SYSDATE
 		WHERE LIFE_ID = #{lifeId}
 		  AND STATUS = 'PLAYING'
@@ -404,16 +412,22 @@
 	</select>
 
 	<select id="selectEventLogs" parameterType="int" resultType="com.example.demo.engine.EventLogDTO">
-		SELECT LIFE_ID   AS lifeId,
-		       AGE       AS age,
-		       YEAR_NO   AS yearNo,
-		       EVENT_ID  AS eventId,
-		       CHOICE_ID AS choiceId,
-		       LOG_TEXT  AS logText,
-		       IS_AI     AS isAi
-		FROM LIFE_EVENT_LOG
-		WHERE LIFE_ID = #{lifeId}
-		ORDER BY AGE DESC, LOG_ID ASC
+		SELECT L.LIFE_ID   AS lifeId,
+		       L.AGE       AS age,
+		       L.YEAR_NO   AS yearNo,
+		       L.EVENT_ID  AS eventId,
+		       L.CHOICE_ID AS choiceId,
+		       L.LOG_TEXT  AS logText,
+		       L.IS_AI     AS isAi,
+		       G.EVENT_TYPE AS eventType,
+		       CASE WHEN G.EVENT_TYPE = 'HIST' AND L.CHOICE_ID IS NULL
+		                 AND (NVL(G.INTENSITY, 1) &gt;= 2 OR G.HIST_TYPE_CODE IN ('WAR', 'DISASTER'))
+		                 AND L.LOG_TEXT NOT LIKE '%끝났%' AND L.LOG_TEXT NOT LIKE '%멎었%'
+		            THEN 'Y' ELSE 'N' END AS alert
+		FROM LIFE_EVENT_LOG L
+		LEFT JOIN GAME_EVENT G ON L.EVENT_ID = G.EVENT_ID
+		WHERE L.LIFE_ID = #{lifeId}
+		ORDER BY L.AGE DESC, L.LOG_ID ASC
 	</select>
 
 	<!-- C03 인생 지도: 지금까지 한 해씩 남긴 기록 (나이순) -->
