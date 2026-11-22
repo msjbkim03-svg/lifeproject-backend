@@ -55,6 +55,6 @@ public class QuestService {
 		for (int questId : ids) {
 			dao.insertLifeQuest(dto.getLifeId(), questId);
 		}
-		return null; // 성공
+		return null;
 	}
 }

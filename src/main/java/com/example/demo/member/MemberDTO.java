@@ -13,11 +13,11 @@ public class MemberDTO {
 	private String nickname;     // NICKNAME   닉네임
 	private String email;        // EMAIL      이메일
 	private String memberRole;   // MEMBER_ROLE USER / ADMIN
-	private int point;           // POINT
+	private int point;
 	private String status;       // STATUS     ACTIVE / WITHDRAWN
-	private Date joinDate;       // JOIN_DATE
-	private String phone;        // PHONE      전화번호 (숫자만 저장, v31)
-	private String privacyAgreed;// PRIVACY_AGREED 개인정보 활용 동의 Y / N (v31)
+	private Date joinDate;
+	private String phone;        // PHONE      전화번호 (숫자만 저장)
+	private String privacyAgreed;// PRIVACY_AGREED 개인정보 활용 동의 Y / N
 	private String captchaToken; // 로봇 확인 토큰 (DB에는 없음, 회원가입 때 구글 확인용)
 
 	public int getMemberId() { return memberId; }

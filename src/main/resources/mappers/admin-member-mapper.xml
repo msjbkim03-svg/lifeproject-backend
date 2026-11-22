@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+	"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="adminMember">
+
+	<!-- 검색 조건 (목록·개수가 같이 씀 → <include refid="searchWhere"/> 로 끼워 넣음) -->
+	<!-- <where> 는 안에 조건이 하나라도 있을 때만 WHERE 를 붙이고, 맨 앞의 AND 는 알아서 지움 -->
+	<sql id="searchWhere">
+		<where>
+			<if test="keyword != null">
+				(LOGIN_ID LIKE '%' || #{keyword} || '%'
+				 OR NICKNAME LIKE '%' || #{keyword} || '%'
+				 OR EMAIL LIKE '%' || #{keyword} || '%')
+			</if>
+			<if test="status != null">
+				AND STATUS = #{status}
+			</if>
+		</where>
+	</sql>
+
+	<!-- 회원 목록: 최근 가입 순, ROWNUM 으로 페이지 나누기 (전생 기록 M07 과 같은 방식) -->
+	<select id="selectMembers" parameterType="map" resultType="com.example.demo.admin.AdminMemberDTO">
+		SELECT * FROM (
+			SELECT a.*, ROWNUM AS RN FROM (
+				SELECT m.MEMBER_ID, m.LOGIN_ID, m.NICKNAME, m.EMAIL, m.PHONE,
+				       m.MEMBER_ROLE, m.POINT, m.STATUS,
+				       TO_CHAR(m.JOIN_DATE, 'YYYY-MM-DD') AS JOIN_DATE,
+				       (SELECT COUNT(*) FROM LIFE l
+				         WHERE l.MEMBER_ID = m.MEMBER_ID AND l.STATUS = 'ENDED') AS LIFE_COUNT
+				FROM MEMBER m
+				<include refid="searchWhere"/>
+				ORDER BY m.MEMBER_ID DESC
+			) a
+			WHERE ROWNUM &lt;= #{end}
+		)
+		WHERE RN &gt; #{start}
+	</select>
+
+	<!-- 검색 조건에 맞는 회원 수 -->
+	<select id="countMembers" parameterType="map" resultType="int">
+		SELECT COUNT(*) FROM MEMBER
+		<include refid="searchWhere"/>
+	</select>
+
+	<!-- 회원 1명 (권한·상태 확인용) -->
+	<select id="selectMember" parameterType="int" resultType="com.example.demo.admin.AdminMemberDTO">
+		SELECT MEMBER_ID, LOGIN_ID, NICKNAME, MEMBER_ROLE, STATUS
+		FROM MEMBER
+		WHERE MEMBER_ID = #{memberId}
+	</select>
+
+	<!-- 강제 탈퇴: 회원 탈퇴(M06)와 같게 상태만 바꾸고 전화번호는 지움 -->
+	<update id="updateWithdrawn" parameterType="int">
+		UPDATE MEMBER
+		SET STATUS = 'WITHDRAWN', PHONE = NULL
+		WHERE MEMBER_ID = #{memberId} AND STATUS = 'ACTIVE'
+	</update>
+
+</mapper>

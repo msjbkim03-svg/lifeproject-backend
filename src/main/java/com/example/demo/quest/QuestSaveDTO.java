@@ -3,7 +3,6 @@ package com.example.demo.quest;
 import java.util.List;
 
 // 고른 퀘스트 저장 요청 (C01)
-// 화면이 보내는 JSON: { lifeId: 12, questIds: [1, 5, 6] }
 public class QuestSaveDTO {
 
 	private int lifeId;            // 방금 태어난 인생 번호

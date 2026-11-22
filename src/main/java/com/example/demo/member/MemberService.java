@@ -17,7 +17,6 @@ import org.springframework.web.client.RestClient;
 
 import jakarta.mail.internet.MimeMessage;
 
-// 실제 일(검사, 암호화, 저장)을 하는 곳
 @Service
 public class MemberService {
 
@@ -104,11 +103,11 @@ public class MemberService {
 		// 5. 그 번호로 특성 4종 Lv.1 저장
 		dao.insertDefaultTraits(dto.getMemberId());
 
-		return null; // 성공
+		return null;
 	}
 
 	// 로봇 확인: 화면에서 받은 토큰을 구글에 보내서 진짜인지 물어봄
-	// POST https://www.google.com/recaptcha/api/siteverify (form: secret, response) → { success: true/false }
+	// POST https://www.google.com/recaptcha/api/siteverify (form: secret, response)
 	private boolean verifyCaptcha(String token) {
 		if (token == null || token.isBlank()) return false;
 
@@ -147,7 +146,7 @@ public class MemberService {
 		// 3. 입력한 비밀번호를 DB의 BCrypt 값과 비교
 		if (!encoder.matches(password, member.getPassword())) return null;
 
-		return member; // 성공
+		return member;
 	}
 
 	// ===== 비회원 인생 → 회원 인생 전환 (M02) =====
@@ -158,7 +157,7 @@ public class MemberService {
 		if (guestToken == null || guestToken.isBlank()) return false;
 
 		// 2. 회원에게 이미 진행 중인 인생이 있으면 전환하지 않음
-		//    (회원당 진행 중 인생 1개 규칙, 남은 비회원 인생은 7일 뒤 자동 삭제)
+		//    (회원당 진행 중 인생 1개 규칙, 남은 비회원 인생은 엔진 C03 이 7일 미접속 시 정리)
 		if (dao.countPlayingLife(memberId) > 0) return false;
 
 		// 3. 비회원 인생에 회원 번호 채우기
@@ -227,7 +226,7 @@ public class MemberService {
 		// 7. 저장 (아이디는 바꾸지 않음)
 		dto.setMemberId(memberId);
 		dao.updateMember(dto);
-		return null; // 성공
+		return null;
 	}
 
 	// ===== 회원 탈퇴 (M06) =====
@@ -280,11 +279,10 @@ public class MemberService {
 				sendCodeMail(dto.getEmail(), code, purpose);
 			} catch (Exception e) {
 				// 메일이 안 나가도 화면에는 똑같은 문구를 보여 줌 (가입 여부 노출 방지)
-				// 원인은 STS 콘솔에서 확인 (앱 비밀번호가 틀렸는지 등)
 				e.printStackTrace();
 			}
 		}
-		return null; // 성공
+		return null;
 	}
 
 	// ===== 인증번호 확인 (아이디 찾기·비밀번호 재설정이 같이 씀) =====
@@ -362,7 +360,7 @@ public class MemberService {
 
 		// 4. BCrypt 로 바꿔서 저장 (원래 비밀번호는 복원할 수 없음)
 		dao.updatePassword(member.getMemberId(), encoder.encode(newPw));
-		return null; // 성공
+		return null;
 	}
 
 	// ===== 이메일 변경 인증번호 보내기 (M05) =====
@@ -396,11 +394,11 @@ public class MemberService {
 			e.printStackTrace();
 			return "메일을 보내지 못했어요. 이메일 주소를 확인해 주세요.";
 		}
-		return null; // 성공
+		return null;
 	}
 
 	// ===== 인증번호 메일 보내기 (M05·M09 같이 씀) =====
-	// HTML 메일 (밤하늘 카드 + 금색 인증번호)
+	// HTML 메일
 	private void sendCodeMail(String to, String code, String purpose) throws Exception {
 		MimeMessage mail = mailSender.createMimeMessage();
 		MimeMessageHelper helper = new MimeMessageHelper(mail, "UTF-8");
@@ -488,7 +486,7 @@ public class MemberService {
 
 	// ===== 특성 레벨 올리기 (M08) =====
 	// 포인트 1점 차감 + 특성 1레벨 상승 + 포인트 내역 저장을 한 번에 (하나라도 실패하면 모두 취소)
-	// 버튼을 빠르게 두 번 눌러도 SQL 의 조건(WHERE POINT >= 1, TRAIT_LEVEL < 5) 때문에 넘치지 않음
+	// 버튼을 빠르게 두 번 눌러도 SQL 의 조건(WHERE POINT >= 1, TRAIT_LEVEL < 최대 레벨) 때문에 넘치지 않음
 	@Transactional
 	public void levelUp(int memberId, String traitId) {
 
