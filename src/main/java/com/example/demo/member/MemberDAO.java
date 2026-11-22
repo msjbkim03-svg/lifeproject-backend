@@ -12,7 +12,6 @@ public class MemberDAO {
 
 	private final SqlSessionTemplate mybatis;
 
-	// 스프링이 MyBatis 실행기(SqlSessionTemplate)를 넣어 줌
 	public MemberDAO(SqlSessionTemplate mybatis) {
 		this.mybatis = mybatis;
 	}

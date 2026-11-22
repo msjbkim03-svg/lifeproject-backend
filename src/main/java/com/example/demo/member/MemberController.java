@@ -35,9 +35,9 @@ public class MemberController {
 		try {
 			String error = service.join(dto);
 			if (error != null) {
-				return ResponseEntity.badRequest().body(Map.of("message", error)); // 400
+				return ResponseEntity.badRequest().body(Map.of("message", error));
 			}
-			return ResponseEntity.status(201).body(Map.of("message", "회원가입을 마쳤어요.")); // 201
+			return ResponseEntity.status(201).body(Map.of("message", "회원가입을 마쳤어요."));
 		} catch (DuplicateKeyException e) {
 			// 거의 동시에 같은 아이디로 가입한 경우 → DB UNIQUE 제약이 막아 줌
 			return ResponseEntity.status(409).body(Map.of("message", "이미 사용 중인 정보가 있어요."));
@@ -63,7 +63,6 @@ public class MemberController {
 	}
 
 	// 로그인 (M02)  POST /api/members/login
-	// 돌려주는 JSON: { token, nickname, memberRole, guestConverted }
 	@PostMapping("/login")
 	public ResponseEntity<?> login(@RequestBody MemberLoginDTO dto) {
 		MemberDTO member = service.login(dto.getLoginId(), dto.getPassword());
@@ -75,8 +74,7 @@ public class MemberController {
 
 		// 이 브라우저에서 비회원으로 하던 인생이 있으면 회원 인생으로 전환
 		boolean converted = service.convertGuestLife(member.getMemberId(), dto.getGuestToken());
-
-		// 토큰 안에는 회원 번호만 넣음 (비밀번호·이메일은 넣지 않음)
+		
 		String token = jwtUtil.createToken(String.valueOf(member.getMemberId()),member.getMemberRole());
 
 		return ResponseEntity.ok(Map.of(
@@ -90,8 +88,6 @@ public class MemberController {
 	@GetMapping("/me")
 	public ResponseEntity<?> myPage(@RequestAttribute("memberId") String memberId) {
 		MyPageDTO my = service.myPage(Integer.parseInt(memberId));
-
-		// 토큰은 맞는데 회원이 없거나 탈퇴한 경우
 		if (my == null) {
 			return ResponseEntity.status(404).body(Map.of("message", "회원 정보를 찾을 수 없어요."));
 		}
@@ -99,16 +95,14 @@ public class MemberController {
 	}
 
 	// 개인정보 수정 (M05)  PUT /api/members/me
-	// (새 비밀번호는 비워 두면 안 바뀜)
 	@PutMapping("/me")
-	public ResponseEntity<?> update(@RequestAttribute("memberId") String memberId,
-			@RequestBody MemberUpdateDTO dto) {
+	public ResponseEntity<?> update(@RequestAttribute("memberId") String memberId, @RequestBody MemberUpdateDTO dto) {
 		try {
 			String error = service.update(Integer.parseInt(memberId), dto);
 			if (error != null) {
-				return ResponseEntity.badRequest().body(Map.of("message", error)); // 400
+				return ResponseEntity.badRequest().body(Map.of("message", error));
 			}
-			// 헤더에 보이는 닉네임을 바꿀 수 있게 새 닉네임을 돌려줌
+			
 			return ResponseEntity.ok(Map.of("message", "저장했어요.", "nickname", dto.getNickname()));
 		} catch (DuplicateKeyException e) {
 			// 거의 동시에 같은 닉네임·이메일로 바꾼 경우 → DB UNIQUE 제약이 막아 줌
@@ -117,7 +111,6 @@ public class MemberController {
 	}
 
 	// 이메일 변경 인증번호 보내기 (M05)  POST /api/members/me/emailCode
-	// 보내는 JSON: { email }  ← 바꿀 새 이메일
 	@PostMapping("/me/emailCode")
 	public ResponseEntity<?> emailCode(@RequestAttribute("memberId") String memberId,
 			@RequestBody MemberUpdateDTO dto) {
@@ -141,7 +134,6 @@ public class MemberController {
 	
 
 	// 아이디·비밀번호 찾기 - 인증번호 보내기 (M09)  POST /api/members/find/sendCode
-	// 보내는 JSON: { purpose, email, loginId }  (purpose: FIND_ID / RESET_PW, loginId 는 비밀번호 찾기만)
 	@PostMapping("/find/sendCode")
 	public ResponseEntity<?> sendCode(@RequestBody MemberFindDTO dto) {
 		String error = service.sendCode(dto);
@@ -152,7 +144,6 @@ public class MemberController {
 	}
 
 	// 아이디 찾기 - 아이디 확인 (M09)  POST /api/members/find/id
-	// 보내는 JSON: { email, code }  → 돌려주는 JSON: { loginId: "msj***" }
 	@PostMapping("/find/id")
 	public ResponseEntity<?> findId(@RequestBody MemberFindDTO dto) {
 		String maskedId = service.findId(dto.getEmail(), dto.getCode()); // 예: msj***
@@ -164,7 +155,6 @@ public class MemberController {
 
 
 	// 아이디·비밀번호 찾기 - 인증번호 확인 (M09)  POST /api/members/find/checkCode
-	// 보내는 JSON: { purpose, loginId, email, code }  (purpose: FIND_ID / RESET_PW, loginId 는 비밀번호 찾기만)
 	@PostMapping("/find/checkCode")
 	public ResponseEntity<?> checkCode(@RequestBody MemberFindDTO dto) {
 		String error = service.checkCode(dto);
@@ -175,7 +165,6 @@ public class MemberController {
 	}
 
 	// 비밀번호 찾기 - 새 비밀번호 저장 (M09)  POST /api/members/find/resetPw
-	// 보내는 JSON: { loginId, email, code, newPassword, newPasswordCheck }
 	@PostMapping("/find/resetPw")
 	public ResponseEntity<?> resetPw(@RequestBody MemberFindDTO dto) {
 		String error = service.resetPassword(dto);
@@ -188,7 +177,6 @@ public class MemberController {
 	
 
 	// 내 특성 레벨 (C01 퀘스트 화면, M08 특성 강화)  GET /api/members/me/traits
-	// 돌려주는 JSON: [ { traitId, traitName, traitLevel, maxLevel }, ... ]  (INVEST, DISEASE, LOVE, STUDY 순서)
 	@GetMapping("/me/traits")
 	public List<MemberTraitDTO> myTraits(@RequestAttribute("memberId") String memberId) {
 		return service.myTraits(Integer.parseInt(memberId));
@@ -196,7 +184,6 @@ public class MemberController {
 
 	// 전생 기록 (M07)  GET /api/members/me/lives?page=1&sort=recent
 	// sort: recent(최신순, 기본) / age(오래 산 순)
-	// 돌려주는 JSON: { total, page, size, questDone, pointSum, lives: [ {lifeNo, lifeId, countryName, ...}, ... ] }
 	@GetMapping("/me/lives")
 	public Map<String, Object> myLives(@RequestAttribute("memberId") String memberId,
 			@RequestParam(defaultValue = "1") int page,
@@ -206,7 +193,6 @@ public class MemberController {
 
 	// 특성 레벨 올리기 (M08)  POST /api/members/me/traits/{traitId}/levelUp
 	// 포인트 1점 → 그 특성 1레벨 (다음 생부터 적용)
-	// 돌려주는 JSON: { point: 남은 포인트, traits: [ ... ] }
 	@PostMapping("/me/traits/{traitId}/levelUp")
 	public ResponseEntity<?> levelUp(@RequestAttribute("memberId") String memberId,
 			@PathVariable String traitId) {

@@ -1,6 +1,6 @@
 package com.example.demo.member;
 
-// 로그인 요청 JSON 을 담는 상자 { loginId, password, guestToken }
+// 로그인 요청 JSON 을 담는 상자
 // guestToken = 비회원으로 하던 인생의 임시 토큰 (없으면 null)
 public class MemberLoginDTO {
 
