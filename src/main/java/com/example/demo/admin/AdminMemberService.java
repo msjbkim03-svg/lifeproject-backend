@@ -24,6 +24,8 @@ public class AdminMemberService {
 		if (page < 1) page = 1;
 		if (keyword != null) keyword = keyword.trim();
 		if (keyword != null && keyword.isEmpty()) keyword = null;
+		// % _ 를 "아무 글자"가 아니라 진짜 글자로 찾게 앞에 \ 붙이기 (SQL 의 ESCAPE '\')
+		if (keyword != null) keyword = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
 		if (!"ACTIVE".equals(status) && !"WITHDRAWN".equals(status)) status = null;
 
 		// 2. SQL 에 넘길 조건 상자

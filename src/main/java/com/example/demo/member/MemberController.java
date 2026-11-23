@@ -75,7 +75,8 @@ public class MemberController {
 		// 이 브라우저에서 비회원으로 하던 인생이 있으면 회원 인생으로 전환
 		boolean converted = service.convertGuestLife(member.getMemberId(), dto.getGuestToken());
 		
-		String token = jwtUtil.createToken(String.valueOf(member.getMemberId()),member.getMemberRole());
+		String token = jwtUtil.createToken(String.valueOf(member.getMemberId()), member.getMemberRole(),
+				JwtUtil.passwordVersion(member.getPassword()));
 
 		return ResponseEntity.ok(Map.of(
 				"token", token,
@@ -203,8 +204,12 @@ public class MemberController {
 			// 포인트 부족 / 이미 Lv.5 → 아무것도 안 바뀜 (트랜잭션 취소)
 			return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
 		}
+		MyPageDTO my = service.myPage(id);
+		if (my == null) {
+			return ResponseEntity.status(404).body(Map.of("message", "회원 정보를 찾을 수 없어요."));
+		}
 		return ResponseEntity.ok(Map.of(
-				"point", service.myPage(id).getPoint(),
+				"point", my.getPoint(),
 				"traits", service.myTraits(id)));
 	}
 }
