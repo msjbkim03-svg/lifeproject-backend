@@ -72,6 +72,22 @@ public class EventController {
 		return eServ.rollYear(life);
 	}
 
+	// 테스트: 지금 처지 상태 경험 (최종 전에 삭제)
+	// 예: /event/test/states?lifeId=0&country=IND&married=N&school=ENROLLED&job=EMPLOYED
+	@GetMapping("/test/states")
+	public List<String> testStates(@RequestParam(defaultValue = "0") int lifeId, @RequestParam String country,
+			@RequestParam(defaultValue = "N") String married, @RequestParam(required = false) String school,
+			@RequestParam(required = false) String job, @RequestParam(required = false) String birthCountry) {
+		LifeDTO life = new LifeDTO();
+		life.setLifeId(lifeId);
+		life.setCurrentCountry(country);
+		life.setBirthCountry(birthCountry == null ? country : birthCountry);
+		life.setMarriedYn(married);
+		life.setSchoolStatus(school);
+		life.setJobStatus(job);
+		return eServ.stateExps(life);
+	}
+	
 	// 테스트: 선택지 고르기 (최종 전에 삭제)
 	@GetMapping("/test/choice")
 	public EventResultDTO testChoice(@RequestParam int choiceId, @RequestParam int age, @RequestParam int birthYear,
