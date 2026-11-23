@@ -127,6 +127,21 @@ public class EngineController {
 		return ResponseEntity.ok(info);
 	}
 
+	// C22 엔딩 크레딧 재료  GET /api/engine/film?lifeId=...&guestToken=...
+	//   { life: 세상을 떠난 해의 모습(가족 포함), industry: { 나이: 산업 }, sources: [자료 이름] }
+	@GetMapping("/api/engine/film")
+	public ResponseEntity<?> film(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		java.util.Map<String, Object> out = engineService.filmData(lifeId, loginMemberId(auth), guestToken);
+		if (out == null) {
+			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+		}
+		if (out.isEmpty()) {
+			return ResponseEntity.badRequest().body("아직 끝나지 않은 인생이에요.");
+		}
+		return ResponseEntity.ok(out);
+	}
+
 	// C03 1년 진행  POST /api/engine/next  { lifeId, guestToken }
 	@PostMapping("/api/engine/next")
 	public ResponseEntity<?> nextYear(@RequestBody EngineRequestDTO req,

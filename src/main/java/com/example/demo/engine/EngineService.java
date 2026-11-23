@@ -1440,6 +1440,39 @@ public class EngineService {
 		return loadMyLife(lifeId, memberId, guestToken) != null;
 	}
 
+	// ================= C22 엔딩 크레딧 (원작 주마등 필름) =================
+	// 끝난 내 인생 하나의 필름 재료 (내 인생이 아니면 null, 아직 안 끝났으면 빈 Map)
+	//   life:     세상을 떠난 해의 모습 (가족과 삶 · 가진 것 · 사는 나라 …, 진행 화면과 같은 fillRegion)
+	//   industry: 나이 → 그해 하던 일의 산업 AGRI · INDUSTRY · SERVICE (마을 일터 그림)
+	//   sources:  이 이야기에 쓰인 자료 (겪은 역사 사건 · 태어난 나라 통계의 출처 이름, 최대 12개)
+	public Map<String, Object> filmData(int lifeId, Integer memberId, String guestToken) {
+		LifeDTO life = loadMyLife(lifeId, memberId, guestToken);
+		if (life == null) {
+			return null;
+		}
+		Map<String, Object> out = new HashMap<>();
+		if (!"ENDED".equals(life.getStatus())) {
+			return out;
+		}
+		life.setHistName(engineDao.selectHistName(life));
+		fillRegion(life);
+		Map<Integer, String> industry = new java.util.TreeMap<>();
+		List<YearLogDTO> years = engineDao.selectYearLogs(lifeId);
+		if (years != null) {
+			for (YearLogDTO y : years) {
+				JobDTO j = y.getJobId() == null ? null : findJob(y.getJobId());
+				if (j != null && j.getIndustry() != null) {
+					industry.put(y.getAge(), j.getIndustry());
+				}
+			}
+		}
+		List<String> sources = engineDao.selectFilmSources(lifeId);
+		out.put("life", life);
+		out.put("industry", industry);
+		out.put("sources", sources == null ? new ArrayList<String>() : sources);
+		return out;
+	}
+
 	// 선택 이벤트를 아직 안 골랐는지 (다음 해로 못 넘어감)
 	public boolean isWaitingChoice(LifeDTO life) {
 		return life.getPendingEventId() != null;
