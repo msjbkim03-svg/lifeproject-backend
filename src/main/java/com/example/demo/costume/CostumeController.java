@@ -55,7 +55,8 @@ public class CostumeController {
 
 	// 사기·착용·벗기 공통: 주인 확인 → 처리 → 바뀐 목록 + 안내 문장
 	private ResponseEntity<Map<String, Object>> change(int costumeId, Map<String, Object> body, String auth, String action) {
-		int lifeId = Integer.parseInt(String.valueOf(body.get("lifeId")));
+		Integer lifeId = toInt(body.get("lifeId"));
+		if (lifeId == null) return ResponseEntity.badRequest().body(Map.of("message", "인생 번호가 없어요."));
 		String guestToken = (String) body.get("guestToken");
 		Integer memberId = readMemberId(auth);
 		CostumeLifeDTO life = service.myLife(lifeId, memberId, guestToken);
@@ -78,6 +79,16 @@ public class CostumeController {
 		Map<String, Object> result = service.list(service.myLife(lifeId, memberId, guestToken));
 		result.put("message", done);
 		return ResponseEntity.ok(result);
+	}
+
+	// 숫자로 바꾸기 (없거나 숫자가 아니면 null)
+	private Integer toInt(Object value) {
+		if (value == null) return null;
+		try {
+			return Integer.parseInt(String.valueOf(value));
+		} catch (NumberFormatException e) {
+			return null;
+		}
 	}
 
 	private Integer readMemberId(String auth) {

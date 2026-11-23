@@ -14,9 +14,9 @@
 		SELECT COUNT(*) FROM MEMBER WHERE NICKNAME = #{nickname}
 	</select>
 
-	<!-- M01: 이메일 중복 확인 -->
+	<!-- M01: 이메일 중복 확인 (예전에 대문자로 저장된 이메일도 찾게 LOWER, #{email} 은 Service 가 소문자로 바꿔서 줌) -->
 	<select id="countByEmail" parameterType="string" resultType="int">
-		SELECT COUNT(*) FROM MEMBER WHERE EMAIL = #{email}
+		SELECT COUNT(*) FROM MEMBER WHERE LOWER(EMAIL) = #{email}
 	</select>
 
 	<!-- M01: 회원 INSERT
@@ -108,7 +108,7 @@
 	<!-- M05: 나(memberId)를 뺀 같은 이메일 개수 -->
 	<select id="countEmailExceptMe" parameterType="map" resultType="int">
 		SELECT COUNT(*) FROM MEMBER
-		WHERE EMAIL = #{email} AND MEMBER_ID &lt;&gt; #{memberId}
+		WHERE LOWER(EMAIL) = #{email} AND MEMBER_ID &lt;&gt; #{memberId}
 	</select>
 
 	<!-- M05: 개인정보 저장
@@ -126,11 +126,13 @@
 
 	<!-- M06: 회원 탈퇴 (줄을 지우지 않고 상태만 바꿈)
 	     개인정보 동의 문구 "보유 기간: 회원 탈퇴 시까지" 에 맞춰 전화번호는 지움 (v31)
-	     ※ 이메일·닉네임은 NOT NULL + UNIQUE 라서 지울 수 없음 -->
+	     이메일은 'wd회원번호@withdrawn' 으로 바꿔서 같은 이메일로 다시 가입할 수 있게 (NOT NULL + UNIQUE 라 비울 수는 없음)
+	     ※ 아이디·닉네임은 그대로 (다른 사람이 같은 아이디로 가입하면 헷갈려서) -->
 	<update id="updateWithdrawn" parameterType="int">
 		UPDATE MEMBER
 		SET STATUS = 'WITHDRAWN',
-		    PHONE = NULL
+		    PHONE = NULL,
+		    EMAIL = 'wd' || MEMBER_ID || '@withdrawn'
 		WHERE MEMBER_ID = #{memberId} AND STATUS = 'ACTIVE'
 	</update>
 	
@@ -144,6 +146,11 @@
 		  AND CREATED_AT &gt; SYSDATE - 1/1440
 	</select>
 
+	<!-- 만든 지 하루 지난 인증번호 지우기 (보낼 때마다 같이 정리) -->
+	<delete id="deleteOldAuth">
+		DELETE FROM EMAIL_AUTH WHERE CREATED_AT &lt; SYSDATE - 1
+	</delete>
+
 	<!-- 인증번호 저장 (유효시간 5분 = SYSDATE + 5/1440, 틀린 횟수 0, 아직 안 씀) -->
 	<insert id="insertEmailAuth" parameterType="map">
 		INSERT INTO EMAIL_AUTH (AUTH_ID, EMAIL, AUTH_CODE, PURPOSE, EXPIRES_AT, FAIL_COUNT, IS_USED, CREATED_AT)
@@ -155,7 +162,7 @@
 		SELECT MEMBER_ID, LOGIN_ID, PASSWORD, NICKNAME, EMAIL,
 		       MEMBER_ROLE, POINT, STATUS, JOIN_DATE
 		FROM MEMBER
-		WHERE EMAIL = #{email} AND STATUS = 'ACTIVE'
+		WHERE LOWER(EMAIL) = #{email} AND STATUS = 'ACTIVE'
 	</select>
 
 	<!-- 아이디 + 이메일로 회원 찾기 (탈퇴 회원 제외) -->
@@ -163,7 +170,7 @@
 		SELECT MEMBER_ID, LOGIN_ID, PASSWORD, NICKNAME, EMAIL,
 		       MEMBER_ROLE, POINT, STATUS, JOIN_DATE
 		FROM MEMBER
-		WHERE LOGIN_ID = #{loginId} AND EMAIL = #{email} AND STATUS = 'ACTIVE'
+		WHERE LOGIN_ID = #{loginId} AND LOWER(EMAIL) = #{email} AND STATUS = 'ACTIVE'
 	</select>
 
 	<!-- 가장 최근 인증번호가 [같은 번호 · 안 씀 · 5분 안 지남 · 틀린 횟수 5번 미만] 이면 1, 아니면 0 -->

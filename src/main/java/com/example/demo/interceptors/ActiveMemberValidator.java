@@ -3,6 +3,7 @@ package com.example.demo.interceptors;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import com.auth0.jwt.interfaces.DecodedJWT;
 import com.example.demo.commons.JwtUtil;
 import com.example.demo.member.MemberDAO;
 import com.example.demo.member.MemberDTO;
@@ -41,8 +42,11 @@ public class ActiveMemberValidator implements HandlerInterceptor {
 
 		// 3. 토큰에서 회원 번호 꺼내기 (잘못된 토큰이면 통과 → 각 주소의 원래 처리에 맡김)
 		int memberId;
+		String pv;
 		try {
-			memberId = Integer.parseInt(jwt.verifyToken(authHeader.substring(7)).getSubject());
+			DecodedJWT token = jwt.verifyToken(authHeader.substring(7));
+			memberId = Integer.parseInt(token.getSubject());
+			pv = token.getClaim("pv").asString();
 		} catch (Exception e) {
 			return true;
 		}
@@ -50,6 +54,12 @@ public class ActiveMemberValidator implements HandlerInterceptor {
 		// 4. DB에서 상태 확인 → 없거나 탈퇴했으면 401 (로그인 필요)
 		MemberDTO member = memberDAO.selectById(memberId);
 		if (member == null || !"ACTIVE".equals(member.getStatus())) {
+			response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+			return false;
+		}
+
+		// 5. 토큰을 받은 뒤 비밀번호가 바뀌었으면 401 (pv 가 없는 예전 토큰은 그대로 통과)
+		if (pv != null && !pv.equals(JwtUtil.passwordVersion(member.getPassword()))) {
 			response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
 			return false;
 		}

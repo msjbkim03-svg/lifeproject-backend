@@ -74,6 +74,7 @@ public class CostumeService {
 	// 착용 (같은 부위에 입던 건 벗음)
 	@Transactional
 	public String equip(CostumeLifeDTO life, int costumeId) {
+		if (!"PLAYING".equals(life.getStatus())) return "진행 중인 인생에서만 갈아입을 수 있어요.";
 		CostumeDTO c = dao.selectCostume(costumeId);
 		if (c == null || dao.countOwned(life.getLifeId(), costumeId) == 0) return "가진 것만 착용할 수 있어요.";
 		dao.unequipPart(life.getLifeId(), c.getPart());
@@ -83,6 +84,7 @@ public class CostumeService {
 
 	// 벗기 (그 부위는 기본 모습으로)
 	public String unequip(CostumeLifeDTO life, int costumeId) {
+		if (!"PLAYING".equals(life.getStatus())) return "진행 중인 인생에서만 갈아입을 수 있어요.";
 		if (dao.setEquipped(life.getLifeId(), costumeId, "N") == 0) return "가진 것만 벗을 수 있어요.";
 		return null;
 	}

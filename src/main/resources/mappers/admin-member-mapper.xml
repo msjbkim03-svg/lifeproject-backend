@@ -8,9 +8,9 @@
 	<sql id="searchWhere">
 		<where>
 			<if test="keyword != null">
-				(LOGIN_ID LIKE '%' || #{keyword} || '%'
-				 OR NICKNAME LIKE '%' || #{keyword} || '%'
-				 OR EMAIL LIKE '%' || #{keyword} || '%')
+				(LOGIN_ID LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR NICKNAME LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR EMAIL LIKE '%' || #{keyword} || '%' ESCAPE '\')
 			</if>
 			<if test="status != null">
 				AND STATUS = #{status}
@@ -52,7 +52,8 @@
 	<!-- 강제 탈퇴: 회원 탈퇴(M06)와 같게 상태만 바꾸고 전화번호는 지움 -->
 	<update id="updateWithdrawn" parameterType="int">
 		UPDATE MEMBER
-		SET STATUS = 'WITHDRAWN', PHONE = NULL
+		SET STATUS = 'WITHDRAWN', PHONE = NULL,
+		    EMAIL = 'wd' || MEMBER_ID || '@withdrawn'
 		WHERE MEMBER_ID = #{memberId} AND STATUS = 'ACTIVE'
 	</update>
 

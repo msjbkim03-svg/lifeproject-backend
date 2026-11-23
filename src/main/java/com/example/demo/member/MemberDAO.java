@@ -97,6 +97,11 @@ public class MemberDAO {
 				Map.of("email", email, "purpose", purpose));
 	}
 
+	// 만든 지 하루 지난 인증번호 지우기 (EMAIL_AUTH 가 계속 쌓이지 않게)
+	public int deleteOldAuth() {
+		return mybatis.delete("member.deleteOldAuth");
+	}
+
 	// 인증번호 저장 (유효시간 5분은 SQL 안에서 계산)
 	public int insertEmailAuth(String email, String code, String purpose) {
 		return mybatis.insert("member.insertEmailAuth",

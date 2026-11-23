@@ -48,13 +48,20 @@ public class MemberService {
 	}
 
 	public boolean isEmailAvailable(String email) {
-		return dao.countByEmail(email) == 0;
+		return dao.countByEmail(cleanEmail(email)) == 0;
+	}
+
+	// 이메일 정리: 앞뒤 공백 빼고 소문자로 (" ABC@b.com" 과 "abc@b.com" 을 같은 이메일로)
+	private String cleanEmail(String email) {
+		return email == null ? null : email.trim().toLowerCase();
 	}
 
 	// ===== 회원가입 (M01) =====
 	// 문제가 있으면 오류 문구를 돌려주고, 성공하면 null 을 돌려준다
 	@Transactional // 회원 INSERT 와 특성 INSERT 중 하나라도 실패하면 둘 다 취소
 	public String join(MemberDTO dto) {
+		dto.setEmail(cleanEmail(dto.getEmail()));
+		if (dto.getLoginId() != null) dto.setLoginId(dto.getLoginId().trim());
 
 		// 1. 입력 형식 검사 (화면에서도 검사하지만 서버에서 한 번 더)
 		if (dto.getLoginId() == null || !dto.getLoginId().matches("^[a-zA-Z0-9]{4,20}$")) {
@@ -135,6 +142,7 @@ public class MemberService {
 
 		// 0. 빈 값이면 바로 실패
 		if (loginId == null || password == null) return null;
+		loginId = loginId.trim();
 
 		// 1. 아이디로 회원 찾기
 		MemberDTO member = dao.selectByLoginId(loginId);
@@ -174,6 +182,7 @@ public class MemberService {
 	// 문제가 있으면 오류 문구를, 성공하면 null 을 돌려준다
 	@Transactional // 인증번호 '사용함' 처리와 회원 정보 저장을 한 번에 (하나라도 실패하면 둘 다 취소)
 	public String update(int memberId, MemberUpdateDTO dto) {
+		dto.setEmail(cleanEmail(dto.getEmail()));
 
 		// 1. DB 에서 지금 내 정보 꺼내기 (비밀번호 비교용)
 		MemberDTO me = dao.selectById(memberId);
@@ -217,7 +226,7 @@ public class MemberService {
 		}
 
 		// 6. 이메일을 바꿨으면 새 이메일로 받은 인증번호 확인 (안 바꿨으면 건너뜀)
-		if (!dto.getEmail().equals(me.getEmail())) {
+		if (!dto.getEmail().equalsIgnoreCase(me.getEmail())) {
 			if (!verifyCode(dto.getEmail(), "CHANGE_EMAIL", dto.getEmailCode())) {
 				return "이메일 인증번호가 맞지 않거나 시간이 지났어요.";
 			}
@@ -244,6 +253,8 @@ public class MemberService {
 	// 문제가 있으면 오류 문구를, 성공하면 null 을 돌려준다
 	// ※ 가입된 이메일이든 아니든 겉으로는 똑같이 "성공"처럼 보이게 함 (가입 여부를 알 수 없게)
 	public String sendCode(MemberFindDTO dto) {
+		dto.setEmail(cleanEmail(dto.getEmail()));
+		if (dto.getLoginId() != null) dto.setLoginId(dto.getLoginId().trim());
 
 		// 1. 입력 검사
 		String purpose = dto.getPurpose();
@@ -267,6 +278,7 @@ public class MemberService {
 
 		// 4. DB 에 저장 (유효시간 5분)
 		//    회원이 없어도 저장함 → 1분 제한이 똑같이 걸려서 "가입된 이메일인지" 알 수 없음
+		dao.deleteOldAuth();
 		dao.insertEmailAuth(dto.getEmail(), code, purpose);
 
 		// 5. 일치하는 회원이 있을 때만 메일 발송
@@ -307,6 +319,7 @@ public class MemberService {
 
 	@Transactional
 	public String findId(String email, String code) {
+		email = cleanEmail(email);
 		// 1. 이메일로 회원 찾기 (먼저 → 없으면 인증번호를 쓰지 않음)
 		MemberDTO member = dao.selectActiveByEmail(email);
 		if (member == null) return null;
@@ -322,6 +335,8 @@ public class MemberService {
 	// purpose: FIND_ID(아이디 찾기) 또는 RESET_PW(비밀번호 찾기)
 	// 번호를 '사용함'으로 바꾸지 않음 → 아이디 확인(findId)·비밀번호 변경(resetPw) 때 한 번 더 확인하고 그때 사용 처리
 	public String checkCode(MemberFindDTO dto) {
+		dto.setEmail(cleanEmail(dto.getEmail()));
+		if (dto.getLoginId() != null) dto.setLoginId(dto.getLoginId().trim());
 		String fail = "인증번호가 맞지 않거나 시간이 지났어요.";
 		String purpose = dto.getPurpose();
 		if (!"FIND_ID".equals(purpose) && !"RESET_PW".equals(purpose)) return "잘못된 요청이에요.";
@@ -344,6 +359,8 @@ public class MemberService {
 	// ===== 비밀번호 재설정 (M09) =====
 	@Transactional // 번호를 '사용함'으로 바꾸는 것과 비밀번호 저장 중 하나라도 실패하면 둘 다 취소
 	public String resetPassword(MemberFindDTO dto) {
+		dto.setEmail(cleanEmail(dto.getEmail()));
+		if (dto.getLoginId() != null) dto.setLoginId(dto.getLoginId().trim());
 
 		// 1. 새 비밀번호 검사 (먼저 검사해야 형식 실수로 인증번호가 헛되이 쓰이지 않음)
 		String newPw = dto.getNewPassword();
@@ -370,6 +387,7 @@ public class MemberService {
 	// ===== 이메일 변경 인증번호 보내기 (M05) =====
 	// (로그인한 본인만 쓰는 기능이라 오류를 그대로 알려 줘도 됨)
 	public String sendEmailChangeCode(int memberId, String newEmail) {
+		newEmail = cleanEmail(newEmail);
 
 		// 1. 형식 검사
 		if (newEmail == null || !newEmail.matches("^[\\w.+-]+@[\\w-]+\\.[\\w.]+$")) {
@@ -379,7 +397,7 @@ public class MemberService {
 		// 2. 지금 이메일과 같으면 인증할 필요 없음
 		MemberDTO me = dao.selectById(memberId);
 		if (me == null || "WITHDRAWN".equals(me.getStatus())) return "회원 정보를 찾을 수 없어요.";
-		if (newEmail.equals(me.getEmail())) return "지금 쓰는 이메일이에요.";
+		if (newEmail.equalsIgnoreCase(me.getEmail())) return "지금 쓰는 이메일이에요.";
 
 		// 3. 다른 회원이 쓰는 이메일이면 안 됨
 		if (dao.countEmailExceptMe(memberId, newEmail) > 0) return "이미 사용 중인 이메일이에요.";
@@ -391,12 +409,14 @@ public class MemberService {
 
 		// 5. 6자리 만들어 저장 (유효 5분) → 새 이메일로 발송
 		String code = String.format("%06d", new SecureRandom().nextInt(1000000));
+		dao.deleteOldAuth();
 		dao.insertEmailAuth(newEmail, code, "CHANGE_EMAIL");
+		// 로그인한 본인 기능이라 실패를 알려 줘도 됨 → 다 보낼 때까지 기다림 (화면은 그동안 입력칸을 먼저 열어 둠)
 		try {
 			sendCodeMail(newEmail, code, "CHANGE_EMAIL");
 		} catch (Exception e) {
 			e.printStackTrace();
-			return "메일을 보내지 못했어요. 이메일 주소를 확인해 주세요.";
+			return "메일을 보내지 못했어요. 이메일 주소를 확인하고 1분 뒤 다시 받아 주세요.";
 		}
 		return null;
 	}
