@@ -80,7 +80,8 @@ public class EventController {
 			@RequestParam(required = false) String job, @RequestParam(required = false) String birthCountry,
 			@RequestParam(required = false) String parentAlive, @RequestParam(required = false) String owns,
 			@RequestParam(defaultValue = "0") int age, 
-			@RequestParam(defaultValue = "0") int children) {
+			@RequestParam(defaultValue = "0") int children,
+			@RequestParam(defaultValue = "0") long assets) {
 		LifeDTO life = new LifeDTO();
 		life.setLifeId(lifeId);
 		life.setCurrentAge(age);
@@ -92,6 +93,7 @@ public class EventController {
 		life.setParentAlive(parentAlive);
 		life.setOwns(owns);
 		life.setChildCount(children);
+		life.setAssets(assets);
 		return eServ.stateExps(life);
 	}
 
