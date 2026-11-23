@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+	"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="costume">
+
+	<!-- 인생 1개 + 그해 사는 나라의 1인당 GDP (엔진과 같게 가장 가까운 연대 값) -->
+	<select id="selectLife" parameterType="int" resultType="com.example.demo.costume.CostumeLifeDTO">
+		SELECT l.LIFE_ID, l.MEMBER_ID, l.GUEST_TOKEN, l.STATUS, l.CURRENT_AGE,
+		       NVL(l.ASSETS, 0) AS ASSETS,
+		       (SELECT MAX(s.GDP_PER_CAPITA)
+		               KEEP (DENSE_RANK FIRST ORDER BY ABS(s.DECADE - TRUNC((l.BIRTH_YEAR + l.CURRENT_AGE) / 10) * 10))
+		          FROM COUNTRY_STAT s
+		         WHERE s.COUNTRY_CODE = l.CURRENT_COUNTRY
+		           AND s.GDP_PER_CAPITA IS NOT NULL) AS GDP_PER_CAPITA
+		FROM LIFE l
+		WHERE l.LIFE_ID = #{lifeId}
+	</select>
+
+	<!-- 모자·머리·옷 목록 + 이 인생이 가졌는지·입었는지 -->
+	<select id="selectCostumes" parameterType="int" resultType="com.example.demo.costume.CostumeDTO">
+		SELECT c.COSTUME_ID, c.COSTUME_NAME, c.PART, c.PRICE_RATE,
+		       c.IMAGE_PATH AS LOOK,
+		       CASE WHEN lc.COSTUME_ID IS NULL THEN 'N' ELSE 'Y' END AS OWNED,
+		       NVL(lc.IS_EQUIPPED, 'N') AS EQUIPPED
+		FROM COSTUME c
+		LEFT JOIN LIFE_COSTUME lc
+		       ON lc.COSTUME_ID = c.COSTUME_ID AND lc.LIFE_ID = #{lifeId}
+		ORDER BY c.PART, c.PRICE_RATE, c.COSTUME_ID
+	</select>
+
+	<select id="selectCostume" parameterType="int" resultType="com.example.demo.costume.CostumeDTO">
+		SELECT COSTUME_ID, COSTUME_NAME, PART, PRICE_RATE, IMAGE_PATH AS LOOK
+		FROM COSTUME
+		WHERE COSTUME_ID = #{costumeId}
+	</select>
+
+	<select id="countOwned" parameterType="map" resultType="int">
+		SELECT COUNT(*) FROM LIFE_COSTUME
+		WHERE LIFE_ID = #{lifeId} AND COSTUME_ID = #{costumeId}
+	</select>
+
+	<!-- 돈 내기: 진행 중이고 돈이 있을 때만 바뀜 (0줄이면 못 삼) -->
+	<update id="payAssets" parameterType="map">
+		UPDATE LIFE
+		SET ASSETS = ASSETS - #{price}
+		WHERE LIFE_ID = #{lifeId} AND STATUS = 'PLAYING' AND ASSETS &gt;= #{price}
+	</update>
+
+	<insert id="insertLifeCostume" parameterType="map">
+		INSERT INTO LIFE_COSTUME (LIFE_ID, COSTUME_ID, PAID_AMOUNT, BOUGHT_AGE, IS_EQUIPPED)
+		VALUES (#{lifeId}, #{costumeId}, #{price}, #{age}, 'N')
+	</insert>
+
+	<!-- 같은 부위(모자·머리·옷)에 착용 중인 것 벗기 -->
+	<update id="unequipPart" parameterType="map">
+		UPDATE LIFE_COSTUME
+		SET IS_EQUIPPED = 'N'
+		WHERE LIFE_ID = #{lifeId} AND IS_EQUIPPED = 'Y'
+		  AND COSTUME_ID IN (SELECT COSTUME_ID FROM COSTUME WHERE PART = #{part})
+	</update>
+
+	<update id="setEquipped" parameterType="map">
+		UPDATE LIFE_COSTUME
+		SET IS_EQUIPPED = #{equipped}
+		WHERE LIFE_ID = #{lifeId} AND COSTUME_ID = #{costumeId}
+	</update>
+
+</mapper>
