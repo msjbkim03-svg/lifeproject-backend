@@ -950,6 +950,16 @@ public class EngineService {
 		return meM ? "누나" : "언니";
 	}
 
+	// 같은 호칭이 여럿일 때: 1번째 = 큰누나·큰형 (동생은 '큰 남동생'), 2번째부터 둘째 누나 · 셋째 누나 …
+	private static final String[] SIB_ORD = { "둘째", "셋째", "넷째", "다섯째", "여섯째", "일곱째", "여덟째", "아홉째" };
+
+	private static String sibOrd(String word, int k) {
+		if (k == 1) {
+			return word.endsWith("동생") ? "큰 " + word : "큰" + word;
+		}
+		return (k - 2 < SIB_ORD.length ? SIB_ORD[k - 2] : k + "번째") + " " + word;
+	}
+
 	private List<FamilyMemberDTO> family(LifeDTO life, CountryStatDTO stat) {
 		FamSeed f = famSeed(life, stat);
 		int age = life.getCurrentAge();
@@ -971,7 +981,8 @@ public class EngineService {
 		out.add(parentRow("아버지", f.father, f.fatherAt, dadDie, f.fatherJob, dadGone, age).with(null, dadGone ? null : bondWord(life, dadB, 0)));
 
 		// 형제자매: 손위는 늘, 손아래는 태어난 뒤부터 / 24세가 넘으면 집을 떠남 (원작 sibsLeft)
-		List<String> sib = new ArrayList<>();
+		//   같은 호칭이 여럿이면 나이 많은 순으로 큰누나 · 둘째 누나 · 셋째 누나 (11/23 동현님: '누나 누나 누나'가 어색함)
+		List<Object[]> sibs = new ArrayList<>(); // {호칭, 나이}
 		int left = 0;
 		for (int i = 0; i < f.siblingGap.length; i++) {
 			int g = f.siblingGap[i];
@@ -979,12 +990,24 @@ public class EngineService {
 			if (sAge < 0) {
 				continue;
 			}
-			sib.add(sibWord(life.getGender(), f.siblingSex[i], g > 0) + " " + sAge + "세");
+			sibs.add(new Object[] { sibWord(life.getGender(), f.siblingSex[i], g > 0), sAge });
 			if (sAge >= 24 && age >= 6) {
 				left++;
 			}
 		}
-		String sibText = sib.isEmpty() ? "없음" : sib.size() <= 5 ? String.join(" · ", sib) : sib.size() + "명";
+		sibs.sort((a, b) -> (Integer) b[1] - (Integer) a[1]);
+		Map<String, Integer> wordN = new HashMap<>();
+		for (Object[] x : sibs) {
+			wordN.merge((String) x[0], 1, Integer::sum);
+		}
+		Map<String, Integer> wordI = new HashMap<>();
+		List<String> sib = new ArrayList<>();
+		for (Object[] x : sibs) {
+			String w = (String) x[0];
+			int k = wordI.merge(w, 1, Integer::sum);
+			sib.add((wordN.get(w) > 1 ? sibOrd(w, k) : w) + " " + x[1] + "세");
+		}
+		String sibText = sib.isEmpty() ? "없음" : sib.size() <= 7 ? String.join(" · ", sib) : sib.size() + "명";
 		if (left > 0) {
 			sibText = sibText + " · " + (left == sib.size() ? "모두 집을 떠남" : left + "명은 집을 떠남");
 		}
@@ -1069,10 +1092,19 @@ public class EngineService {
 				if (nm == null) {
 					continue;
 				}
+				// 성이 없는 나라는 첫 낱말(이름)만, 그런데 그게 한 글자이거나 이미 있는 이름이면 전체 이름
+				//   (11/23 동현님: 미얀마 같은 나라에서 '예, 예, 예'처럼 첫 낱말만 겹쳐 나왔음)
+				String call = SURNAME_CC.contains(life.getBirthCountry()) ? nm : nm.split(" ")[0];
+				if (call.length() < 2 || alive.contains(call)) {
+					call = nm;
+				}
+				if (alive.contains(call)) {
+					continue; // 같은 이름 친구는 한 번만
+				}
 				if (age >= dieAt) {
 					gone++;
 				} else {
-					alive.add(SURNAME_CC.contains(life.getBirthCountry()) ? nm : nm.split(" ")[0]);
+					alive.add(call);
 				}
 			}
 			if (n > 0) {
@@ -1931,7 +1963,8 @@ public class EngineService {
 		int[] jail = prisonSpan(life);
 		if (jail != null && age >= jail[0] && age < jail[0] + jail[1]) {
 			// 그 해를 교도소에서 보냄: 바깥 일상 줄 대신 안에서의 한 줄 (들어간 해는 이벤트 문장이 있으니 기록이 없을 때만)
-			if (age > jail[0] || already == 0) {
+			//   마지막 해는 출소 문장이 있으니 빼요 (11/23: '교도소에서 나왔다' 바로 뒤에 '면회를 왔다'가 붙었음)
+			if ((age > jail[0] || already == 0) && age < jail[0] + jail[1] - 1) {
 				out.add(prisonLine(life));
 			}
 			return out;
@@ -6801,7 +6834,8 @@ public class EngineService {
 			double nowRate = life.getIncomeRate() == null ? 1 : life.getIncomeRate();
 			s.jcJobId = j == null ? null : j.getJobId();
 			s.jcSame = 1.05 + 0.2 * new java.util.SplittableRandom(life.getLifeId() * 911L + lived).nextDouble();
-			String jobNow = life.getJobName() == null ? "지금 일" : life.getJobName();
+			JobDTO cur = life.getJobId() == null ? null : findJob(life.getJobId()); // 결정 창을 만들 땐 jobName 이 비어 있음
+			String jobNow = cur != null ? cur.getJobName() : life.getJobName() == null ? "지금 일" : life.getJobName();
 			e.setLogText("다른 곳에서 함께 일하자는 제안이 왔어요. 지금은 " + ro(jobNow) + " " + Math.max(1, life.getJobYears()) + "년째 일하고 있어요."
 					+ " 지금 벌이는 월 약 " + won(life, jobPay(gdp, nowRate, life.getCurrentCountry(), st) / 12) + "이에요.");
 			for (EventChoiceDTO c : cs) {
@@ -7216,8 +7250,9 @@ public class EngineService {
 		} else if ("JOBCHANGE_SAME".equals(o.act) && life.getIncomeRate() != null) {
 			// 같은 일·다른 직장 (원작): 벌이만 오르고 경력은 그대로
 			life.setIncomeRate(life.getIncomeRate() * (s.jcSame > 1 ? s.jcSame : 1.1));
-			if (life.getJobName() != null) {
-				text = text + " 하는 일은 " + life.getJobName() + " 그대로다.";
+			JobDTO cur = life.getJobId() == null ? null : findJob(life.getJobId());
+			if (cur != null) {
+				text = text + " 하는 일은 " + cur.getJobName() + " 그대로다.";
 			}
 		} else if ("JOBCHANGE_STAY".equals(o.act) && life.getIncomeRate() != null) {
 			life.setIncomeRate(life.getIncomeRate() * 1.01); // 원작: 남으면 직급 조금 (pct +0.01)
