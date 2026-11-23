@@ -508,7 +508,10 @@ final class EngineStory {
 				if (age >= line.minAge && age <= line.maxAge && year >= line.fromYear && !once.contains(line.id) && line.when.test(life)
 						&& line.cost == 0 && !(sibs == 0 && SIB_IDS.contains(line.id)) && !(younger == 0 && YOUNGER_IDS.contains(line.id))
 						&& !(last.containsKey(line.id) && age - last.get(line.id) < 3)) {
-					int n = count.getOrDefault(line.id, 0) * 10 + rnd.nextInt(10);
+					// 횟수 제한(capOf)이 남은 줄 먼저 (명절 줄은 제한이 없어 자연스럽게 채워짐), 다 찼으면 가장 적게 나온 줄
+					//   (11/23 100명: 이 자리에서 '감기'·'옛 친구 재회'가 한 인생 5번까지 나왔음)
+					int used = count.getOrDefault(line.id, 0);
+					int n = (used >= capOf(line) ? 1000 : 0) + used * 10 + rnd.nextInt(10);
 					if (n < bestN) {
 						bestN = n;
 						best = line;

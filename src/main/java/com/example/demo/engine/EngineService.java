@@ -5962,6 +5962,7 @@ public class EngineService {
 		boolean noschoolAsk; // 초등학교에 못 간 아이에게 '학교에 가고 싶어요' (원작 noschool)
 		String major;       // 고른 전공 (hum law biz eng med edu art)
 		String jcJobId;     // 이직 제안 직업 (원작 jobchange)
+		double jcSame;      // 같은 일·다른 직장 제안의 벌이 배율 (1.05~1.25, 원작: 지금보다 5% 넘게 나은 자리만)
 		double petVet;      // 이번 반려동물 치료비 (원작 petsick)
 		long houseSm;       // '작은 집을 대출 없이 산다' 집값 (원작 houseDeal("s"), 0이면 보통 집)
 		Integer mktL;       // 투자 큰 오르내림을 마지막으로 기록한 나이 (원작 flags.mktL)
@@ -6459,8 +6460,8 @@ public class EngineService {
 			if (life.getJobYears() >= 5) {
 				add.accept("RANKUP", 0.08);
 			}
-			if (life.getJobYears() >= 3 && jcCandidate(life, lived) != null) {
-				add.accept("JOBCHANGE", 0.07);
+			if (life.getJobYears() >= 1) {
+				add.accept("JOBCHANGE", 0.13); // 원작 jobchange 13% (다른 일이 없어도 같은 일·다른 직장 제안은 옴)
 			}
 			if (!"UNI".equals(edu) && !"GRAD".equals(edu)) {
 				add.accept("ADULTEDU", 0.03);
@@ -6546,7 +6547,7 @@ public class EngineService {
 		List<JobDTO> pool = new ArrayList<>();
 		for (JobDTO j : jobs()) {
 			if (levelIndex(j.getRequiredEdu()) <= fin && !j.getJobId().equals(life.getJobId()) && !"JOB_OWNER".equals(j.getJobId())
-					&& j.getIncomeRate() > now * 1.15 && j.getIncomeRate() < now * 2) {
+					&& j.getIncomeRate() > now * 1.05 && j.getIncomeRate() < now * 2) {
 				pool.add(j);
 			}
 		}
@@ -6793,14 +6794,30 @@ public class EngineService {
 		}
 		// 이직 제안 (원작 jobchange): 그 직업과 벌이
 		if ("JOBCHANGE".equals(d.key)) {
+			// 원작 jobchange: 다른 일(있으면) + 같은 일·다른 직장(지금보다 5~25% 더) + 남기
 			JobDTO j = jcCandidate(life, lived);
-			if (j == null) {
-				return;
-			}
-			s.jcJobId = j.getJobId();
 			CountryStatDTO st = yearStat(life);
-			e.setLogText("다른 곳에서 " + j.getJobName() + " 자리로 함께 일하자는 제안이 왔어요. 벌이는 지금보다 나아요.");
-			cs.get(0).setChoiceText(ro(j.getJobName()) + " 옮긴다 (월 약 " + won(life, jobPay(gdpOf(st), j.getIncomeRate(), life.getCurrentCountry(), st) / 12) + ")");
+			double gdp = gdpOf(st);
+			double nowRate = life.getIncomeRate() == null ? 1 : life.getIncomeRate();
+			s.jcJobId = j == null ? null : j.getJobId();
+			s.jcSame = 1.05 + 0.2 * new java.util.SplittableRandom(life.getLifeId() * 911L + lived).nextDouble();
+			String jobNow = life.getJobName() == null ? "지금 일" : life.getJobName();
+			e.setLogText("다른 곳에서 함께 일하자는 제안이 왔어요. 지금은 " + ro(jobNow) + " " + Math.max(1, life.getJobYears()) + "년째 일하고 있어요."
+					+ " 지금 벌이는 월 약 " + won(life, jobPay(gdp, nowRate, life.getCurrentCountry(), st) / 12) + "이에요.");
+			for (EventChoiceDTO c : cs) {
+				if (c.getChoiceText().startsWith("새 일로")) {
+					c.setChoiceText(j == null ? null
+							: ro(j.getJobName()) + " 옮긴다 (월 약 " + won(life, jobPay(gdp, j.getIncomeRate(), life.getCurrentCountry(), st) / 12) + ")");
+				} else if (c.getChoiceText().startsWith("같은 일")) {
+					c.setChoiceText("같은 일, 다른 직장으로 옮긴다 (" + jobNow + " · 월 약 "
+							+ won(life, jobPay(gdp, nowRate * s.jcSame, life.getCurrentCountry(), st) / 12) + " · 지금보다 "
+							+ Math.round((s.jcSame - 1) * 100) + "% 더)");
+				}
+			}
+			cs.removeIf(c -> c.getChoiceText() == null);
+			for (int i = 0; i < cs.size(); i++) {
+				cs.get(i).setChoiceOrder(i + 1);
+			}
 		}
 		// 은퇴 (원작 retire): 연금 안내
 		if ("RETIRE".equals(d.key)) {
@@ -7196,6 +7213,14 @@ public class EngineService {
 				addExperience(life, j.getJobId());
 				text = text + " " + j.getJobName() + " 일을 시작했다.";
 			}
+		} else if ("JOBCHANGE_SAME".equals(o.act) && life.getIncomeRate() != null) {
+			// 같은 일·다른 직장 (원작): 벌이만 오르고 경력은 그대로
+			life.setIncomeRate(life.getIncomeRate() * (s.jcSame > 1 ? s.jcSame : 1.1));
+			if (life.getJobName() != null) {
+				text = text + " 하는 일은 " + life.getJobName() + " 그대로다.";
+			}
+		} else if ("JOBCHANGE_STAY".equals(o.act) && life.getIncomeRate() != null) {
+			life.setIncomeRate(life.getIncomeRate() * 1.01); // 원작: 남으면 직급 조금 (pct +0.01)
 		} else if ("QUIT_JOB".equals(o.act) && "EMPLOYED".equals(life.getJobStatus())) {
 			life.setJobStatus("UNEMPLOYED");
 			life.setJobYears(0);
