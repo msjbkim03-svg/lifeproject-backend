@@ -144,5 +144,11 @@
 		FROM LIFE_EXPERIENCE
 		WHERE LIFE_ID = #{lifeId}
 	</select>
+	
+		<!-- 이벤트 하나 (부모님 별세: 엔진이 그해 떠나실 분을 정하면 ID로 바로 가져옴) -->
+	<select id="selectEvent" parameterType="String"
+		resultType="com.example.demo.event.dto.GameEventDTO">
+		SELECT * FROM GAME_EVENT WHERE EVENT_ID = #{eventId}
+	</select>
 
 </mapper>
