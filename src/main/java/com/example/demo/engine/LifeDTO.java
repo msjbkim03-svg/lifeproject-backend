@@ -78,6 +78,7 @@ public class LifeDTO {
 	private Double houseRate;	// [화면용] 올해 집값 변화율 (0.03 = +3%)
 	private Long carValue;	// [화면용] 자동차·오토바이 중고 시세 (순자산에는 안 들어 있음)
 	private List<String> alerts;	// [화면용] 올해 기록 가운데 '큰 사건' 경고등을 켤 문장들
+	private String jobIndustry;	// [화면용] 지금 하는 일의 산업 AGRI · INDUSTRY · SERVICE (일하는 중일 때만, 윤아님 마을 일터 그림)
 
 	public int getLifeId() {
 		return lifeId;
@@ -413,6 +414,14 @@ public class LifeDTO {
 
 	public void setQuests(List<LifeQuestDTO> quests) {
 		this.quests = quests;
+	}
+
+	public String getJobIndustry() {
+		return jobIndustry;
+	}
+
+	public void setJobIndustry(String jobIndustry) {
+		this.jobIndustry = jobIndustry;
 	}
 
 	public String getJobName() {
