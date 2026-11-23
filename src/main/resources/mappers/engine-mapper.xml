@@ -241,6 +241,7 @@
 		    WEALTH_CLASS   = #{wealthClass},
 		    ORIGIN_CLASS   = #{originClass, jdbcType=NUMERIC},
 		    HOUSE_VALUE    = #{houseValue, jdbcType=NUMERIC},
+		    IS_URBAN       = NVL(#{isUrban, jdbcType=CHAR}, IS_URBAN),
 		    LAST_PLAYED_AT = SYSDATE
 		WHERE LIFE_ID = #{lifeId}
 	</update>

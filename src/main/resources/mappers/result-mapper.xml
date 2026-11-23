@@ -41,6 +41,13 @@
 		       ROUND(l.KNOWLEDGE)       AS knowledge,
 		       ROUND(l.RELATION)        AS relation,
 		       l.IS_MARRIED             AS marriedYn,
+		       <!-- 결혼 이력 (지금은 미혼이어도 결혼했다가 이혼·사별했을 수 있음, 인생 기록 문장으로 셈) -->
+		       (SELECT COUNT(*) FROM LIFE_EVENT_LOG g WHERE g.LIFE_ID = l.LIFE_ID
+		           AND g.LOG_TEXT LIKE '%결혼식을 올렸%')                          AS weddingCount,
+		       (SELECT COUNT(*) FROM LIFE_EVENT_LOG g WHERE g.LIFE_ID = l.LIFE_ID
+		           AND (g.LOG_TEXT LIKE '%각자의 길을 가기로%' OR g.LOG_TEXT LIKE '%이혼했%'))  AS divorceCount,
+		       (SELECT COUNT(*) FROM LIFE_EVENT_LOG g WHERE g.LIFE_ID = l.LIFE_ID
+		           AND g.LOG_TEXT LIKE '%배우자를 먼저 떠나보내%')                  AS widowCount,
 		       l.CHILD_COUNT            AS childCount,
 		       l.START_TYPE             AS startType,
 		       l.STATUS                 AS status,
