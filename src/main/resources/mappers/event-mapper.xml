@@ -127,5 +127,22 @@
 		JOIN HISTORY_EVENT H ON G.HIST_EVENT_ID = H.EVENT_ID
 		WHERE G.EVENT_ID = #{eventId}
 	</select>
+	
+		<!-- 나라의 권역 (EAST, SOUTHEAST, SOUTH, CENTRAL, WEST) - 열대 판정(STATE_TROPICAL)용 -->
+	<select id="selectRegionCode" parameterType="String" resultType="String">
+		SELECT REGION_CODE FROM COUNTRY WHERE COUNTRY_CODE = #{countryCode}
+	</select>
+
+	<!-- 연애 상태 판정용: 마지막 만남 나이 / 마지막으로 연애·결혼이 끝난 나이 (이별·청혼·이혼·사별·결혼 위기)
+	     둘 다 없으면 MyBatis 가 null 을 돌려줌 -->
+	<select id="selectLoveAges" parameterType="int" resultType="map">
+		SELECT MAX(CASE WHEN EXP_ID = 'LE_LOVE_MEET' THEN AGE END) AS MEET_AGE,
+		MAX(CASE WHEN EXP_ID = 'LE_LOVE_BREAKUP'
+		OR EXP_ID LIKE 'LE_LOVE_PROPOSAL%'
+		OR EXP_ID IN ('LE_MARRIAGE_DIVORCE', 'LE_MARRIAGE_WIDOW')
+		OR EXP_ID LIKE 'LE_MARRIAGE_CRISIS%' THEN AGE END) AS END_AGE
+		FROM LIFE_EXPERIENCE
+		WHERE LIFE_ID = #{lifeId}
+	</select>
 
 </mapper>

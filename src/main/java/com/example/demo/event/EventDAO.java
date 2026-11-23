@@ -113,4 +113,14 @@ public class EventDAO {
 		return mybatis.selectOne("Event.selectHistDescription", eventId);
 	}
 	
+	// 나라의 권역 (없으면 null)
+	public String selectRegionCode(String countryCode) {
+		return mybatis.selectOne("Event.selectRegionCode", countryCode);
+	}
+
+	// 연애 상태 판정용 나이 { MEET_AGE, END_AGE } (경험이 하나도 없으면 null)
+	public Map<String, Object> selectLoveAges(int lifeId) {
+		return mybatis.selectOne("Event.selectLoveAges", lifeId);
+	}
+	
 }
