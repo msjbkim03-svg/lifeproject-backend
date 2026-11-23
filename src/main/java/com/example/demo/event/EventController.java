@@ -78,9 +78,12 @@ public class EventController {
 	public List<String> testStates(@RequestParam(defaultValue = "0") int lifeId, @RequestParam String country,
 			@RequestParam(defaultValue = "N") String married, @RequestParam(required = false) String school,
 			@RequestParam(required = false) String job, @RequestParam(required = false) String birthCountry,
-			@RequestParam(required = false) String parentAlive, @RequestParam(required = false) String owns) {
+			@RequestParam(required = false) String parentAlive, @RequestParam(required = false) String owns,
+			@RequestParam(defaultValue = "0") int age, 
+			@RequestParam(defaultValue = "0") int children) {
 		LifeDTO life = new LifeDTO();
 		life.setLifeId(lifeId);
+		life.setCurrentAge(age);
 		life.setCurrentCountry(country);
 		life.setBirthCountry(birthCountry == null ? country : birthCountry);
 		life.setMarriedYn(married);
@@ -88,6 +91,7 @@ public class EventController {
 		life.setJobStatus(job);
 		life.setParentAlive(parentAlive);
 		life.setOwns(owns);
+		life.setChildCount(children);
 		return eServ.stateExps(life);
 	}
 
