@@ -102,6 +102,10 @@ final class EngineStory {
 	}
 
 	// 이 인생에 이 줄(시대 물건 등)이 이미 나왔는지 (엔진 선택지: 휴대폰이 생긴 사람만 '잠들기 전 휴대폰')
+	public static void mark(int lifeId, String id) {
+		ONCE.computeIfAbsent(lifeId, k -> ConcurrentHashMap.newKeySet()).add(id);
+	}
+
 	public static boolean had(int lifeId, String id) {
 		Set<String> s = ONCE.get(lifeId);
 		return s != null && s.contains(id);
@@ -124,12 +128,12 @@ final class EngineStory {
 			new Line("baby_walk", 1, 1, 3, ANY, "벽을 짚고 일어서더니 첫걸음을 뗐다. 온 식구가 박수를 쳤다."),
 			new Line("baby_bday1", 1, 1, 3, ANY, "첫 생일을 맞아 친척들이 모여 축하해 주었다."),
 			new Line("baby_hold", 0, 2, 2, l -> rural(l) && !rich(l) && lowGdp(l), "어른들이 밭일을 하는 동안 할머니 등에 업혀 지냈다."),
-			new Line("baby_story", 1, 3, 2, ANY, "잠들기 전마다 부모님이 옛이야기를 들려주셨다."),
+			new Line("baby_story", 1, 3, 2, l -> parents(l), "잠들기 전마다 부모님이 옛이야기를 들려주셨다."),
 			new Line("baby_play", 2, 2, 2, ANY, "흙 한 줌, 나뭇가지 하나로 한나절을 놀았다."),
 			new Line("baby_mud", 2, 4, 2, ANY, "흙장난을 하다 옷을 다 버렸다."),
 			new Line("baby_climb", 2, 4, 2, ANY, "높은 곳만 보면 기어 올라가 어른들이 가슴을 쓸어내렸다."),
 			new Line("baby_why", 2, 4, 2, ANY, "눈에 보이는 것마다 ‘왜?’라고 물었다."),
-			new Line("baby_sick", 1, 3, 2, l -> l.getHealth() < 70, "열이 올라 며칠을 앓았다. 어머니가 밤새 곁을 지켰다."),
+			new Line("baby_sick", 1, 3, 2, l -> l.getHealth() < 70 && parents(l), "열이 올라 며칠을 앓았다. 어머니가 밤새 곁을 지켰다."),
 			new Line("baby_diarrhea", 0, 4, 2, l -> poor(l) && lowGdp(l) && l.getHealth() < 75, "설사병으로 며칠을 앓았다. 끓인 물과 소금물로 겨우 회복했다."),
 
 			// ── 어린 시절 (3~5세) ──
@@ -250,7 +254,7 @@ final class EngineStory {
 			new Line("cer_wedding0", 18, 45, 2, l -> !hasMoney(l), "친구의 결혼식에 가서 음식 준비를 거들었다."),
 			new Line("cer_funeral", 30, 90, 2, l -> hasMoney(l), "친척 장례에 다녀와 부조금을 냈다.", 0.006, 0),
 			new Line("cer_baby", 25, 45, 2, l -> hasMoney(l), "친구 아이의 돌잔치에 다녀왔다.", 0.004, 0),
-			new Line("cer_holiday", 25, 70, 2, l -> hasMoney(l) && parents(l), "{명절}에 부모님 댁에 선물과 용돈을 챙겨 갔다.", 0.008, 0),
+			new Line("cer_holiday", 25, 70, 2, l -> hasMoney(l) && parents(l) && !had(l.getLifeId(), "par_live"), "{명절}에 부모님 댁에 선물과 용돈을 챙겨 갔다.", 0.008, 0),
 			new Line("cer_reunion", 30, 80, 2, l -> hasMoney(l), "동창 모임에 나가 회비를 내고 옛이야기로 밤을 새웠다.", 0.003, 0),
 			new Line("cer_kidschool", 30, 55, 2, l -> l.getChildCount() > 0 && hasMoney(l), "아이 학원비와 책값이 꽤 들었다.", 0.02, 0),
 			// 원작 살림 지출 (원작 500명 기록의 중간값을 그 나라 중위 소득 비율로 맞춤: 치과 −7만, 가전 −37만, 배관 −61만 원 …)
@@ -263,7 +267,7 @@ final class EngineStory {
 			new Line("exp_trip", 28, 70, 2, l -> hasMoney(l) && married(l), "형제 가족과 함께 여행을 다녀왔다.", 0.025, 1975),
 			new Line("exp_parent_hosp", 35, 70, 2, l -> hasMoney(l) && parents(l), "부모님 병원비를 형제들과 나눠 냈다.", 0.04, 0),
 			new Line("exp_glasses", 45, 80, 1, l -> hasMoney(l), "글씨가 흐려 돋보기를 맞췄다.", 0.002, 0),
-			new Line("exp_cane", 72, 99, 1, l -> hasMoney(l), "무릎이 시려 지팡이를 하나 샀다.", 0.03, 0),
+			new Line("exp_cane", 72, 99, 1, l -> hasMoney(l), "무릎이 시려 지팡이를 하나 샀다.", 0.003, 0),
 
 			// ── 가족 ──
 			new Line("fam_walk", 20, 90, 2, l -> married(l), "배우자와 저녁을 먹으며 하루 있었던 일을 이야기했다."),
@@ -370,6 +374,28 @@ final class EngineStory {
 	// 살림 지출(exp_)은 같은 일이 8년 안에 다시 나오지 않게 (TV가 몇 해마다 고장 나지 않게)
 	private static final Map<Integer, Map<String, Integer>> LAST = new ConcurrentHashMap<>();
 	private static final int EXP_GAP = 8;
+	// 같은 일상 줄이 한 인생에 너무 자주 나오지 않게 (300번 돌려 보니 감기 12번 · 옛 친구 재회 10번이 나왔음)
+	//   경조사(cer_)는 3년, 명절 줄은 제한 없음(원작도 해마다), 나머지는 7년 안에 다시 안 나옴
+	//   (11/23 다시 300번: 7년 간격으로도 감기 8번 · 옛 친구 6번이 나와 간격을 늘리고 한 인생 횟수도 막음)
+	//   경조사 4년 · 살림 지출 8년 · 명절 제한 없음 · 나머지 10년
+	private static int gapOf(Line line) {
+		if (line.id.startsWith("exp_")) {
+			return EXP_GAP;
+		}
+		if (line.text.contains("{명절}")) {
+			return 0;
+		}
+		return line.id.startsWith("cer_") ? 4 : 10;
+	}
+
+	// 한 인생에 같은 줄이 나오는 최대 횟수: 경조사 5번, 명절은 제한 없음, 나머지 3번 (감기·치과·옛 친구 재회 같은 줄)
+	private static int capOf(Line line) {
+		if (line.text.contains("{명절}")) {
+			return 99;
+		}
+		return line.id.startsWith("cer_") ? 5 : 3;
+	}
+	private static final Map<Integer, Map<String, Integer>> COUNT = new ConcurrentHashMap<>();
 
 	// 나이대별 일상 줄 수 (원작 한 해 기록 양에 맞춤, 이벤트·진학 기록과 합쳐서)
 	private static int wantLines(int age, Random rnd) {
@@ -387,13 +413,22 @@ final class EngineStory {
 
 	// 그해 일상 문장 고르기
 	// age: 방금 지나간 해의 나이, already: 그해 이미 기록된 사건 수 (많으면 일상은 덜 넣음)
+	// 형제자매가 있어야 하는 줄 / 손아래 동생이 있어야 하는 줄
+	private static final Set<String> SIB_IDS = Set.of("kid_dark", "kid_sibfight", "exp_trip", "exp_parent_hosp", "fam_sibling");
+	private static final Set<String> YOUNGER_IDS = Set.of("noschool_care");
+
 	static List<Story> year(LifeDTO life, int age, int already, Random rnd) {
+		return year(life, age, already, rnd, 1, 1);
+	}
+
+	static List<Story> year(LifeDTO life, int age, int already, Random rnd, int sibs, int younger) {
 		int year = life.getBirthYear() + age;
 		int want = Math.max(age <= 18 ? 2 : 1, wantLines(age, rnd) - already / 2); // 사건 2개당 일상 1줄 덜
 
 		Deque<String> recent = RECENT.computeIfAbsent(life.getLifeId(), k -> new ArrayDeque<>());
 		Set<String> once = ONCE.computeIfAbsent(life.getLifeId(), k -> ConcurrentHashMap.newKeySet());
 		Map<String, Integer> last = LAST.computeIfAbsent(life.getLifeId(), k -> new ConcurrentHashMap<>());
+		Map<String, Integer> count = COUNT.computeIfAbsent(life.getLifeId(), k -> new ConcurrentHashMap<>());
 		List<Story> out = new ArrayList<>();
 
 		// 세계 소식 (그해에 있으면 먼저, 5세 이상)
@@ -409,7 +444,9 @@ final class EngineStory {
 		for (Line line : LINES) {
 			if (age >= line.minAge && age <= line.maxAge && year >= line.fromYear
 					&& !recent.contains(line.id) && !once.contains(line.id) && line.when.test(life)
-					&& !(line.id.startsWith("exp_") && last.containsKey(line.id) && age - last.get(line.id) < EXP_GAP)) {
+					&& !(last.containsKey(line.id) && age - last.get(line.id) < gapOf(line))
+					&& count.getOrDefault(line.id, 0) < capOf(line)
+					&& !(sibs == 0 && SIB_IDS.contains(line.id)) && !(younger == 0 && YOUNGER_IDS.contains(line.id))) {
 				pool.add(line);
 			}
 		}
@@ -447,9 +484,8 @@ final class EngineStory {
 				once.add("exp_glasses");
 				pool.removeIf(l -> l.id.equals("hl_eyes") || l.id.equals("exp_glasses"));
 			}
-			if (chosen.id.startsWith("exp_")) {
-				last.put(chosen.id, age);
-			}
+			last.put(chosen.id, age);
+			count.merge(chosen.id, 1, Integer::sum);
 			recent.addLast(chosen.id);
 			while (recent.size() > RECENT_SIZE) {
 				recent.removeFirst();
@@ -459,6 +495,7 @@ final class EngineStory {
 			RECENT.clear(); // 서버 메모리 보호 (오래 켜 두면 끝난 인생 기록이 쌓이므로)
 			ONCE.clear();
 			LAST.clear();
+			COUNT.clear();
 		}
 		return out;
 	}
