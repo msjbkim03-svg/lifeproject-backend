@@ -5592,16 +5592,11 @@ public class EngineService {
 		return null;
 	}
 
-	// 윤아님 EventResultDTO.prisonYears (1~4) - 아직 필드가 없을 때도 컴파일되게 이름으로 읽음, 없으면 원작 기본 2년
-	//   TODO 윤아님 DTO 에 prisonYears 가 들어가면 e.getPrisonYears() 로 바꿔도 됨
+	// 윤아님 EventResultDTO.prisonYears (1~4, 11/23 추가), 값이 없으면 원작 기본 2년
 	private static int prisonYearsOf(EventResultDTO e) {
-		try {
-			Object v = e.getClass().getMethod("getPrisonYears").invoke(e);
-			if (v instanceof Number && ((Number) v).intValue() > 0) {
-				return Math.max(1, Math.min(4, ((Number) v).intValue()));
-			}
-		} catch (ReflectiveOperationException ex) {
-			// 필드 없음 → 기본값
+		Object v = e.getPrisonYears();
+		if (v instanceof Number && ((Number) v).intValue() > 0) {
+			return Math.max(1, Math.min(4, ((Number) v).intValue()));
 		}
 		return 2;
 	}
