@@ -179,15 +179,12 @@ public class EventService {
 		}
 		return false;
 	}
-	
+
 	// 부모님 별세 이벤트 → 엔진 결과 동작 (템플릿 동작 PARENT_DEATH 대신 누가 떠나셨는지 알려 줌)
 	// CAR·FIRE 는 사고로 함께 별세 (내 이벤트가 낮은 확률로 굴림)
-	private static final Map<String, String> PARENT_ACTION = Map.of(
-			"LE_PARENT_DEATH_MOTHER", "PARENT_DEATH_MOTHER",
-			"LE_PARENT_DEATH_FATHER", "PARENT_DEATH_FATHER",
-			"LE_PARENT_DEATH_SAMEYEAR", "PARENT_DEATH_BOTH",
-			"LE_PARENT_DEATH_CAR", "PARENT_DEATH_BOTH",
-			"LE_PARENT_DEATH_FIRE", "PARENT_DEATH_BOTH");
+	private static final Map<String, String> PARENT_ACTION = Map.of("LE_PARENT_DEATH_MOTHER", "PARENT_DEATH_MOTHER",
+			"LE_PARENT_DEATH_FATHER", "PARENT_DEATH_FATHER", "LE_PARENT_DEATH_SAMEYEAR", "PARENT_DEATH_BOTH",
+			"LE_PARENT_DEATH_CAR", "PARENT_DEATH_BOTH", "LE_PARENT_DEATH_FIRE", "PARENT_DEATH_BOTH");
 
 	// ===== 4단계: 문장 만들기 + 효과 계산 =====
 
@@ -277,7 +274,14 @@ public class EventService {
 			states.add("STATE_TROPICAL"); // 말라리아
 		}
 		if (!married) {
-			states.add(isDating(life.getLifeId()) ? "STATE_DATING" : "STATE_SINGLE"); // 만남 / 이별·청혼
+			int dating = datingYears(life);
+			states.add(dating >= 0 ? "STATE_DATING" : "STATE_SINGLE"); // 만남 / 이별·청혼
+			if (dating >= 2) {
+				states.add("STATE_DATING_LONG"); // 사귄 지 2년 이상 → 결혼 이야기
+			}
+		}
+		if (life.getChildCount() > 0) {
+			states.add("STATE_HAS_CHILD"); // 자녀가 있음 → 아이가 크게 아픔
 		}
 		if (bothParents(life)) {
 			states.add("STATE_BOTH_PARENTS"); // 부모님 두 분 다 살아 계심 (사고로 함께 별세 조건)
@@ -333,16 +337,20 @@ public class EventService {
 		return null;
 	}
 
-	// 사귀는 중: 마지막 만남이 그 뒤의 이별·청혼·이혼·사별·결혼 위기보다 나중
+	// 사귄 햇수: 사귀는 중이면 지금 나이 - 마지막 만남 나이, 사귀는 중이 아니면 -1
+	// 사귀는 중 = 마지막 만남이 그 뒤의 이별·청혼·이혼·사별·결혼 위기·결혼 이야기 헤어짐보다 나중
 	// (청혼을 거절했거나 결혼이 끝났으면 그 만남은 끝난 것)
-	private boolean isDating(int lifeId) {
-		Map<String, Object> ages = eDAO.selectLoveAges(lifeId);
+	private int datingYears(LifeDTO life) {
+		Map<String, Object> ages = eDAO.selectLoveAges(life.getLifeId());
 		if (ages == null || ages.get("MEET_AGE") == null) {
-			return false; // 만난 적 없음
+			return -1; // 만난 적 없음
 		}
 		int meet = ((Number) ages.get("MEET_AGE")).intValue();
 		Object end = ages.get("END_AGE");
-		return end == null || meet > ((Number) end).intValue();
+		if (end != null && meet <= ((Number) end).intValue()) {
+			return -1; // 마지막 만남이 이미 끝남
+		}
+		return Math.max(0, life.getCurrentAge() - meet);
 	}
 
 	// ===== 엔진 연결: 1년치 이벤트 굴리기 (EngineService가 호출) =====
@@ -384,6 +392,9 @@ public class EventService {
 				hasChoice = true;
 			}
 
+			if ("LE_LOVE_WEDTALK".equals(e.getEventId())) {
+				e.setVarValue(String.valueOf(datingYears(life))); // 결혼 이야기: 사귄 햇수 → 문장의 {변수}
+			}
 			results.add(buildResult(t, e, life.getName(), age, year, life.getCurrentCountry()));
 		}
 
@@ -465,11 +476,18 @@ public class EventService {
 			new String[] { " 함께한 사람들과 변화를 이끌어 냈다.", " 하지만 진압 과정에서 크게 다쳤다." }, "ENLIST",
 			new String[] { " 무사히 살아 돌아왔다.", " 하지만 전투 중 크게 다쳤다." }, "COUNSEL",
 			new String[] { " 서로를 다시 이해하게 되었다.", " 하지만 끝내 마음을 돌리지 못하고 헤어졌다." }, "TREAT",
-			new String[] { " 치료가 잘 되어 몸을 회복했다.", " 하지만 치료가 듣지 않아 병이 깊어졌다." });
+			new String[] { " 치료가 잘 되어 몸을 회복했다.", " 하지만 치료가 듣지 않아 병이 깊어졌다." }, "KIDTREAT",
+			new String[] { " 다행히 아이는 무사히 나았다.", " 하지만 아이는 오래 앓으며 크게 고생했다." });
 
-	// 결과 종류 묶기: TREAT_HOSPITAL, TREAT_HOME, TREAT_LOAN → TREAT
+	// 결과 종류 묶기: TREAT_HOSPITAL, TREAT_HOME, TREAT_LOAN → TREAT / KIDTREAT_* → KIDTREAT (아이 치료)
 	private String actionGroup(String action) {
-		return action != null && action.startsWith("TREAT_") ? "TREAT" : action;
+		if (action == null) {
+			return null;
+		}
+		if (action.startsWith("TREAT_")) {
+			return "TREAT";
+		}
+		return action.startsWith("KIDTREAT_") ? "KIDTREAT" : action;
 	}
 
 	// 특성 배율: 투자 → 투자 특성 (Lv.5 × 1.4), 치료 → 질병 특성 (Lv.5 × 1.4), 나머지 1
@@ -516,6 +534,10 @@ public class EventService {
 			r.setDeathAdd(0.05);
 			r.setDeathCause("질병");
 			return wealth; // 치료비는 성공·실패와 관계없이 나감
+		case "KIDTREAT": // 아이 치료 실패: 아이가 오래 앓음 → 마음고생 (내 건강·사망 확률은 그대로)
+			r.setEffHappiness(r.getEffHappiness() - 7);
+			r.setEffRelation(r.getEffRelation() - 2);
+			return wealth; // 치료비는 성공·실패와 관계없이 나감
 		default:
 			return wealth;
 		}
@@ -525,8 +547,8 @@ public class EventService {
 	private String afterAction(String action, boolean success) {
 		if ("COUNSEL".equals(action) && !success)
 			return "MARRIAGE_END"; // 상담 실패 → 이혼 (엔진이 결혼 상태 해제)
-		if ("TREAT_LOAN".equals(action))
-			return "LOAN"; // 빚내서 치료 → 성공·실패와 관계없이 빚 (엔진이 재산에서 뺌)
+		if ("TREAT_LOAN".equals(action) || "KIDTREAT_LOAN".equals(action))
+			return "LOAN"; // 빚내서 치료 (나·아이) → 성공·실패와 관계없이 빚 (엔진이 재산에서 뺌)
 		return null; // 투자·참여·병원·집 치료는 상태 변화 없음
 	}
 
