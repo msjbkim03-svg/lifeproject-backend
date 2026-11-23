@@ -30,6 +30,8 @@ public class EventResultDTO {
 	private List<DestinationDTO> destinations; // 목적지 후보
 	
 	private boolean ai; // AI가 쓴 문장인지 (C11, LIFE_EVENT_LOG.IS_AI)
+	
+	private int prisonYears; // 위험한 제안에서 붙잡혔을 때 징역 햇수 (엔진 PRISON), 나머지는 0
 
 	public boolean isAi() {
 		return ai;
@@ -197,5 +199,13 @@ public class EventResultDTO {
 
 	public void setDestinations(List<DestinationDTO> destinations) {
 		this.destinations = destinations;
+	}
+	
+	public int getPrisonYears() {
+		return prisonYears;
+	}
+
+	public void setPrisonYears(int prisonYears) {
+		this.prisonYears = prisonYears;
 	}
 }

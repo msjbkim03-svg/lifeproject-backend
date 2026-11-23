@@ -64,6 +64,21 @@ public class EventService {
 
 	private static final int AVG_MARRY_AGE = 30; // 평균 결혼 나이 (설계값, 추후 시뮬레이션 결과로 조정)
 
+
+	// 나라별 인구 10만 명당 수감자 수 (원작 PRISON_RATE, World Prison Brief), 없는 나라는 140
+	private static final Map<String, Integer> PRISON_RATE = Map.of("THA", 400, "TUR", 380, "IRN", 230,
+			"CHN", 120, "KOR", 105, "BGD", 45, "IND", 40, "PAK", 40, "JPN", 35);
+
+	// 나라 수감률 배율 = √(수감률 ÷ 140) (예: 한국 0.87, 일본 0.5, 태국 1.69)
+	private double prisonK(String countryCode) {
+		return Math.sqrt(PRISON_RATE.getOrDefault(countryCode, 140) / 140.0);
+	}
+
+	// 위험한 제안을 받아들였을 때 붙잡힐 확률 = 35% × 나라 배율, 12~70% (한국 약 30%)
+	private double caughtRate(String countryCode) {
+		return Math.min(Math.max(0.35 * prisonK(countryCode), 0.12), 0.7);
+	}
+	
 	// 템플릿 하나의 올해 발생 확률
 	public double calcProbability(EventTemplateDTO t, int age, Map<String, Object> stat, String countryCode,
 			String gender) {
@@ -92,6 +107,8 @@ public class EventService {
 			String spouseGender = "M".equals(gender) ? "F" : "M";
 			return EngineService.baseDeathProb(countryCode, getStat(stat, "LIFE_EXPECTANCY"),
 					getStat(stat, "INFANT_MORTALITY"), getStat(stat, "U5_MORTALITY"), spouseGender, age);
+		case "CRIME": // 위험한 제안: 기본 확률 × 성별(여성 0.08배) × 나라 수감률 배율 (원작 crime)
+			return base * ("F".equals(gender) ? 0.08 : 1) * prisonK(countryCode);
 		default: // FIXED
 			return base;
 		}
@@ -283,6 +300,12 @@ public class EventService {
 		if (life.getChildCount() > 0) {
 			states.add("STATE_HAS_CHILD"); // 자녀가 있음 → 아이가 크게 아픔
 		}
+		// 형편이 어려움: 일자리가 없거나(실직·18세 넘어 아직 취업 전) 빚이 있음 → 위험한 제안
+		boolean jobless = "UNEMPLOYED".equals(life.getJobStatus())
+				|| (life.getJobStatus() == null && life.getCurrentAge() >= 18);
+		if (jobless || life.getAssets() < 0) {
+			states.add("STATE_HARDUP");
+		}
 		if (bothParents(life)) {
 			states.add("STATE_BOTH_PARENTS"); // 부모님 두 분 다 살아 계심 (사고로 함께 별세 조건)
 		}
@@ -355,6 +378,9 @@ public class EventService {
 
 	// ===== 엔진 연결: 1년치 이벤트 굴리기 (EngineService가 호출) =====
 	public List<EventResultDTO> rollYear(LifeDTO life) {
+		if ("PRISON".equals(life.getJobStatus())) {
+			return new ArrayList<>(); // 교도소에 있는 동안은 이벤트 없음 (엔진이 교도소 생활 처리)
+		}
 		int age = life.getCurrentAge();
 		int year = life.getBirthYear() + age;
 		List<String> expIds = eDAO.selectExpIds(life.getLifeId());
@@ -438,11 +464,16 @@ public class EventService {
 		// 3. 성공·실패가 있는 선택지 (투자·치료·참여·상담): SUCCESS_RATE로 판정
 		if (c.getSuccessRate() != null) {
 			String group = actionGroup(c.getResultAction()); // TREAT_HOSPITAL → TREAT
-			double rate = Math.min(c.getSuccessRate() * traitRate(group, life.getLifeId()), 0.95);
+			// 위험한 제안은 '안 붙잡힐 확률'을 나라 수감률로 계산 (DB SUCCESS_RATE 값은 쓰지 않음)
+			double rate = "CRIME".equals(group) ? 1 - caughtRate(life.getCurrentCountry())
+					: Math.min(c.getSuccessRate() * traitRate(group, life.getLifeId()), 0.95);
 			boolean success = Math.random() < rate;
 			text = text + (success ? SUCCESS_TEXT.get(group)[0] : SUCCESS_TEXT.get(group)[1]);
 			if (!success) {
 				wealth = applyFail(group, r, wealth); // 종류별 실패 효과
+				if ("CRIME".equals(group)) {
+					text = text + " 징역 " + r.getPrisonYears() + "년을 선고받았다.";
+				}
 			}
 			r.setResultAction(afterAction(c.getResultAction(), success)); // 엔진에 보낼 상태 변화
 		} else {
@@ -477,9 +508,11 @@ public class EventService {
 			new String[] { " 무사히 살아 돌아왔다.", " 하지만 전투 중 크게 다쳤다." }, "COUNSEL",
 			new String[] { " 서로를 다시 이해하게 되었다.", " 하지만 끝내 마음을 돌리지 못하고 헤어졌다." }, "TREAT",
 			new String[] { " 치료가 잘 되어 몸을 회복했다.", " 하지만 치료가 듣지 않아 병이 깊어졌다." }, "KIDTREAT",
-			new String[] { " 다행히 아이는 무사히 나았다.", " 하지만 아이는 오래 앓으며 크게 고생했다." });
+			new String[] { " 다행히 아이는 무사히 나았다.", " 하지만 아이는 오래 앓으며 크게 고생했다." }, "CRIME", new String[] {
+					" 약속한 큰돈은 끝내 들어오지 않았다. 손에 쥔 건 몇 주 치 벌이뿐이었고, 그날 이후 문 두드리는 소리에 자주 잠을 깼다.", " 하지만 붙잡혀 재판을 받았다." });
 
-	// 결과 종류 묶기: TREAT_HOSPITAL, TREAT_HOME, TREAT_LOAN → TREAT / KIDTREAT_* → KIDTREAT (아이 치료)
+	// 결과 종류 묶기: TREAT_HOSPITAL, TREAT_HOME, TREAT_LOAN → TREAT / KIDTREAT_* →
+	// KIDTREAT (아이 치료)
 	private String actionGroup(String action) {
 		if (action == null) {
 			return null;
@@ -538,6 +571,11 @@ public class EventService {
 			r.setEffHappiness(r.getEffHappiness() - 7);
 			r.setEffRelation(r.getEffRelation() - 2);
 			return wealth; // 치료비는 성공·실패와 관계없이 나감
+		case "CRIME": // 위험한 제안에서 붙잡힘: 징역 1~4년 (원작 crime)
+			r.setEffHappiness(-15);
+			r.setEffRelation(-10);
+			r.setPrisonYears(1 + (int) (Math.random() * 4));
+			return wealth;
 		default:
 			return wealth;
 		}
@@ -549,6 +587,8 @@ public class EventService {
 			return "MARRIAGE_END"; // 상담 실패 → 이혼 (엔진이 결혼 상태 해제)
 		if ("TREAT_LOAN".equals(action) || "KIDTREAT_LOAN".equals(action))
 			return "LOAN"; // 빚내서 치료 (나·아이) → 성공·실패와 관계없이 빚 (엔진이 재산에서 뺌)
+		if ("CRIME".equals(action))
+			return success ? "CRIME_PAY" : "PRISON"; // 위험한 제안: 안 붙잡힘 → 몇 주 치 벌이 / 붙잡힘 → 교도소 (엔진)
 		return null; // 투자·참여·병원·집 치료는 상태 변화 없음
 	}
 
