@@ -1712,6 +1712,8 @@ public class EngineService {
 		// 4. 저장 + 그해 기록
 		engineDao.updateLifeYear(life);
 		engineDao.insertYearLog(life);
+		// 아이(16세 전)에게 뜬 이민·피란 선택은 가족이 대신 정함 (11/23 동현님: 영유아·학생에게 결정권이 있는 게 어색)
+		kidFamilyDecides(life, lived);
 
 		closeBook(life, startAssets);
 		fillRegion(life);
@@ -2042,6 +2044,29 @@ public class EngineService {
 		}
 	}
 
+	// 끝날 때 상태로 판정하는 퀘스트 (이민·재산·행복)가 지금 조건을 채우는지 (11/23: 진행 중에도 달성 표시)
+	//   판정식은 QuestJudgeService.judgeOne 과 같음 (MIGRATE · ASSETS · HAPPINESS)
+	private boolean questNow(LifeDTO life, LifeQuestDTO q) {
+		String type = q.getQuestType(), target = q.getTargetValue();
+		if (type == null) {
+			return false;
+		}
+		try {
+			switch (type) {
+			case "MIGRATE":
+				return life.getBirthCountry() != null && !life.getBirthCountry().equals(life.getCurrentCountry());
+			case "ASSETS":
+				return target != null && life.getAssets() >= Double.parseDouble(target);
+			case "HAPPINESS":
+				return target != null && life.getHappiness() >= Double.parseDouble(target);
+			default:
+				return false;
+			}
+		} catch (NumberFormatException e) {
+			return false;
+		}
+	}
+
 	// 화면용: 지금 이미 이룬 퀘스트는 live = Y (끝난 뒤 판정값 achieved 가 있으면 그것을 씀)
 	private void fillQuestLive(LifeDTO life) {
 		if (life.getQuests() == null) {
@@ -2050,6 +2075,8 @@ public class EngineService {
 		for (LifeQuestDTO q : life.getQuests()) {
 			if (q.getAchieved() == null && questLive(life, q)) {
 				q.setLive("Y");
+			} else if (q.getAchieved() == null && questNow(life, q)) {
+				q.setLive("NOW"); // 지금은 조건을 채움 (끝날 때 상태로 판정하는 퀘스트라 아직 바뀔 수 있음)
 			}
 		}
 	}
@@ -4902,6 +4929,14 @@ public class EngineService {
 				rate = Math.max(-0.7, rate * crisisK(life)); // 큰 재난·위기는 사람마다 다르게 (11/23)
 			}
 			long d = Math.round(life.getAssets() * rate);
+			if (d < 0 && !"HIST".equals(e.getEventType())) {
+				// 병·사고 같은 개인 사건의 손실은 재산 비율만 쓰면 부자는 터무니없이 큼 (300번: 간염 치료비 약 9,400만 원,
+				//   11/23 동현님: 결핵 진단만으로 5천만 원) → 그 나라 중위 소득 기준으로 무거운 정도에 따라
+				//   큰 병·큰 사고 1배 · 그 밖의 병(진단·앓음) 0.2배 · 나머지 개인 사건 0.5배 (역사 사건·재난은 위 crisisK 그대로)
+				String lt = e.getLogText() == null ? "" : e.getLogText();
+				double capK = SERIOUS_W.matcher(lt).find() ? 1.0 : ILL_W.matcher(lt).find() ? 0.2 : 0.5;
+				d = Math.max(d, -Math.round(medIncome(life.getCurrentCountry(), yearStat(life)) * capK));
+			}
 			life.setAssets(life.getAssets() + d);
 			String t = e.getLogText() == null ? "" : e.getLogText();
 			book(life, t.contains("집") || t.contains("땅") ? (d > 0 ? "집값 상승" : "집값 하락")
@@ -4944,6 +4979,9 @@ public class EngineService {
 		// 6. 인생 기록 문장 저장 (C03 기록 화면, C11 AI 서술 대상 표시)
 		saveEventLog(life, age, e.getEventId(), choiceId, e.getLogText());
 	}
+
+	private static final java.util.regex.Pattern SERIOUS_W = java.util.regex.Pattern.compile("암|심장|뇌졸중|수술|중상|크게 다쳤|치매|큰 병");
+	private static final java.util.regex.Pattern ILL_W = java.util.regex.Pattern.compile("진단|병원을 찾|앓|걸렸|병에");
 
 	// 역사 사건(전쟁·재난·경제 위기)으로 잃는 재산 배율 (11/23 동현님: 같은 위기라도 사람마다 피해가 달라야)
 	//   운 0.5~1.5배 × 형편 (가난할수록 1.3배, 넉넉하면 0.8배) × 장사·실직 1.3배 × 주식에 넣었으면 1.3배 · 예금이면 0.85배
@@ -5140,6 +5178,55 @@ public class EngineService {
 		engineDao.updateLifeYear(life);
 		fillRegion(life);
 		return life;
+	}
+
+	// 아이가 받은 '떠난다/남는다' 선택 (윤아님 이민·피란 이벤트, 선택지에 MIGRATE 가 있는 것): 가족이 대신 정함
+	//   반반으로 고르고, 떠나면 갈 나라도 후보 가운데 하나로 (선택 창·목적지 창을 띄우지 않음)
+	private void kidFamilyDecides(LifeDTO life, int lived) {
+		if (lived >= 16 || !life.isNeedChoice() || life.getPendingEvent() == null || life.getPendingEventId() == null
+				|| life.getPendingEventId().startsWith("ENG_") || life.getPendingEvent().getChoices() == null) {
+			return;
+		}
+		EventChoiceDTO go = null, stay = null;
+		for (EventChoiceDTO c : life.getPendingEvent().getChoices()) {
+			if ("MIGRATE".equals(c.getResultAction())) {
+				go = c;
+			} else if (stay == null) {
+				stay = c;
+			}
+		}
+		if (go == null || stay == null || go.getChoiceId() == null || stay.getChoiceId() == null) {
+			return;
+		}
+		List<EventResultDTO> before = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
+		List<MoneyLineDTO> flow = life.getMoneyFlow() == null ? new ArrayList<>() : new ArrayList<>(life.getMoneyFlow());
+		String note = lived < 7 ? "아직 어린아이라, 떠날지 남을지는 가족이 정했다." : "떠날지 남을지는 가족이 정했다. 나는 따라갈 수밖에 없었다.";
+		saveEventLog(life, lived, null, null, note);
+		EventChoiceDTO pick = random.nextDouble() < 0.5 ? go : stay;
+		if (chooseEvent(life, pick.getChoiceId(), null) == null) {
+			life.setEvents(before);
+			life.setMoneyFlow(flow);
+			return; // 못 고르면 예전처럼 창을 띄움
+		}
+		List<EventResultDTO> added = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
+		if (life.isNeedDestination() && life.getDestinations() != null && !life.getDestinations().isEmpty()) {
+			String cc = life.getDestinations().get(random.nextInt(life.getDestinations().size())).getCountryCode();
+			if (chooseDestination(life, cc) != null && life.getEvents() != null) {
+				added.addAll(life.getEvents());
+			}
+			life.setNeedDestination(false);
+			life.setDestinations(null);
+		}
+		before.add(noteEvent(note));
+		before.addAll(added);
+		life.setEvents(before);
+		if (life.getMoneyFlow() != null) {
+			flow.addAll(life.getMoneyFlow());
+		}
+		life.setMoneyFlow(flow);
+		life.setNeedChoice(false);
+		life.setPendingEvent(null);
+		life.setChoiceCosts(null);
 	}
 
 	// ================= C10 이민 목적지 고르기 =================
@@ -5377,6 +5464,9 @@ public class EngineService {
 		es.estateNote = null;
 		es.estateAmt = 0;
 		applyAction(life, action, null, age);
+		// 윤아님 예전 별세 이벤트(LE_PARENT_DEATH, '한 번만')가 그 뒤에 또 '부모님을 떠나보냈다'를 띄우지 않게 경험으로 남김
+		//   (200번: 엔진이 47세에 두 분을 보내드린 뒤 62세에 그 이벤트가 또 나왔음)
+		addExperience(life, "LE_PARENT_DEATH");
 		life.setHappiness(life.getHappiness() - ("PARENT_DEATH_BOTH".equals(action) ? 12 : 8));
 		long moved = life.getAssets() - before - es.estateAmt;
 		if (moved < 0 && -moved * krwPerUsd(stat) >= 10000) {
@@ -6106,10 +6196,10 @@ public class EngineService {
 			}
 			if (ka >= 3 && ka <= 11) {
 				small.add(new int[] { i, ka });
-				smallNm.add(m.getName());
+				smallNm.add(kidCall(m.getName(), life.getBirthCountry()));
 			}
 			if (k != null && engineOk(life, s, EngineChoice.byKey(k), lived)) {
-				s.kidNm = m.getName();
+				s.kidNm = kidCall(m.getName(), life.getBirthCountry());
 				s.kidAge = ka;
 				s.done.put(("BABYCARE".equals(k) ? "BC#" : "KIDWED".equals(k) ? "KW#" : "KIDUNI".equals(k) ? "KU#" : "KS#") + i, 1);
 				key = k;
@@ -6124,6 +6214,19 @@ public class EngineService {
 			key = "DISCIPLINE";
 		}
 		return key == null ? -1 : EngineChoice.indexOf(key);
+	}
+
+	// 아이를 부르는 이름 (원작 callName): 성 쓰는 나라는 성을 빼고, 띄어 쓰는 이름은 앞 낱말만 ('유리아 쿠르니아완' → '유리아')
+	private static String kidCall(String nm, String cc) {
+		if (nm == null || nm.isBlank()) {
+			return "아이";
+		}
+		if (SURNAME_CC.contains(cc)) {
+			String g = splitName(nm)[1];
+			return g.isBlank() ? nm : g;
+		}
+		int sp = nm.indexOf(' ');
+		return sp > 0 ? nm.substring(0, sp) : nm;
 	}
 
 	// 받침에 따라 조사 (이름 뒤): kj("민준", "을", "를")
@@ -6548,7 +6651,9 @@ public class EngineService {
 							: (help > 0 ? "모은 돈은 없지만 부모님께서 " + won(life, help) + "을 보태 주시기로 했어요." : "모은 돈은 없어요.");
 					e.setLogText("가격은 약 " + won(life, price) + " (한국 체감 금액). " + have + " "
 							+ (loan > 0 ? "나머지 " + won(life, loan) + "은 대출로 갚아야 해요." : "대출 없이 살 수 있어요."));
-					cs.get(0).setChoiceText((loan > 0 ? "대출을 끼고 산다" : "모은 돈으로 산다") + " (행복 +10)");
+					// 선택지에도 집값을 (11/23 동현님: 집값이 안 보임) - 원작 sub 는 '행복 +10' 뿐이지만 본문을 안 읽어도 알게
+					cs.get(0).setChoiceText(loan > 0 ? "대출을 끼고 산다 (약 " + won(life, price) + " · 대출 " + won(life, loan) + " · 행복 +10)"
+							: "모은 돈으로 산다 (약 " + won(life, price) + " · 행복 +10)");
 					// 원작: 대출이 필요하면 '작은 집을 대출 없이 산다'(집값 55%급)를 가운데에 (살 수 있을 때만)
 					String smId = String.valueOf(EngineChoice.choiceId(decIdx, 2));
 					EventChoiceDTO sm = null;
