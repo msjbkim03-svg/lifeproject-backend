@@ -34,9 +34,9 @@ public class QuestService {
 			return "같은 퀘스트를 두 번 고를 수 없어요.";
 		}
 
-		// 2. 내 인생이고, 지금 진행 중인지
+		// 2. 내 인생이고, 지금 진행 중이고, 태어난 직후(0살)인지
 		if (dao.countMyPlayingLife(dto.getLifeId(), memberId) == 0) {
-			return "내가 진행 중인 인생이 아니에요.";
+			return "퀘스트는 내 인생이 막 태어났을 때만 정할 수 있어요.";
 		}
 
 		// 3. 이미 퀘스트를 정한 인생이면 다시 못 정함 (목표는 고정)

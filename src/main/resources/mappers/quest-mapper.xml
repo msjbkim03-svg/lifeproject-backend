@@ -12,10 +12,12 @@
 		ORDER BY QUEST_ID
 	</select>
 
-	<!-- 내 인생이고 진행 중(PLAYING)이면 1 -->
+	<!-- 내 인생이고 진행 중(PLAYING)이고 아직 0살(태어난 직후)이면 1
+	     → 나중에 다 산 뒤 쉬운 퀘스트를 고르는 꼼수 막기 -->
 	<select id="countMyPlayingLife" parameterType="map" resultType="int">
 		SELECT COUNT(*) FROM LIFE
 		WHERE LIFE_ID = #{lifeId} AND MEMBER_ID = #{memberId} AND STATUS = 'PLAYING'
+		  AND NVL(CURRENT_AGE, 0) = 0
 	</select>
 
 	<!-- 이 인생에 이미 정해진 퀘스트 개수 -->

@@ -274,13 +274,17 @@ public class MemberService {
 				? dao.selectActiveByEmail(dto.getEmail())
 				: dao.selectActiveByLoginIdAndEmail(dto.getLoginId(), dto.getEmail());
 
+		// Gmail 보내기는 몇 초 걸려서, 메일은 다른 스레드에 맡기고 화면에는 바로 대답함
 		if (member != null) {
-			try {
-				sendCodeMail(dto.getEmail(), code, purpose);
-			} catch (Exception e) {
-				// 메일이 안 나가도 화면에는 똑같은 문구를 보여 줌 (가입 여부 노출 방지)
-				e.printStackTrace();
-			}
+			String email = dto.getEmail();
+			new Thread(() -> {
+				try {
+					sendCodeMail(email, code, purpose);
+				} catch (Exception e) {
+					// 메일이 안 나가도 화면에는 똑같은 문구를 보여 줌 (가입 여부 노출 방지)
+					e.printStackTrace();
+				}
+			}).start();
 		}
 		return null;
 	}
