@@ -30,7 +30,7 @@ public class QuestController {
 
 	// 고른 퀘스트 저장  POST /api/quests/life
 	@PostMapping("/life")
-	public ResponseEntity<?> saveLifeQuests(@RequestAttribute("memberId") String memberId,
+	public ResponseEntity<Map<String, Object>> saveLifeQuests(@RequestAttribute("memberId") String memberId,
 			@RequestBody QuestSaveDTO dto) {
 		String error = service.saveLifeQuests(Integer.parseInt(memberId), dto);
 		if (error != null) {

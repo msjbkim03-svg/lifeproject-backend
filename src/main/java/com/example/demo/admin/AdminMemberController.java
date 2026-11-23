@@ -33,7 +33,7 @@ public class AdminMemberController {
 
 	// 강제 탈퇴  POST /api/admin/members/{memberId}/withdraw
 	@PostMapping("/{memberId}/withdraw")
-	public ResponseEntity<?> withdraw(@PathVariable int memberId) {
+	public ResponseEntity<Map<String, Object>> withdraw(@PathVariable int memberId) {
 		String error = service.withdraw(memberId);
 		if (error != null) {
 			return ResponseEntity.badRequest().body(Map.of("message", error));

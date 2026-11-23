@@ -28,7 +28,7 @@ public class CostumeController {
 	}
 
 	@GetMapping
-	public ResponseEntity<?> list(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
+	public ResponseEntity<Map<String, Object>> list(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
 			@RequestHeader(value = "Authorization", required = false) String auth) {
 		CostumeLifeDTO life = service.myLife(lifeId, readMemberId(auth), guestToken);
 		if (life == null) return ResponseEntity.status(403).body(Map.of("message", "내 인생이 아니에요."));
@@ -36,25 +36,25 @@ public class CostumeController {
 	}
 
 	@PostMapping("/{costumeId}/buy")
-	public ResponseEntity<?> buy(@PathVariable int costumeId, @RequestBody Map<String, Object> body,
+	public ResponseEntity<Map<String, Object>> buy(@PathVariable int costumeId, @RequestBody Map<String, Object> body,
 			@RequestHeader(value = "Authorization", required = false) String auth) {
 		return change(costumeId, body, auth, "buy");
 	}
 
 	@PostMapping("/{costumeId}/equip")
-	public ResponseEntity<?> equip(@PathVariable int costumeId, @RequestBody Map<String, Object> body,
+	public ResponseEntity<Map<String, Object>> equip(@PathVariable int costumeId, @RequestBody Map<String, Object> body,
 			@RequestHeader(value = "Authorization", required = false) String auth) {
 		return change(costumeId, body, auth, "equip");
 	}
 
 	@PostMapping("/{costumeId}/unequip")
-	public ResponseEntity<?> unequip(@PathVariable int costumeId, @RequestBody Map<String, Object> body,
+	public ResponseEntity<Map<String, Object>> unequip(@PathVariable int costumeId, @RequestBody Map<String, Object> body,
 			@RequestHeader(value = "Authorization", required = false) String auth) {
 		return change(costumeId, body, auth, "unequip");
 	}
 
 	// 사기·착용·벗기 공통: 주인 확인 → 처리 → 바뀐 목록 + 안내 문장
-	private ResponseEntity<?> change(int costumeId, Map<String, Object> body, String auth, String action) {
+	private ResponseEntity<Map<String, Object>> change(int costumeId, Map<String, Object> body, String auth, String action) {
 		int lifeId = Integer.parseInt(String.valueOf(body.get("lifeId")));
 		String guestToken = (String) body.get("guestToken");
 		Integer memberId = readMemberId(auth);
