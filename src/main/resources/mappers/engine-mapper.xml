@@ -449,6 +449,33 @@
 		ORDER BY AGE
 	</select>
 
+	<!-- C22 엔딩 크레딧: 이 이야기에 쓰인 자료 (원작 '이 이야기에 쓰인 자료')
+	     1. 실제로 겪은 역사 사건(인생 기록에 남은 HIST 이벤트)의 출처 → 2. 태어난 나라의 살았던 연대 통계 출처, 최대 12개 -->
+	<select id="selectFilmSources" parameterType="int" resultType="string">
+		SELECT TITLE FROM (
+			SELECT s.TITLE AS TITLE, MIN(x.ORD) AS ORD
+			FROM (
+				SELECT h.SOURCE_ID AS SID, 1 AS ORD
+				FROM LIFE_EVENT_LOG e
+				JOIN GAME_EVENT g ON g.EVENT_ID = e.EVENT_ID
+				JOIN HISTORY_EVENT h ON h.EVENT_ID = g.HIST_EVENT_ID
+				WHERE e.LIFE_ID = #{lifeId}
+				UNION ALL
+				SELECT c.SOURCE_ID AS SID, 2 AS ORD
+				FROM LIFE l
+				JOIN COUNTRY_STAT c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
+				WHERE l.LIFE_ID = #{lifeId}
+				  AND c.DECADE BETWEEN TRUNC(l.BIRTH_YEAR / 10) * 10
+				                   AND TRUNC((l.BIRTH_YEAR + NVL(l.DEATH_AGE, l.CURRENT_AGE)) / 10) * 10
+			) x
+			JOIN DATA_SOURCE s ON s.SOURCE_ID = x.SID
+			WHERE s.TITLE IS NOT NULL
+			GROUP BY s.TITLE
+			ORDER BY MIN(x.ORD), s.TITLE
+		)
+		WHERE ROWNUM &lt;= 12
+	</select>
+
 	<!-- C03 나라 패널: 그해와 가장 가까운 연대의 나라 통계 + 권역 이름 + 출처 (권역 진학률·산업 비율은 selectRegionStat)
 	     cond: countryCode, year -->
 	<select id="selectCountryInfo" parameterType="map" resultType="com.example.demo.engine.CountryInfoDTO">
