@@ -2,6 +2,7 @@ package com.example.demo.memorial;
 
 import java.util.Map;
 
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,8 +37,11 @@ public class MemorialController {
 
 	// 로그인은 선택: 토큰이 있으면 내 촛불·내 방명록 표시
 	@GetMapping("/{lifeId}")
-	public ResponseEntity<MemorialRoomDTO> room(@PathVariable int lifeId,@RequestHeader(value = "Authorization", required = false) String auth) {
-		MemorialRoomDTO room = service.room(lifeId, readMemberId(auth));
+	// view=true: 처음 들어올 때만 조회수 +1 (방명록 쓰고 다시 불러올 때는 안 올림)
+	public ResponseEntity<MemorialRoomDTO> room(@PathVariable int lifeId,
+			@RequestParam(defaultValue = "false") boolean view,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		MemorialRoomDTO room = service.room(lifeId, readMemberId(auth), view);
 		if (room == null) {
 			return ResponseEntity.notFound().build();
 		}
@@ -47,15 +51,25 @@ public class MemorialController {
 	@PostMapping("/{lifeId}/open")
 	public ResponseEntity<Map<String, Object>> open(@PathVariable int lifeId, @RequestAttribute("memberId") String memberId,
 			@RequestBody Map<String, String> body) {
-		String error = service.open(lifeId, Integer.parseInt(memberId), body.get("message"));
-		if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
+		try {
+			String error = service.open(lifeId, Integer.parseInt(memberId), body.get("message"));
+			if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
+		} catch (DuplicateKeyException e) {
+			// 거의 동시에 두 번 누름 → DB UNIQUE(LIFE_ID) 가 막아 줌
+			return ResponseEntity.badRequest().body(Map.of("message", "이미 열린 추모관이에요."));
+		}
 		return ResponseEntity.ok(Map.of("message", "추모관을 열었어요."));
 	}
 
 	@PostMapping("/{lifeId}/candle")
 	public ResponseEntity<Map<String, Object>> candle(@PathVariable int lifeId, @RequestAttribute("memberId") String memberId) {
-		String error = service.candle(lifeId, Integer.parseInt(memberId));
-		if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
+		try {
+			String error = service.candle(lifeId, Integer.parseInt(memberId));
+			if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
+		} catch (DuplicateKeyException e) {
+			// 거의 동시에 두 번 누름 → DB PK(POST_ID, MEMBER_ID) 가 막아 줌 (촛불 수도 같이 취소됨)
+			return ResponseEntity.badRequest().body(Map.of("message", "이미 촛불을 켰어요."));
+		}
 		return ResponseEntity.ok(Map.of("tributeCount", service.tributeCount(lifeId)));
 	}
 

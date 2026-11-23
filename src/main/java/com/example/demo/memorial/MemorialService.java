@@ -32,7 +32,7 @@ public class MemorialService {
 	}
 
 	// 안 열린 방은 주인만 볼 수 있음 → 볼 수 없으면 null
-	public MemorialRoomDTO room(int lifeId, Integer memberId) {
+	public MemorialRoomDTO room(int lifeId, Integer memberId, boolean view) {
 		MemorialRoomDTO room = dao.selectRoom(lifeId);
 		if (room == null) return null;
 
@@ -51,7 +51,7 @@ public class MemorialService {
 
 		List<MemorialCommentDTO> comments = new ArrayList<>();
 		if (opened) {
-			dao.plusViewCount(room.getPostId());
+			if (view) dao.plusViewCount(room.getPostId());
 			comments = dao.selectComments(room.getPostId());
 			for (MemorialCommentDTO c : comments) {
 				c.setMine(memberId != null && memberId == c.getMemberId());
