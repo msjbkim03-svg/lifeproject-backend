@@ -71,6 +71,8 @@ final class EngineStory {
 	// 조건 줄임말
 	private static boolean enrolled(LifeDTO l) { return "ENROLLED".equals(l.getSchoolStatus()); }
 	private static boolean working(LifeDTO l) { return "EMPLOYED".equals(l.getJobStatus()); }
+	// 회사에 다니는 사람 (가게 사장 JOB_OWNER 는 빼고: 윗사람·직장 동료가 없음)
+	private static boolean employee(LifeDTO l) { return working(l) && !"JOB_OWNER".equals(l.getJobId()); }
 	private static boolean jobless(LifeDTO l) { return "UNEMPLOYED".equals(l.getJobStatus()); }
 	private static boolean married(LifeDTO l) { return "Y".equals(l.getMarriedYn()); }
 	private static boolean parents(LifeDTO l) { return !"N".equals(l.getParentAlive()); }
@@ -80,6 +82,24 @@ final class EngineStory {
 	private static boolean focus(LifeDTO l, String f) { return f.equals(l.getFocusCode()); }
 	private static boolean hasMoney(LifeDTO l) { return l.getAssets() > 0 || l.getIncome() > 0; }
 	private static boolean owns(LifeDTO l, String id) { return l.getOwns() != null && l.getOwns().contains(id); }
+	// 지금 연도 (나이 기준 대략)
+	private static int yr(LifeDTO l) { return l.getBirthYear() + l.getCurrentAge(); }
+	// 아직 가난한 나라·시대 (1인당 GDP 5천 달러 아래, GDP를 모르면 1980년 전)
+	private static boolean lowGdp(LifeDTO l) { return l.getGdpPerCapita() != null ? l.getGdpPerCapita() < 5000 : yr(l) < 1980; }
+	// 1인당 GDP (달러, 모르면 시대로 어림)
+	private static double gdp(LifeDTO l) { return l.getGdpPerCapita() != null ? l.getGdpPerCapita() : yr(l) < 1980 ? 1000 : 8000; }
+	private static final Set<String> CRAM_CC = Set.of("KOR", "CHN", "JPN", "TWN", "HKG", "SGP", "VNM");
+	// 병역 중 (SVC-ON 토큰)
+	private static boolean serving(LifeDTO l) { return owns(l, "SVC-ON"); }
+	// 농사짓는 집: 농사·어업 일을 하거나, 시골에서 일하지 않는 사람(아이·노인)이 가난한 나라·시대에 사는 경우
+	private static boolean farmer(LifeDTO l) {
+		if (!rural(l)) return false;
+		if (working(l)) {
+			String n = l.getJobName();
+			return n != null && (n.contains("농") || n.contains("어부") || n.contains("어업") || n.contains("목축") || n.contains("과수"));
+		}
+		return lowGdp(l) && !rich(l);
+	}
 
 	// 이 인생에 이 줄(시대 물건 등)이 이미 나왔는지 (엔진 선택지: 휴대폰이 생긴 사람만 '잠들기 전 휴대폰')
 	public static boolean had(int lifeId, String id) {
@@ -103,7 +123,7 @@ final class EngineStory {
 			new Line("baby_word", 1, 1, 3, ANY, "첫 단어를 말했다. ‘엄마’라는 뜻의 말이었다."),
 			new Line("baby_walk", 1, 1, 3, ANY, "벽을 짚고 일어서더니 첫걸음을 뗐다. 온 식구가 박수를 쳤다."),
 			new Line("baby_bday1", 1, 1, 3, ANY, "첫 생일을 맞아 친척들이 모여 축하해 주었다."),
-			new Line("baby_hold", 0, 2, 2, l -> rural(l), "어른들이 밭일을 하는 동안 할머니 등에 업혀 지냈다."),
+			new Line("baby_hold", 0, 2, 2, l -> rural(l) && !rich(l) && lowGdp(l), "어른들이 밭일을 하는 동안 할머니 등에 업혀 지냈다."),
 			new Line("baby_story", 1, 3, 2, ANY, "잠들기 전마다 부모님이 옛이야기를 들려주셨다."),
 			new Line("baby_play", 2, 2, 2, ANY, "흙 한 줌, 나뭇가지 하나로 한나절을 놀았다."),
 			new Line("baby_mud", 2, 4, 2, ANY, "흙장난을 하다 옷을 다 버렸다."),
@@ -121,13 +141,23 @@ final class EngineStory {
 			new Line("kid_fall", 3, 9, 2, ANY, "뛰다가 넘어져 무릎이 까졌다. 다음 날 또 뛰어다녔다."),
 			new Line("kid_bday5", 5, 5, 3, ANY, "다섯 번째 생일을 맞았다."),
 			new Line("kid_dream", 5, 8, 2, ANY, "커서 무엇이 되고 싶냐는 물음에 날마다 다른 대답을 했다."),
-			new Line("kid_kinder", 4, 6, 3, l -> !rural(l) && l.getWealthClass() >= 3, "유치원에 다니며 처음으로 단체 생활을 배웠다."),
+			// 유치원 (원작 kinder): 잘사는 나라거나, 집이 넉넉하면 조금 가난한 나라에서도
+			new Line("kid_kinder", 3, 5, 3, l -> gdp(l) > 4000 || l.getWealthClass() >= 4 && gdp(l) > 1300 || l.getWealthClass() >= 5 && gdp(l) > 800, "유치원에 다니며 처음으로 단체 생활을 배웠다."),
+			// ── 집안 형편 (원작 fam_room · fam_trip · fam_maid · fam_room1 · fam_clothes · hungry · kid_academy) ──
+			new Line("fam_maid", 1, 6, 2, l -> l.getWealthClass() >= 5 && gdp(l) < 25000, "집에 살림과 아이 돌보기를 도와주는 사람이 있었다."),
+			new Line("fam_room", 6, 11, 2, l -> rich(l) && (gdp(l) > 3000 || l.getWealthClass() >= 5), "처음으로 내 방이 생겼다."),
+			new Line("fam_trip", 5, 14, 2, l -> rich(l) && (gdp(l) > 4000 || l.getWealthClass() >= 5), "방학에 가족과 함께 여행을 다녀왔다."),
+			new Line("fam_room1", 2, 12, 2, l -> poor(l) && !rural(l) && gdp(l) < 12000, "온 가족이 방 한 칸에서 함께 먹고 잤다."),
+			new Line("fam_clothes", 4, 12, 2, l -> poor(l) && gdp(l) < 6000, "새 옷은 명절에나 한 벌 생겼다."),
+			new Line("fam_hungry", 0, 17, 2, l -> poor(l) && gdp(l) < 1800, "흉작으로 식구들이 하루 한 끼로 버텼다."),
+			new Line("kid_academy", 9, 13, 3, l -> enrolled(l) && CRAM_CC.contains(l.getCurrentCountry()) && l.getWealthClass() >= 2 && gdp(l) > 2500,
+					"학교가 끝나면 학원 두 곳을 돌고, 깜깜해져서야 집에 돌아왔다."),
 			new Line("kid_grandpa", 3, 8, 2, ANY, "할아버지가 몰래 사탕을 쥐여 주셨다."),
 			new Line("kid_draw", 3, 7, 2, ANY, "크레파스를 쥐기만 하면 시간 가는 줄 몰랐다. 벽에도 그림을 그려 혼이 났다."),
 			new Line("kid_animal", 3, 8, 2, l -> rural(l), "마당의 닭과 개를 쫓아다니며 놀았다."),
 			new Line("kid_dark", 3, 6, 2, ANY, "밤에 혼자 화장실 가는 것이 무서워 형제를 깨웠다."),
 			new Line("kid_sibfight", 3, 12, 2, ANY, "형제자매와 장난감을 두고 다퉜다가 금세 다시 같이 놀았다."),
-			new Line("kid_help", 4, 9, 2, l -> poor(l) || rural(l), "어른들을 따라 물을 길어 오는 일을 거들었다."),
+			new Line("kid_help", 4, 9, 2, l -> (poor(l) || rural(l)) && lowGdp(l), "어른들을 따라 물을 길어 오는 일을 거들었다."),
 			new Line("kid_rain", 3, 9, 2, ANY, "비 오는 날 웅덩이마다 뛰어들어 신발이 젖었다."),
 
 			// ── 학교 다니는 아이 (6~14세) ──
@@ -143,7 +173,7 @@ final class EngineStory {
 			new Line("sch_hobby", 6, 18, 3, l -> focus(l, "HOBBY"), "좋아하는 일에 푹 빠져 시간 가는 줄 몰랐다."),
 			new Line("sch_study", 6, 18, 3, l -> focus(l, "STUDY") && enrolled(l), "책상 앞에 앉아 있는 시간이 부쩍 늘었다."),
 			new Line("sch_play", 6, 16, 3, l -> focus(l, "PLAY"), "친구들과 몰려다니며 온 동네를 놀이터로 삼았다."),
-			new Line("sch_walk", 6, 14, 2, l -> rural(l) && enrolled(l), "먼 길을 걸어 학교에 다녔다. 비 오는 날이면 신발이 다 젖었다."),
+			new Line("sch_walk", 6, 14, 2, l -> rural(l) && enrolled(l) && (lowGdp(l) || poor(l)), "먼 길을 걸어 학교에 다녔다. 비 오는 날이면 신발이 다 젖었다."),
 			new Line("sch_sportsday", 7, 12, 3, l -> enrolled(l), "운동회 날 이어달리기에서 온 힘을 다해 달렸다."),
 			new Line("sch_trip", 9, 17, 2, l -> enrolled(l) && !poor(l), "수학여행을 떠나 처음으로 친구들과 낯선 도시에서 밤을 보냈다."),
 			new Line("sch_notrip", 9, 17, 2, l -> enrolled(l) && poor(l), "수학여행비를 낼 형편이 안 돼 혼자 학교에 남았다."),
@@ -156,7 +186,7 @@ final class EngineStory {
 			new Line("sch_award", 8, 17, 1, l -> enrolled(l) && l.getKnowledge() >= 75, "글짓기 대회에서 상을 받아 집에 상장을 들고 갔다."),
 			new Line("sch_vacation", 7, 15, 2, l -> rural(l) && enrolled(l), "방학이면 냇가에서 물고기를 잡으며 하루를 보냈다."),
 			new Line("sch_cousins", 7, 15, 2, l -> enrolled(l), "방학에 사촌들이 놀러 와 며칠 내내 붙어 지냈다."),
-			new Line("noschool_work", 6, 14, 3, l -> outOfSchool(l) && rural(l), "학교 대신 밭에 나가 어른들 일을 거들었다."),
+			new Line("noschool_work", 6, 14, 3, l -> outOfSchool(l) && farmer(l), "학교 대신 밭에 나가 어른들 일을 거들었다."),
 			new Line("noschool_care", 6, 14, 3, l -> outOfSchool(l), "어린 동생들을 돌보며 하루를 보냈다."),
 			new Line("noschool_envy", 7, 14, 2, l -> outOfSchool(l), "책가방을 메고 가는 또래들을 오래 바라보았다."),
 			new Line("noschool_street", 9, 15, 2, l -> !enrolled(l) && !rural(l) && poor(l), "시장 골목에서 물건을 날라 주고 몇 푼을 벌었다."),
@@ -178,13 +208,13 @@ final class EngineStory {
 			new Line("teen_secret", 13, 18, 2, l -> l.getRelation() >= 50, "친구들과 밤새 비밀 이야기를 나눴다."),
 			new Line("teen_mirror", 13, 17, 2, ANY, "거울 앞에 서 있는 시간이 부쩍 길어졌다."),
 			new Line("teen_sports", 13, 19, 2, l -> focus(l, "SPORT") && enrolled(l), "학교 대표로 경기에 나가 땀을 흘렸다."),
-			new Line("teen_chores", 12, 18, 2, l -> rural(l) && outOfSchool(l), "어른 몫의 일을 맡게 되었다. 손이 거칠어졌다."),
+			new Line("teen_chores", 12, 18, 2, l -> rural(l) && outOfSchool(l) && lowGdp(l), "어른 몫의 일을 맡게 되었다. 손이 거칠어졌다."),
 
 			// ── 시대 물건 (그 물건이 흔해진 해부터) ──
-			new Line("era_radio", 5, 60, 2, l -> l.getWealthClass() >= 3, "집에 라디오가 생겼다. 저녁마다 식구들이 모여 들었다.", 0, 1950),
-			new Line("era_tv", 5, 70, 2, l -> l.getWealthClass() >= 3 && !rural(l), "집에 텔레비전이 생겼다. 동네 아이들이 구경하러 몰려왔다.", 0, 1970),
-			new Line("era_phone", 15, 80, 2, l -> !rural(l) && l.getWealthClass() >= 3, "집에 전화가 놓였다. 벨이 울리면 서로 받겠다고 뛰어갔다.", 0, 1980),
-			new Line("era_pc", 10, 60, 2, l -> l.getWealthClass() >= 3 && !rural(l), "내 컴퓨터가 생겼다. 밤늦도록 화면 앞을 떠나지 않았다.", 0, 1995),
+			new Line("era_radio", 5, 60, 2, l -> l.getWealthClass() >= 3 && yr(l) < 1975, "집에 라디오가 생겼다. 저녁마다 식구들이 모여 들었다.", 0, 1950),
+			new Line("era_tv", 5, 70, 2, l -> l.getWealthClass() >= 3 && !rural(l) && yr(l) < 1992, "집에 텔레비전이 생겼다. 동네 아이들이 구경하러 몰려왔다.", 0, 1970),
+			new Line("era_phone", 15, 80, 2, l -> !rural(l) && l.getWealthClass() >= 3 && yr(l) < 1998, "집에 전화가 놓였다. 벨이 울리면 서로 받겠다고 뛰어갔다.", 0, 1980),
+			new Line("era_pc", 10, 60, 2, l -> l.getWealthClass() >= 3 && !rural(l) && yr(l) < 2012, "내 컴퓨터가 생겼다. 밤늦도록 화면 앞을 떠나지 않았다.", 0, 1995),
 			new Line("era_net", 10, 70, 2, ANY, "처음으로 인터넷에 접속했다. 세상이 넓어졌다.", 0, 2002),
 			// 휴대전화는 스마트폰이 흔해지기 전(2013년 전)까지만, 돈 쓰기로 이미 산 사람은 빼고
 			new Line("era_mobile", 13, 75, 2, l -> l.getBirthYear() + l.getCurrentAge() < 2013 && !owns(l, "CELL") && !owns(l, "PHONE"), "처음으로 휴대전화가 생겼다.", 0, 2005),
@@ -198,37 +228,37 @@ final class EngineStory {
 			new Line("uni_prep", 18, 30, 3, l -> focus(l, "JOB_PREP"), "원서와 자기소개서를 몇 번이고 고쳐 썼다."),
 
 			// ── 일하는 어른 ──
-			new Line("work_used", 16, 70, 3, l -> working(l), "일에 익숙해져 손이 빨라졌다."),
+			new Line("work_used", 16, 70, 3, l -> working(l) && l.getJobYears() <= 3, "일에 익숙해져 손이 빨라졌다."),
 			new Line("work_tired", 16, 70, 2, l -> working(l) && l.getHealth() < 55, "일이 고되어 몸살을 앓고 며칠을 쉬었다."),
-			new Line("work_praise", 16, 70, 3, l -> working(l) && focus(l, "WORK"), "일을 잘 해내 윗사람에게 칭찬을 들었다."),
+			new Line("work_praise", 16, 70, 3, l -> employee(l) && focus(l, "WORK"), "일을 잘 해내 윗사람에게 칭찬을 들었다."),
 			new Line("work_balance", 16, 70, 2, l -> working(l) && focus(l, "BALANCE"), "일은 일대로, 저녁은 저녁대로 챙기며 한 해를 보냈다."),
 			new Line("work_parents", 18, 55, 2, l -> working(l) && parents(l), "월급날 부모님께 용돈을 드렸다.", 0.01, 0),
 			new Line("work_commute", 18, 64, 2, l -> working(l) && !rural(l), "출퇴근길 버스와 지하철은 늘 붐볐다."),
-			new Line("work_farm", 16, 70, 2, l -> working(l) && rural(l), "날씨를 살피며 한 해 농사를 지었다."),
-			new Line("work_harvest", 16, 75, 2, l -> rural(l), "올해는 풍년이었다. 창고가 그득해 마음이 든든했다."),
-			new Line("work_drought", 16, 75, 2, l -> rural(l), "비가 너무 적어 수확이 줄었다."),
+			new Line("work_farm", 16, 70, 2, l -> working(l) && farmer(l), "날씨를 살피며 한 해 농사를 지었다."),
+			new Line("work_harvest", 16, 75, 2, l -> farmer(l), "올해는 풍년이었다. 창고가 그득해 마음이 든든했다."),
+			new Line("work_drought", 16, 75, 2, l -> farmer(l), "비가 너무 적어 수확이 줄었다."),
 			new Line("work_learn", 18, 64, 3, l -> focus(l, "SELF_DEV"), "퇴근 뒤에 짬을 내어 새로운 것을 배웠다."),
 			new Line("work_overtime", 22, 60, 2, l -> working(l) && focus(l, "WORK"), "야근이 이어져 집에는 잠만 자러 들어갔다."),
-			new Line("work_dinner", 22, 60, 2, l -> working(l) && !rural(l), "회식 자리에서 동료들과 늦게까지 이야기를 나눴다."),
-			new Line("jobless_search", 16, 64, 3, l -> jobless(l), "일자리를 찾아 여기저기 다녔지만 쉽지 않았다."),
-			new Line("jobless_day", 16, 64, 2, l -> jobless(l) && poor(l), "그날그날 일거리를 얻어 하루를 버텼다."),
+			new Line("work_dinner", 22, 60, 2, l -> employee(l) && !rural(l), "회식 자리에서 동료들과 늦게까지 이야기를 나눴다."),
+			new Line("jobless_search", 16, 64, 3, l -> jobless(l) && !serving(l), "일자리를 찾아 여기저기 다녔지만 쉽지 않았다."),
+			new Line("jobless_day", 16, 64, 2, l -> jobless(l) && poor(l) && !serving(l), "그날그날 일거리를 얻어 하루를 버텼다."),
 
 			// ── 경조사 (돈이 나감) ──
-			new Line("cer_wedding", 22, 60, 3, l -> hasMoney(l), "친구의 결혼식에 다녀왔다. 축의금을 냈다.", 0.008, 0),
-			new Line("cer_wedding2", 25, 65, 2, l -> hasMoney(l) && working(l), "직장 동료의 결혼식에 다녀왔다.", 0.006, 0),
-			new Line("cer_wedding0", 18, 60, 2, l -> !hasMoney(l), "친구의 결혼식에 가서 음식 준비를 거들었다."),
+			new Line("cer_wedding", 22, 45, 3, l -> hasMoney(l), "친구의 결혼식에 다녀왔다. 축의금을 냈다.", 0.008, 0),
+			new Line("cer_wedding2", 25, 65, 2, l -> hasMoney(l) && employee(l), "직장 동료의 결혼식에 다녀왔다.", 0.006, 0),
+			new Line("cer_wedding0", 18, 45, 2, l -> !hasMoney(l), "친구의 결혼식에 가서 음식 준비를 거들었다."),
 			new Line("cer_funeral", 30, 90, 2, l -> hasMoney(l), "친척 장례에 다녀와 부조금을 냈다.", 0.006, 0),
-			new Line("cer_baby", 25, 55, 2, l -> hasMoney(l), "친구 아이의 돌잔치에 다녀왔다.", 0.004, 0),
+			new Line("cer_baby", 25, 45, 2, l -> hasMoney(l), "친구 아이의 돌잔치에 다녀왔다.", 0.004, 0),
 			new Line("cer_holiday", 25, 70, 2, l -> hasMoney(l) && parents(l), "{명절}에 부모님 댁에 선물과 용돈을 챙겨 갔다.", 0.008, 0),
 			new Line("cer_reunion", 30, 80, 2, l -> hasMoney(l), "동창 모임에 나가 회비를 내고 옛이야기로 밤을 새웠다.", 0.003, 0),
 			new Line("cer_kidschool", 30, 55, 2, l -> l.getChildCount() > 0 && hasMoney(l), "아이 학원비와 책값이 꽤 들었다.", 0.02, 0),
 			// 원작 살림 지출 (원작 500명 기록의 중간값을 그 나라 중위 소득 비율로 맞춤: 치과 −7만, 가전 −37만, 배관 −61만 원 …)
 			new Line("exp_dentist", 25, 80, 2, l -> hasMoney(l), "이가 아파 치과에 다녀왔다.", 0.01, 0),
-			new Line("exp_appliance", 25, 85, 2, l -> hasMoney(l) && !rural(l), "냉장고가 고장 나 고치는 데 돈이 들었다.", 0.05, 1965),
-			new Line("exp_tv", 25, 85, 1, l -> hasMoney(l), "텔레비전이 고장 나 새로 들였다.", 0.05, 1970),
+			new Line("exp_appliance", 25, 85, 2, l -> hasMoney(l) && owns(l, "TV"), "냉장고가 고장 나 고치는 데 돈이 들었다.", 0.05, 1965),
+			new Line("exp_tv", 25, 85, 1, l -> hasMoney(l) && owns(l, "TV"), "텔레비전이 고장 나 새로 들였다.", 0.05, 1970),
 			new Line("exp_pipe", 28, 85, 1, l -> hasMoney(l) && !rural(l), "집 배관이 터져 수리를 맡겼다.", 0.08, 0),
 			new Line("exp_roof", 28, 85, 1, l -> hasMoney(l) && rural(l), "비가 새서 지붕을 고쳤다.", 0.06, 0),
-			new Line("exp_car", 30, 75, 1, l -> hasMoney(l) && rich(l), "자동차가 고장 나 정비소에 맡겼다.", 0.12, 1980),
+			new Line("exp_car", 30, 75, 1, l -> hasMoney(l) && owns(l, "CAR"), "자동차가 고장 나 정비소에 맡겼다.", 0.12, 1980),
 			new Line("exp_trip", 28, 70, 2, l -> hasMoney(l) && married(l), "형제 가족과 함께 여행을 다녀왔다.", 0.025, 1975),
 			new Line("exp_parent_hosp", 35, 70, 2, l -> hasMoney(l) && parents(l), "부모님 병원비를 형제들과 나눠 냈다.", 0.04, 0),
 			new Line("exp_glasses", 45, 80, 1, l -> hasMoney(l), "글씨가 흐려 돋보기를 맞췄다.", 0.002, 0),
@@ -334,6 +364,11 @@ final class EngineStory {
 	private static final Map<Integer, Deque<String>> RECENT = new ConcurrentHashMap<>();
 	private static final Map<Integer, Set<String>> ONCE = new ConcurrentHashMap<>();
 	private static final int RECENT_SIZE = 14;
+	// 평생 한 번만 나오는 줄 (원작 플래그)
+	private static final Set<String> ONCE_IDS = Set.of("fam_maid", "fam_room", "fam_room1", "fam_clothes", "kid_academy", "kid_kinder");
+	// 살림 지출(exp_)은 같은 일이 8년 안에 다시 나오지 않게 (TV가 몇 해마다 고장 나지 않게)
+	private static final Map<Integer, Map<String, Integer>> LAST = new ConcurrentHashMap<>();
+	private static final int EXP_GAP = 8;
 
 	// 나이대별 일상 줄 수 (원작 한 해 기록 양에 맞춤, 이벤트·진학 기록과 합쳐서)
 	private static int wantLines(int age, Random rnd) {
@@ -357,6 +392,7 @@ final class EngineStory {
 
 		Deque<String> recent = RECENT.computeIfAbsent(life.getLifeId(), k -> new ArrayDeque<>());
 		Set<String> once = ONCE.computeIfAbsent(life.getLifeId(), k -> ConcurrentHashMap.newKeySet());
+		Map<String, Integer> last = LAST.computeIfAbsent(life.getLifeId(), k -> new ConcurrentHashMap<>());
 		List<Story> out = new ArrayList<>();
 
 		// 세계 소식 (그해에 있으면 먼저, 5세 이상)
@@ -371,7 +407,8 @@ final class EngineStory {
 		List<Line> pool = new ArrayList<>();
 		for (Line line : LINES) {
 			if (age >= line.minAge && age <= line.maxAge && year >= line.fromYear
-					&& !recent.contains(line.id) && !once.contains(line.id) && line.when.test(life)) {
+					&& !recent.contains(line.id) && !once.contains(line.id) && line.when.test(life)
+					&& !(line.id.startsWith("exp_") && last.containsKey(line.id) && age - last.get(line.id) < EXP_GAP)) {
 				pool.add(line);
 			}
 		}
@@ -399,8 +436,18 @@ final class EngineStory {
 			out.add(new Story(chosen.text.replace("{명절}", holiday(life.getCurrentCountry(), rnd))
 					.replace("{나이}", String.valueOf(age)), chosen.cost, chosen.id));
 			picked++;
-			if (chosen.id.startsWith("era_") || chosen.id.equals("exp_glasses") || chosen.id.equals("exp_cane")) {
+			if (chosen.id.startsWith("era_") || chosen.id.equals("exp_glasses") || chosen.id.equals("exp_cane")
+					|| chosen.id.equals("hl_eyes") || ONCE_IDS.contains(chosen.id)) {
 				once.add(chosen.id);
+			}
+			// 돋보기는 '처음 썼다'와 '맞췄다' 중 한 번만
+			if (chosen.id.equals("hl_eyes") || chosen.id.equals("exp_glasses")) {
+				once.add("hl_eyes");
+				once.add("exp_glasses");
+				pool.removeIf(l -> l.id.equals("hl_eyes") || l.id.equals("exp_glasses"));
+			}
+			if (chosen.id.startsWith("exp_")) {
+				last.put(chosen.id, age);
 			}
 			recent.addLast(chosen.id);
 			while (recent.size() > RECENT_SIZE) {
@@ -410,6 +457,7 @@ final class EngineStory {
 		if (RECENT.size() > 5000) {
 			RECENT.clear(); // 서버 메모리 보호 (오래 켜 두면 끝난 인생 기록이 쌓이므로)
 			ONCE.clear();
+			LAST.clear();
 		}
 		return out;
 	}

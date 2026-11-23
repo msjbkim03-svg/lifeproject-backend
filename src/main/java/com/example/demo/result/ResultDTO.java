@@ -30,6 +30,9 @@ public class ResultDTO {
 	private int knowledge;	// 마지막 지식
 	private int relation;	// 마지막 관계
 	private String marriedYn;	// 결혼 여부 Y, N
+	private Integer weddingCount;	// 결혼한 횟수 (인생 기록 문장으로 셈)
+	private Integer divorceCount;	// 이혼 횟수
+	private Integer widowCount;	// 사별 횟수
 	private int childCount;	// 자녀 수
 	private String startType;	// MEMBER, GUEST
 	private String status;	// PLAYING, ENDED, ABANDONED
@@ -237,6 +240,30 @@ public class ResultDTO {
 
 	public void setRelation(int relation) {
 		this.relation = relation;
+	}
+
+	public Integer getWeddingCount() {
+		return weddingCount;
+	}
+
+	public void setWeddingCount(Integer weddingCount) {
+		this.weddingCount = weddingCount;
+	}
+
+	public Integer getDivorceCount() {
+		return divorceCount;
+	}
+
+	public void setDivorceCount(Integer divorceCount) {
+		this.divorceCount = divorceCount;
+	}
+
+	public Integer getWidowCount() {
+		return widowCount;
+	}
+
+	public void setWidowCount(Integer widowCount) {
+		this.widowCount = widowCount;
 	}
 
 	public String getMarriedYn() {
