@@ -31,7 +31,7 @@ public class MemberController {
 
 	// 회원가입 (M01)  POST /api/members
 	@PostMapping
-	public ResponseEntity<?> join(@RequestBody MemberDTO dto) {
+	public ResponseEntity<Map<String, Object>> join(@RequestBody MemberDTO dto) {
 		try {
 			String error = service.join(dto);
 			if (error != null) {
@@ -64,7 +64,7 @@ public class MemberController {
 
 	// 로그인 (M02)  POST /api/members/login
 	@PostMapping("/login")
-	public ResponseEntity<?> login(@RequestBody MemberLoginDTO dto) {
+	public ResponseEntity<Map<String, Object>> login(@RequestBody MemberLoginDTO dto) {
 		MemberDTO member = service.login(dto.getLoginId(), dto.getPassword());
 
 		if (member == null) {
@@ -86,17 +86,17 @@ public class MemberController {
 
 	// 마이페이지 (M04)  GET /api/members/me
 	@GetMapping("/me")
-	public ResponseEntity<?> myPage(@RequestAttribute("memberId") String memberId) {
+	public ResponseEntity<MyPageDTO> myPage(@RequestAttribute("memberId") String memberId) {
 		MyPageDTO my = service.myPage(Integer.parseInt(memberId));
 		if (my == null) {
-			return ResponseEntity.status(404).body(Map.of("message", "회원 정보를 찾을 수 없어요."));
+			return ResponseEntity.notFound().build();
 		}
 		return ResponseEntity.ok(my);
 	}
 
 	// 개인정보 수정 (M05)  PUT /api/members/me
 	@PutMapping("/me")
-	public ResponseEntity<?> update(@RequestAttribute("memberId") String memberId, @RequestBody MemberUpdateDTO dto) {
+	public ResponseEntity<Map<String, Object>> update(@RequestAttribute("memberId") String memberId, @RequestBody MemberUpdateDTO dto) {
 		try {
 			String error = service.update(Integer.parseInt(memberId), dto);
 			if (error != null) {
@@ -112,7 +112,7 @@ public class MemberController {
 
 	// 이메일 변경 인증번호 보내기 (M05)  POST /api/members/me/emailCode
 	@PostMapping("/me/emailCode")
-	public ResponseEntity<?> emailCode(@RequestAttribute("memberId") String memberId,
+	public ResponseEntity<Map<String, Object>> emailCode(@RequestAttribute("memberId") String memberId,
 			@RequestBody MemberUpdateDTO dto) {
 		String error = service.sendEmailChangeCode(Integer.parseInt(memberId), dto.getEmail());
 		if (error != null) {
@@ -123,7 +123,7 @@ public class MemberController {
 
 	// 회원 탈퇴 (M06)  POST /api/members/me/withdraw
 	@PostMapping("/me/withdraw")
-	public ResponseEntity<?> withdraw(@RequestAttribute("memberId") String memberId,
+	public ResponseEntity<Map<String, Object>> withdraw(@RequestAttribute("memberId") String memberId,
 			@RequestBody MemberUpdateDTO dto) {
 		boolean ok = service.withdraw(Integer.parseInt(memberId), dto.getCurrentPassword());
 		if (!ok) {
@@ -135,7 +135,7 @@ public class MemberController {
 
 	// 아이디·비밀번호 찾기 - 인증번호 보내기 (M09)  POST /api/members/find/sendCode
 	@PostMapping("/find/sendCode")
-	public ResponseEntity<?> sendCode(@RequestBody MemberFindDTO dto) {
+	public ResponseEntity<Map<String, Object>> sendCode(@RequestBody MemberFindDTO dto) {
 		String error = service.sendCode(dto);
 		if(error != null) {
 			return ResponseEntity.badRequest().body(Map.of("message",error));
@@ -145,7 +145,7 @@ public class MemberController {
 
 	// 아이디 찾기 - 아이디 확인 (M09)  POST /api/members/find/id
 	@PostMapping("/find/id")
-	public ResponseEntity<?> findId(@RequestBody MemberFindDTO dto) {
+	public ResponseEntity<Map<String, Object>> findId(@RequestBody MemberFindDTO dto) {
 		String maskedId = service.findId(dto.getEmail(), dto.getCode()); // 예: msj***
 		if (maskedId == null) {
 			return ResponseEntity.badRequest().body(Map.of("message", "인증번호가 맞지 않거나 시간이 지났어요."));
@@ -156,7 +156,7 @@ public class MemberController {
 
 	// 아이디·비밀번호 찾기 - 인증번호 확인 (M09)  POST /api/members/find/checkCode
 	@PostMapping("/find/checkCode")
-	public ResponseEntity<?> checkCode(@RequestBody MemberFindDTO dto) {
+	public ResponseEntity<Map<String, Object>> checkCode(@RequestBody MemberFindDTO dto) {
 		String error = service.checkCode(dto);
 		if (error != null) {
 			return ResponseEntity.badRequest().body(Map.of("message", error));
@@ -166,7 +166,7 @@ public class MemberController {
 
 	// 비밀번호 찾기 - 새 비밀번호 저장 (M09)  POST /api/members/find/resetPw
 	@PostMapping("/find/resetPw")
-	public ResponseEntity<?> resetPw(@RequestBody MemberFindDTO dto) {
+	public ResponseEntity<Map<String, Object>> resetPw(@RequestBody MemberFindDTO dto) {
 		String error = service.resetPassword(dto);
 		if (error != null) {
 			return ResponseEntity.badRequest().body(Map.of("message", error));
@@ -194,7 +194,7 @@ public class MemberController {
 	// 특성 레벨 올리기 (M08)  POST /api/members/me/traits/{traitId}/levelUp
 	// 포인트 1점 → 그 특성 1레벨 (다음 생부터 적용)
 	@PostMapping("/me/traits/{traitId}/levelUp")
-	public ResponseEntity<?> levelUp(@RequestAttribute("memberId") String memberId,
+	public ResponseEntity<Map<String, Object>> levelUp(@RequestAttribute("memberId") String memberId,
 			@PathVariable String traitId) {
 		int id = Integer.parseInt(memberId);
 		try {

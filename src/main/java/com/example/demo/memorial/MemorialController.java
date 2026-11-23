@@ -36,16 +36,16 @@ public class MemorialController {
 
 	// 로그인은 선택: 토큰이 있으면 내 촛불·내 방명록 표시
 	@GetMapping("/{lifeId}")
-	public ResponseEntity<?> room(@PathVariable int lifeId,@RequestHeader(value = "Authorization", required = false) String auth) {
+	public ResponseEntity<MemorialRoomDTO> room(@PathVariable int lifeId,@RequestHeader(value = "Authorization", required = false) String auth) {
 		MemorialRoomDTO room = service.room(lifeId, readMemberId(auth));
 		if (room == null) {
-			return ResponseEntity.status(404).body(Map.of("message", "추모관을 찾을 수 없어요."));
+			return ResponseEntity.notFound().build();
 		}
 		return ResponseEntity.ok(room);
 	}
 
 	@PostMapping("/{lifeId}/open")
-	public ResponseEntity<?> open(@PathVariable int lifeId, @RequestAttribute("memberId") String memberId,
+	public ResponseEntity<Map<String, Object>> open(@PathVariable int lifeId, @RequestAttribute("memberId") String memberId,
 			@RequestBody Map<String, String> body) {
 		String error = service.open(lifeId, Integer.parseInt(memberId), body.get("message"));
 		if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
@@ -53,14 +53,14 @@ public class MemorialController {
 	}
 
 	@PostMapping("/{lifeId}/candle")
-	public ResponseEntity<?> candle(@PathVariable int lifeId, @RequestAttribute("memberId") String memberId) {
+	public ResponseEntity<Map<String, Object>> candle(@PathVariable int lifeId, @RequestAttribute("memberId") String memberId) {
 		String error = service.candle(lifeId, Integer.parseInt(memberId));
 		if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
 		return ResponseEntity.ok(Map.of("tributeCount", service.tributeCount(lifeId)));
 	}
 
 	@PostMapping("/{lifeId}/comments")
-	public ResponseEntity<?> comment(@PathVariable int lifeId, @RequestAttribute("memberId") String memberId,
+	public ResponseEntity<Map<String, Object>> comment(@PathVariable int lifeId, @RequestAttribute("memberId") String memberId,
 			@RequestBody Map<String, String> body) {
 		String error = service.comment(lifeId, Integer.parseInt(memberId), body.get("content"));
 		if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
@@ -68,7 +68,7 @@ public class MemorialController {
 	}
 
 	@DeleteMapping("/comments/{commentId}")
-	public ResponseEntity<?> deleteComment(@PathVariable int commentId, @RequestAttribute("memberId") String memberId) {
+	public ResponseEntity<Map<String, Object>> deleteComment(@PathVariable int commentId, @RequestAttribute("memberId") String memberId) {
 		if (!service.deleteComment(commentId, Integer.parseInt(memberId))) {
 			return ResponseEntity.badRequest().body(Map.of("message", "내가 쓴 방명록만 지울 수 있어요."));
 		}
