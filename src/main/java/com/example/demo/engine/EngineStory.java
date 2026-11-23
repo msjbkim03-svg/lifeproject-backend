@@ -304,18 +304,26 @@ final class EngineStory {
 			// ── 노년 ──
 			new Line("old_bday50", 50, 50, 3, ANY, "쉰 번째 생일을 맞았다."),
 			new Line("old_bday60", 60, 60, 3, ANY, "환갑을 맞아 가족들이 상을 차려 주었다."),
-			new Line("old_grand", 58, 99, 3, l -> l.getChildCount() > 0, "손주들이 놀러 와 집 안이 시끌벅적했다."),
-			new Line("old_grand2", 58, 99, 3, l -> l.getChildCount() > 0, "손주와 함께 시간을 보냈다."),
-			new Line("old_knee", 60, 99, 2, l -> l.getHealth() < 50, "무릎이 아파 걷는 일이 예전 같지 않았다."),
-			new Line("old_walk", 60, 99, 2, l -> l.getHealth() >= 50, "아침마다 동네를 천천히 한 바퀴 걸었다."),
-			new Line("old_memory", 65, 99, 2, l -> l.getKnowledge() < 50, "기억력이 예전 같지 않다."),
-			new Line("old_sharp", 65, 99, 2, l -> l.getKnowledge() >= 50, "날마다 걷고 책을 읽는다. 또래보다 기억력이 좋다는 말을 듣는다."),
+			new Line("old_grand", 58, 120, 3, l -> l.getChildCount() > 0, "손주들이 놀러 와 집 안이 시끌벅적했다."),
+			new Line("old_grand2", 58, 120, 3, l -> l.getChildCount() > 0, "손주와 함께 시간을 보냈다."),
+			new Line("old_knee", 60, 120, 2, l -> l.getHealth() < 50, "무릎이 아파 걷는 일이 예전 같지 않았다."),
+			new Line("old_walk", 60, 120, 2, l -> l.getHealth() >= 50, "아침마다 동네를 천천히 한 바퀴 걸었다."),
+			new Line("old_memory", 65, 120, 2, l -> l.getKnowledge() < 50, "기억력이 예전 같지 않다."),
+			new Line("old_sharp", 65, 120, 2, l -> l.getKnowledge() >= 50, "날마다 걷고 책을 읽는다. 또래보다 기억력이 좋다는 말을 듣는다."),
 			new Line("old_center", 62, 95, 2, l -> !rural(l), "복지관 강좌에 다니며 새로운 것을 배웠다."),
-			new Line("old_friend", 70, 99, 2, ANY, "오랜 친구의 부고를 들었다. 함께 보낸 시절이 떠올랐다."),
-			new Line("old_photo", 60, 99, 2, ANY, "옛 사진을 꺼내 보며 젊은 날을 떠올렸다."),
-			new Line("old_thanks", 70, 99, 2, ANY, "살아온 날들을 돌아보니 고마운 얼굴들이 하나씩 떠올랐다."),
-			new Line("old_brain", 60, 99, 3, l -> focus(l, "BRAIN"), "신문을 꼼꼼히 읽고 낱말 맞히기를 즐겼다."),
-			new Line("old_retired", 55, 99, 2, l -> "RETIRED".equals(l.getJobStatus()), "일을 놓고 나니 하루가 길었다. 텃밭을 가꾸며 시간을 보냈다."));
+			new Line("old_friend", 70, 120, 2, ANY, "오랜 친구의 부고를 들었다. 함께 보낸 시절이 떠올랐다."),
+			new Line("old_photo", 60, 120, 2, ANY, "옛 사진을 꺼내 보며 젊은 날을 떠올렸다."),
+			new Line("old_thanks", 70, 120, 2, ANY, "살아온 날들을 돌아보니 고마운 얼굴들이 하나씩 떠올랐다."),
+			new Line("old_brain", 60, 120, 3, l -> focus(l, "BRAIN"), "신문을 꼼꼼히 읽고 낱말 맞히기를 즐겼다."),
+			new Line("old_retired", 55, 120, 2, l -> "RETIRED".equals(l.getJobStatus()), "일을 놓고 나니 하루가 길었다. 텃밭을 가꾸며 시간을 보냈다."),
+			// 아흔·백 살 넘어서도 해마다 기록이 있게 (11/23: 100세가 넘으니 돈 줄만 남았음)
+			new Line("old_100", 100, 100, 5, ANY, "백 번째 생일을 맞았다. 동네에서 축하 인사가 이어졌다."),
+			new Line("old_alone", 92, 130, 2, ANY, "또래 가운데 곁에 남은 사람이 거의 없었다."),
+			new Line("old_window", 90, 130, 2, ANY, "볕 좋은 날이면 창가에 앉아 오래 바깥을 내다보았다."),
+			new Line("old_visit", 88, 130, 2, l -> l.getChildCount() > 0, "자녀들이 번갈아 찾아와 곁을 지켰다."),
+			new Line("old_nap", 90, 130, 2, ANY, "낮잠이 길어졌다. 꿈속에서 어린 시절 동네를 걸었다."),
+			new Line("old_story", 90, 130, 2, l -> l.getChildCount() > 0, "찾아온 증손주에게 옛날이야기를 들려주었다."),
+			new Line("old_slow", 95, 130, 2, ANY, "하루하루를 천천히, 조용히 보냈다."));
 
 	// 세계 소식 (나라와 상관없이 그해 한 번, 5세 이상) - [연도, 문장]
 	// 사실: 세계 인구는 유엔 세계인구전망 기준
@@ -489,6 +497,28 @@ final class EngineStory {
 			recent.addLast(chosen.id);
 			while (recent.size() > RECENT_SIZE) {
 				recent.removeFirst();
+			}
+		}
+		// 한 해에 기록이 한 줄도 없으면 나이가 건너뛴 것처럼 보임 (11/23: 횟수 제한을 넣은 뒤 50세 넘어 빈 해가 10%쯤 생겼음)
+		//   → 그해 다른 기록이 없을 때만, 횟수·간격 제한을 풀고 가장 적게 나온 줄 하나 (바로 3년 안에 나온 줄은 빼고)
+		if (picked == 0 && already == 0 && out.isEmpty()) {
+			Line best = null;
+			int bestN = Integer.MAX_VALUE;
+			for (Line line : LINES) {
+				if (age >= line.minAge && age <= line.maxAge && year >= line.fromYear && !once.contains(line.id) && line.when.test(life)
+						&& line.cost == 0 && !(sibs == 0 && SIB_IDS.contains(line.id)) && !(younger == 0 && YOUNGER_IDS.contains(line.id))
+						&& !(last.containsKey(line.id) && age - last.get(line.id) < 3)) {
+					int n = count.getOrDefault(line.id, 0) * 10 + rnd.nextInt(10);
+					if (n < bestN) {
+						bestN = n;
+						best = line;
+					}
+				}
+			}
+			if (best != null) {
+				out.add(new Story(best.text.replace("{명절}", holiday(life.getCurrentCountry(), rnd)).replace("{나이}", String.valueOf(age)), 0, best.id));
+				last.put(best.id, age);
+				count.merge(best.id, 1, Integer::sum);
 			}
 		}
 		if (RECENT.size() > 5000) {
