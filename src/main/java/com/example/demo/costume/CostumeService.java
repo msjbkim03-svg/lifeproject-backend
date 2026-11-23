@@ -9,10 +9,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 // C21 코스튬 상점: 값 = 그 나라 1인당 GDP × PRICE_RATE ÷ 100 (달러, 화면은 한국 체감 원)
 //   부위(모자·머리·옷)마다 하나씩만 착용
+//   IMAGE_PATH = 동현님 costumeData.js 의 상품 코드 (HAIR_01, TOP_01, HAT_01 …)
 @Service
 public class CostumeService {
 
 	private static final double DEFAULT_GDP = 10000;
+
+	// DB 부위 → 마을 그림(Village costume)의 이름
+	private static final Map<String, String> WEAR_KEY = Map.of("HAIR", "hair", "CLOTHES", "top", "HAT", "hat");
 
 	private CostumeDAO dao;
 
@@ -35,13 +39,13 @@ public class CostumeService {
 		return Math.round(gdp * c.getPriceRate() / 100);
 	}
 
-	// 목록 { assets, wear: {hat, hair, clothes}, items }
+	// 목록 { assets, wear: {hair, top, hat}, items }  (wear 는 Village costume 에 그대로 넘기면 됨)
 	public Map<String, Object> list(CostumeLifeDTO life) {
 		List<CostumeDTO> items = dao.selectCostumes(life.getLifeId());
 		Map<String, String> wear = new HashMap<>();
 		for (CostumeDTO c : items) {
 			c.setPrice(priceOf(life, c));
-			if ("Y".equals(c.getEquipped())) wear.put(c.getPart().toLowerCase(), c.getLook());
+			if ("Y".equals(c.getEquipped())) wear.put(WEAR_KEY.get(c.getPart()), c.getLook());
 		}
 		Map<String, Object> result = new HashMap<>();
 		result.put("assets", life.getAssets());

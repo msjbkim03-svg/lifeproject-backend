@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 
 // 모자·머리·옷 하나 (값 price 는 Service 가 계산해서 넣음, 달러)
 //   part: HAT / HAIR / CLOTHES
-//   look: 모자 "모양:색"(cap:#c8363d), 머리·옷 "색"(#3a2c26)
+//   look: 동현님 costumeData.js 상품 코드 (HAIR_01, TOP_01, HAT_01 …)
 public class CostumeDTO {
 	private int costumeId;
 	private String costumeName;
