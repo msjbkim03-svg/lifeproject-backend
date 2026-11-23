@@ -497,10 +497,12 @@ public class EngineChoice {
 				new String[] { "윗사람이 팀을 이끌어 보지 않겠냐고 해요. 벌이는 늘지만 책임도 커져요." },
 				new Opt("맡는다 (소득↑ · 책임↑)", 2, -1, 0, 0, 0, "더 큰 자리를 맡기로 했다.").act("RANKUP"),
 				new Opt("지금 자리가 좋다", 1, 0, 0, 0, 0, "지금 자리에 남기로 했다. 저녁이 있는 삶이 더 소중했다.")));
-		ALL.add(new Dec("JOBCHANGE", LIFE, 25, 55, 3, 6, EngineChoice::working, "새로운 제안",
+		// 원작 jobchange: 일하는 22~58세에게 해마다 13%쯤, 다른 일 하나 + 같은 일·다른 직장 하나 + 남기 (11/23 동현님: 원작처럼 새 일자리 제안이 주기적으로)
+		ALL.add(new Dec("JOBCHANGE", LIFE, 22, 58, 8, 2, EngineChoice::working, "새로운 제안",
 				new String[] { "다른 곳에서 함께 일하자는 제안이 왔어요." },
-				new Opt("새 일로 옮긴다", 1, 0, -1, 0, 0, "새 일로 옮겼다.").act("JOBCHANGE"),
-				new Opt("지금 일을 계속한다 (경력 유지)", 0, 0, 0, 0, 0, "제안을 고맙게 거절하고 지금 일을 이어 갔다.")));
+				new Opt("새 일로 옮긴다", 3, 0, -1, 0, 0, "새 일로 옮겼다.").act("JOBCHANGE"),
+				new Opt("같은 일, 다른 직장으로 옮긴다", 3, 0, 0, 0, 0, "더 좋은 조건으로 직장을 옮겼다.").act("JOBCHANGE_SAME"),
+				new Opt("지금 일을 계속한다 (경력 유지)", 0, 0, 0, 0, 0, "제안을 고맙게 거절하고 지금 일을 이어 갔다.").act("JOBCHANGE_STAY")));
 		ALL.add(new Dec("HARASS", LIFE, 18, 60, 1, 99, EngineChoice::working, "일터에서 겪는 괴롭힘",
 				new String[] { "윗사람이 사람들 앞에서 모욕을 주고, 하지 않은 일까지 떠넘겨요. 몇 달째 이어지고 있어요." },
 				new Opt("회사에 정식으로 알린다", 1, 0, 0, 0, 0, new String[] { "회사에 정식으로 알렸다. 조사 끝에 그 사람은 다른 부서로 옮겨 갔다.",
