@@ -744,6 +744,9 @@ public class EngineService {
 		int motherDie, fatherDie;        // 부모가 떠날 나이 (부모 생존 N일 때 누가 먼저인지)
 		String motherJob, fatherJob, spouseJob;
 		int spouseGap;                   // 배우자 나이 - 내 나이
+		String spouse0, job0;            // 첫 만남 상대 (예전 인생과 같은 사람)
+		int gap0;
+		int spouseK = 0;                 // 지금 배우자 자리에 있는 만남 번호 (syncSpouse)
 		int[] siblingGap;                // 형제자매 나이 - 내 나이 (+ 손위, − 손아래)
 		String[] siblingSex;
 	}
@@ -755,7 +758,7 @@ public class EngineService {
 			Map.entry("가사·육아", 0.0), Map.entry("농사일", 0.45), Map.entry("날품팔이", 0.4), Map.entry("시장 행상", 0.5),
 			Map.entry("소작농", 0.4), Map.entry("농업 노동자", 0.45), Map.entry("어부", 0.6), Map.entry("자작농", 0.75),
 			Map.entry("시장 상인", 0.75), Map.entry("재봉사", 0.65), Map.entry("목수", 0.8), Map.entry("교사", 1.1),
-			Map.entry("상점 주인", 1.2), Map.entry("면사무소 직원", 1.0), Map.entry("지주", 2.0), Map.entry("공무원", 1.1),
+			Map.entry("상점 주인", 1.2), Map.entry("면사무소 직원", 1.0), Map.entry("지주", 2.0), Map.entry("농장 주인", 1.6), Map.entry("공무원", 1.1),
 			Map.entry("공장 노동자", 0.8), Map.entry("건설 노동자", 0.8), Map.entry("노점상", 0.5), Map.entry("청소 노동자", 0.55),
 			Map.entry("운전기사", 0.85), Map.entry("사무원", 1.0), Map.entry("간호사", 1.1), Map.entry("미용사", 0.8),
 			Map.entry("기술자", 1.1), Map.entry("상인", 0.9), Map.entry("버스 기사", 0.9), Map.entry("회사원", 1.2),
@@ -765,7 +768,7 @@ public class EngineService {
 	// 같은 인생은 늘 같은 배율 (직업 배율 × 0.85~1.15)
 	private double spouseRate(LifeDTO life, FamSeed f) {
 		double k = SPOUSE_RATE.getOrDefault(f.spouseJob, 1.0);
-		return k * (0.85 + new java.util.SplittableRandom(life.getLifeId() * 31L + 7).nextDouble() * 0.3);
+		return k * (0.85 + new java.util.SplittableRandom(life.getLifeId() * 31L + 7 + f.spouseK * 13L).nextDouble() * 0.3);
 	}
 
 	// 결혼한 해에 결혼 상대 소개 한 줄 (원작: 상대의 나이·직업·소득) - 한 인생에 한 번
@@ -808,7 +811,8 @@ public class EngineService {
 		if (!urban) {
 			if (wc <= 2) return mother ? pick(r, "농사일", "날품팔이", "시장 행상") : pick(r, "소작농", "농업 노동자", "날품팔이", "어부");
 			if (wc == 3) return mother ? pick(r, "농사일", "시장 상인", "재봉사") : pick(r, "자작농", "시장 상인", "목수", "어부");
-			return mother ? pick(r, "교사", "상점 주인", "면사무소 직원") : pick(r, "지주", "상점 주인", "공무원", "교사");
+			return mother ? pick(r, "교사", "상점 주인", "면사무소 직원")
+					: year < 1980 ? pick(r, "지주", "상점 주인", "공무원", "교사") : pick(r, "농장 주인", "상점 주인", "공무원", "교사");
 		}
 		if (wc <= 2) return mother ? pick(r, "공장 노동자", "재봉사", "노점상", "청소 노동자") : pick(r, "공장 노동자", "건설 노동자", "노점상", "운전기사");
 		if (wc == 3) return mother ? pick(r, "사무원", "간호사", "시장 상인", "미용사") : pick(r, "사무원", "기술자", "상인", "버스 기사");
@@ -832,6 +836,7 @@ public class EngineService {
 	private FamSeed famSeed(LifeDTO life, CountryStatDTO stat) {
 		FamSeed f = famCache.get(life.getLifeId());
 		if (f != null) {
+			syncSpouse(life, f);
 			return f;
 		}
 		if (famCache.size() > 20000) {
@@ -903,8 +908,12 @@ public class EngineService {
 		// 태어난 나라 이름으로 (사는 나라로 하면 이민 뒤 서버를 다시 켤 때마다 배우자 이름이 바뀌었음)
 		f.spouse = pickName(life.getBirthCountry(), sg, r);
 		f.spouseJob = parentJob(r, Math.max(2, life.getWealthClass()), urban, by + 25, "F".equals(sg));
+		f.spouse0 = f.spouse;
+		f.gap0 = f.spouseGap;
+		f.job0 = f.spouseJob;
 
 		famCache.put(life.getLifeId(), f);
+		syncSpouse(life, f);
 		return f;
 	}
 
@@ -1488,6 +1497,7 @@ public class EngineService {
 		if (engineDao.lockLifeYear(life) == 0) {
 			return null;
 		}
+		engState(life); // 올해 이벤트 기록이 쌓이기 전에 되살려 둠 (만남 번호가 두 번 세지지 않게)
 
 		// 그해 사는 나라 통계 (사망 판정·진학에 사용)
 		CountryStatDTO stat = yearStat(life);
@@ -1517,6 +1527,9 @@ public class EngineService {
 		spouseNote(life, life.getCurrentAge());
 		// ⑤-1-2 집안 형편 변동: 부모님 일이 기울거나 잘 풀림 (11/20)
 		familyFortune(life);
+		// ⑤-1-3 만난 사람 소개 (새로운 만남마다 새 사람) · 수저별 부모님 도움 (11/23)
+		loveYear(life, stat);
+		parentHelpYear(life, stat);
 
 		// ⑤-2 돈 쓰기·투자 (C06-3): 모은 돈 굴리기 + 가진 물건 유지비
 		investStep(life, stat);
@@ -1528,6 +1541,8 @@ public class EngineService {
 		svcYear(life);
 		// ⑤-6 취미 (원작 hobby): 해마다 작은 효과와 비용
 		hobbyYear(life, stat);
+		// ⑤-7 습관·돈 약속 (원작 담배·술·도박·복권·빌려준 돈·보증, 11/23)
+		habitYear(life, stat);
 		fixStats(life);
 
 		// ⑥ 사망 판정 (C07): 올해(현재 나이)를 못 넘기면 사망
@@ -1610,7 +1625,7 @@ public class EngineService {
 		if (lived == 0) {
 			String home = homeLine(life, stat);
 			saveEventLog(life, lived, null, null, home);
-			yearEvents.add(noteEvent(home));
+			yearEvents.add(0, noteEvent(home)); // 0세 기록은 집안 소개가 맨 앞 (시대 사건보다 먼저)
 		}
 		for (String note : milestones(life, eduBefore, schoolBefore, jobBefore, jobIdBefore)) {
 			saveEventLog(life, lived, null, null, note);
@@ -1811,7 +1826,7 @@ public class EngineService {
 			if (!histWarThisYear(life)) {
 				lines.add(WAR_START.getOrDefault(key, WAR_START.getOrDefault(id, iga(name) + " 일어났다.")));
 			}
-		} else if (age == 0) {
+		} else if (age == 0 && !histWarThisYear(life)) { // 윤아님 전쟁 이벤트가 같은 해에 있으면 생략
 			String c = life.getCountryName() == null ? "이 나라" : life.getCountryName();
 			lines.add("태어난 해, " + c + "에서는 " + iga(name) + " 이어지고 있었다.");
 		}
@@ -1847,6 +1862,11 @@ public class EngineService {
 			return false;
 		}
 		for (EventResultDTO e : life.getEvents()) {
+			// 제목에 전쟁·내전이 들어간 역사 사건도 같은 전쟁 소식으로 봄 (유형 코드가 WAR가 아닐 때)
+			if ("HIST".equals(e.getEventType()) && e.getEventId() != null && e.getTitle() != null
+					&& (e.getTitle().contains("전쟁") || e.getTitle().contains("내전"))) {
+				return true;
+			}
 			if ("HIST".equals(e.getEventType()) && e.getEventId() != null) {
 				HistEffectDTO h = engineDao.selectHistEffect(e.getEventId());
 				if (h != null && "WAR".equals(h.getTypeCode())) {
@@ -2235,7 +2255,7 @@ public class EngineService {
 		if (r <= -0.18) {
 			note = "시장이 크게 떨어져 " + INV_NAME.get(t) + "에 맡긴 돈의 " + pct + "%가 사라졌다. (" + wonSigned(life, gain) + ")";
 		} else if (r >= 0.25) {
-			note = INV_NAME.get(t) + "이(가) 크게 올라 맡긴 돈이 " + pct + "% 불었다. (" + wonSigned(life, gain) + ")";
+			note = iga(INV_NAME.get(t)) + " 크게 올라 맡긴 돈이 " + pct + "% 불었다. (" + wonSigned(life, gain) + ")";
 		}
 		if (note != null) {
 			saveEventLog(life, age, null, null, note);
@@ -2258,11 +2278,22 @@ public class EngineService {
 			Map.entry("CHN2024", -0.06), Map.entry("THA1997", -0.15), Map.entry("IDN1998", -0.20), Map.entry("MYS1998", -0.12),
 			Map.entry("ALL2008", -0.06));
 
+	// 원작 집값 (11/23 동현님: 오르기만 함): 물가 뺀 실질로 해마다 +0.2% + 시장 순환
+	//   시장 수준 = 지난해의 85% + 새 충격 ±5% (−60~+60%) → 몇 해 오르면 몇 해 내리는 오르내림, 길게 보면 거의 제자리
+	//   그해 변화 = 0.2% + (올해 시장 수준 − 지난해 시장 수준) + 실제 큰 흐름 (−30~+25%)
+	private double houseMarket(String cc, int year) {
+		double m = 0;
+		for (int y = year - 60; y <= year; y++) {
+			Random g = new Random(cc.hashCode() * 1000003L + y);
+			m = clamp(0.85 * m + 0.05 * g.nextGaussian(), -0.6, 0.6);
+		}
+		return m;
+	}
+
 	private double houseReturn(String cc, int year) {
-		Random g = new Random(cc.hashCode() * 1000003L + year);
-		double r = 0.02 + 0.06 * g.nextGaussian();
+		double r = 0.002 + houseMarket(cc, year) - houseMarket(cc, year - 1);
 		r = r + HOUSE_SHOCK.getOrDefault(cc + year, 0.0) + HOUSE_SHOCK.getOrDefault("ALL" + year, 0.0);
-		return clamp(r, -0.35, 0.4);
+		return clamp(r, -0.3, 0.25);
 	}
 
 	private double housePriceOf(LifeDTO life, CountryStatDTO stat) {
@@ -2290,11 +2321,15 @@ public class EngineService {
 		}
 		life.setAssets(life.getAssets() + d);
 		book(life, d > 0 ? "내 집 시세 오름" : "내 집 시세 내림", d);
+		// 원작처럼 크게(10% 넘게) 움직인 해만, 5년에 한 번까지 기록 (작은 오르내림은 순자산 내역에만)
 		int pct = (int) Math.round(Math.abs(r) * 100);
-		if (pct < 5) {
+		EngState hs = engState(life);
+		Integer lastHp = hs.done.get("HP");
+		if (pct < 10 || age < 18 || lastHp != null && age - lastHp < 5) {
 			return;
 		}
-		String note = (d > 0 ? "집값이 올라 내 집 시세가 " + pct + "% 뛰었다. (" : "집값이 떨어져 내 집 시세가 " + pct + "% 내렸다. (")
+		hs.done.put("HP", age);
+		String note = (d > 0 ? "동네 집값이 크게 올라 집값이 " + pct + "% 뛰었다. (" : "집값이 한 해 사이 " + pct + "% 떨어졌다. (")
 				+ wonSigned(life, d) + ", 지금 시세 " + won(life, v + d) + ")";
 		saveEventLog(life, age, null, null, note);
 		List<EventResultDTO> ev = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
@@ -2475,13 +2510,20 @@ public class EngineService {
 		if ("BUY_HOUSE".equals(itemId)) {
 			long price = it.getPrice();
 			long cash = list.getCash(); // 쓸 수 있는 돈 (shop 과 같은 기준)
+			long help = Math.round(homeHelp(life, yearStat(life), price, cash)); // 수저별 부모님 도움 (원작 homeHelp)
+			if (help > 0) {
+				life.setAssets(life.getAssets() + help);
+				cash = cash + help;
+				engState(life).done.put("PAR_HOUSE", life.getCurrentAge());
+			}
 			long loan = Math.max(0, price - cash);
 			long interest = Math.round(loan * 0.25);
 			life.setAssets(life.getAssets() - interest); // 집값은 재산으로 남고(현금 → 집) 이자만 나감
 			life.setHappiness(life.getHappiness() + 10);
 			owns.add("HOUSE");
 			life.setHouseValue(price); // 이 값에서 해마다 집값 흐름만큼 오르내림 (houseStep)
-			text = "내 집을 마련했다. (집값 " + won(life, price) + (loan > 0 ? ", 대출 " + won(life, loan) + " · 이자 약 " + won(life, interest) : "") + ")";
+			text = (help > 0 ? "부모님의 도움(+" + won(life, help) + ")을 받아 내 집을 마련했다." : "내 집을 마련했다.")
+					+ " (집값 " + won(life, price) + (loan > 0 ? ", 대출 " + won(life, loan) + " · 이자 약 " + won(life, interest) : "") + ")";
 		} else if (it.getKind().equals("BUY")) {
 			String code = itemId.substring(4);
 			life.setAssets(life.getAssets() - it.getPrice());
@@ -2648,6 +2690,12 @@ public class EngineService {
 		saveEventLog(life, life.getCurrentAge() - 1, null, null, note);
 		List<EventResultDTO> shown = new ArrayList<>();
 		shown.add(noteEvent(note));
+		String fund = startFund(life, stat); // 수저별 살림 밑천 (원작)
+		if (fund != null) {
+			saveEventLog(life, life.getCurrentAge() - 1, null, null, fund);
+			shown.add(noteEvent(fund));
+			engineDao.updateLifeYear(life);
+		}
 		life.setEvents(shown);
 		fillRegion(life);
 		return life;
@@ -3153,6 +3201,15 @@ public class EngineService {
 		if ("EMPLOYED".equals(life.getJobStatus()) && age >= retireAge(life, stat)) {
 			boolean rehired = age - life.getJobYears() >= retireAge(life, stat);
 			if (!rehired) {
+				// 원작 retire: 정년이 되면 은퇴할지 묻고, 시간제·계속 일하기를 고르면 5년 더 (건강 40 미만이면 그만둠)
+				EngState rs = engState(life);
+				if (rs.retUntil != null && age <= rs.retUntil && life.getHealth() >= 40) {
+					return;
+				}
+				if (rs.retUntil == null && !rs.done.containsKey("RETIRE") && life.getHealth() >= 40 && age < 75) {
+					rs.retireAsk = true; // 그해 끝에 은퇴할지 물음 (rollEngineChoice)
+					return;
+				}
 				life.setJobStatus("RETIRED");
 				life.setPension(pensionOf(life, stat));
 				return;
@@ -3516,18 +3573,47 @@ public class EngineService {
 		}
 	}
 
-	// ================= 대학 학비 (원작 TUI · FAM_PAY · STU_LOAN 단순화) =================
-	//   한 해 학비 = 그 나라 중위 소득 × (고소득국 25% · 중앙아시아 15% · 그 외 12% · 남아시아 10%)
-	//   부모님 몫 = 학비 × 집안 형편별 (1분위 5% · 2분위 20% · 3분위 45% · 4분위 75% · 5분위 100%, 원작 FAM_PAY)
-	//   나머지: 사회주의 시절(중국 1989년 전·베트남 1990년 전·북한)은 국가 장학금 →
-	//           학자금 대출이 있는 나라·해(한국 2009년~, 일본 1953년~, 중국 1999년~, 원작 STU_LOAN)는 대출 →
-	//           그 밖에는 성적 장학금(지식이 높을수록, 최대 60%) 아니면 모은 돈으로 (모자라면 빚)
+	// ================= 대학 등록금 (원작 TUI · tuiStart · tuiYear 그대로, 11/23) =================
+	//   등록금을 따로 계산하는 나라는 원작처럼 한국·중국·일본·베트남만 (그 밖의 나라는 원작에도 등록금 계산이 없음)
+	//   한 해 등록금 = 중위 소득 × {국공립, 사립} 비율 × 그해 배율 (사립에 갈 확률은 나라마다, 입학 때 한 번 정함)
+	//   장학금 (학부만): 한국 2012년~ 국가장학금 (형편별 확률·금액, 1분위는 전액) · 중국 2007년~ 국가 조학금 ·
+	//                    베트남 2020년~ 성적 장학금 (지식 65 넘으면 학기마다 기회, 사립은 1/4)
+	//   부모님 몫 = (등록금 − 장학금) × 형편별 비율 (원작 FAM_PAY 0·5·20·45·75·100%, 중국은 60·85·100·100·100%)
+	//               부모님이 안 계시거나 결혼했거나 30세 넘으면 0, 다이아수저 중 아주 부유한 집(원작 rich)은 100%
+	//   나머지는 스스로 마련 (모자라면 빚, 대출이 있는 나라·해는 '학자금 대출'로 기록)
 	private static final double[] FAM_PAY = { 0, 0.05, 0.2, 0.45, 0.75, 1 };
+	private static final double[] CHN_FP = { 0, 0.6, 0.85, 1, 1, 1 };
+	private static final double[] KR_P = { 0, 0.8, 0.75, 0.6, 0.3, 0.02 };
+	private static final double[] KR_A = { 0, 0.17, 0.125, 0.105, 0.1, 0.03 };
+	private static final double[] CN_P = { 0, 0.7, 0.5, 0.2, 0.03, 0 };
+	// {국공립 비율, 사립 비율, 사립에 갈 확률}
+	private static final Map<String, double[]> TUI_F = Map.of(
+			"KOR", new double[] { 0.125, 0.225, 0.78 }, "CHN", new double[] { 0.107, 0.41, 0.22 },
+			"JPN", new double[] { 0.155, 0.28, 0.73 }, "VNM", new double[] { 0.25, 0.55, 0.25 });
+	// 연도별 배율 {연도, 배율} (없으면 1)
+	private static final Map<String, double[][]> TUI_Y = Map.of(
+			"CHN", new double[][] { { 0, 0 }, { 1989, 2.7 }, { 1994, 4.5 }, { 1997, 6.7 }, { 2000, 11 }, { 2005, 5.7 }, { 2010, 2.8 }, { 2015, 1.7 }, { 2020, 1.15 }, { 2023, 1 } },
+			"JPN", new double[][] { { 0, 0.15 }, { 1976, 0.35 }, { 1980, 0.5 }, { 1990, 0.67 }, { 2000, 0.87 }, { 2005, 1 } },
+			"VNM", new double[][] { { 0, 0.6 }, { 2023, 1 } });
 
-	private double tuitionOf(LifeDTO life, CountryStatDTO stat, double med) {
-		String g = groupOf(life.getCurrentCountry(), stat);
-		double k = "hi".equals(g) ? 0.25 : "eca".equals(g) ? 0.15 : "sa".equals(g) ? 0.10 : 0.12;
-		return med * k;
+	private static final class Tui {
+		double fee, schol, fam, rest, famShare;
+		String scholName;
+		boolean priv;
+	}
+
+	private double tuiStep(String cc, int y) {
+		double[][] t = TUI_Y.get(cc);
+		if (t == null) {
+			return 1;
+		}
+		double k = 1;
+		for (double[] row : t) {
+			if (y >= row[0]) {
+				k = row[1];
+			}
+		}
+		return k;
 	}
 
 	private boolean freeUni(LifeDTO life) {
@@ -3542,54 +3628,121 @@ public class EngineService {
 		return "KOR".equals(cc) && y >= 2009 || "JPN".equals(cc) && y >= 1953 || "CHN".equals(cc) && y >= 1999;
 	}
 
-	// 부모님이 대 줄 몫 (부모님이 안 계시면 0)
-	private double famPay(LifeDTO life) {
-		return "N".equals(life.getParentAlive()) ? 0 : FAM_PAY[(int) clamp(life.getWealthClass(), 1, 5)];
+	// 이번 등록금 (grad: 대학원이면 장학금 없음) - 등록금을 계산하지 않는 나라면 null
+	private Tui tuition(LifeDTO life, CountryStatDTO stat, double med, boolean grad) {
+		String cc = life.getCurrentCountry();
+		double[] f = TUI_F.get(cc);
+		if (f == null || freeUni(life)) {
+			return null;
+		}
+		int y = life.getBirthYear() + life.getCurrentAge();
+		int q = (int) clamp(life.getWealthClass(), 1, 5);
+		// 국공립·사립과 국가장학금 여부는 입학 때 한 번 정한 것처럼 인생마다 늘 같게
+		java.util.SplittableRandom r = new java.util.SplittableRandom(life.getLifeId() * 131L + (grad ? 7 : 3));
+		Tui t = new Tui();
+		t.priv = r.nextDouble() < f[2];
+		t.fee = med * (t.priv ? f[1] : f[0]) * tuiStep(cc, y);
+		if (t.fee <= 0) {
+			return null;
+		}
+		double sr = r.nextDouble();
+		if (!grad && "KOR".equals(cc) && y >= 2012 && sr < KR_P[q] + (q == 4 && y >= 2025 ? 0.2 : 0)) {
+			t.schol = Math.min(t.fee, q == 1 ? t.fee : med * KR_A[q]);
+			t.scholName = "국가장학금";
+		} else if (!grad && "CHN".equals(cc) && y >= 2007 && sr < CN_P[q]) {
+			t.schol = Math.min(t.fee, med * 0.055 * tuiStep(cc, y));
+			t.scholName = "국가 조학금";
+		} else if (!grad && "VNM".equals(cc) && y >= 2020) {
+			int n = 0;
+			for (int i = 0; i < 2; i++) {
+				if (random.nextDouble() < clamp((life.getKnowledge() - 65) / 170, 0, 0.2) * (t.priv ? 0.25 : 1)) {
+					n++;
+				}
+			}
+			if (n > 0) {
+				t.schol = Math.min(t.fee, t.fee / 2 * n);
+				t.scholName = "학업 장려 장학금";
+			}
+		}
+		double m = 0;
+		if (!"N".equals(life.getParentAlive()) && !"Y".equals(life.getMarriedYn()) && life.getCurrentAge() < 30) {
+			m = richLevel(life) > 0 ? 1 : "CHN".equals(cc) ? CHN_FP[q] : FAM_PAY[q];
+		}
+		t.famShare = m;
+		t.fam = (t.fee - t.schol) * m;
+		t.rest = Math.max(0, t.fee - t.schol - t.fam);
+		return t;
 	}
 
-	// 진학 선택 창에 붙일 학비 안내 한 줄
+	// 대학 진학 선택 창에 붙일 등록금 안내 (원작 tuiYear 첫해 문장)
 	private String uniFeeNote(LifeDTO life, CountryStatDTO stat) {
 		if (freeUni(life)) {
-			return "학비는 나라가 대 줘요 (국가 장학금·기숙사).";
+			return "등록금은 없고, 나라에서 주는 장학금을 받으며 기숙사에서 지내요.";
 		}
-		double tui = tuitionOf(life, stat, medIncome(life.getCurrentCountry(), stat));
-		int fp = (int) Math.round(famPay(life) * 100);
-		String rest = fp >= 100 ? "" : stuLoanOK(life) ? " 나머지는 학자금 대출을 받아요." : " 나머지는 장학금을 받거나 모은 돈으로 내야 해요.";
-		return "학비는 한 해 약 " + won(life, tui) + ". " + (fp > 0 ? "부모님이 " + fp + "%를 대 주세요." : "부모님 도움은 어려워요.") + rest;
+		Tui t = tuition(life, stat, medIncome(life.getCurrentCountry(), stat), false);
+		if (t == null) {
+			return "";
+		}
+		StringBuilder sb = new StringBuilder("대학 등록금은 한 해 약 " + won(life, t.fee) + (t.priv ? " (사립)" : " (국공립)") + "이에요.");
+		if (t.schol > 0) {
+			sb.append(" ").append(t.scholName).append("으로 한 해 ").append(won(life, t.schol)).append("을 받아요.");
+		}
+		sb.append(" ").append(feeWho(life, t, true));
+		return sb.toString();
+	}
+
+	// 등록금을 누가 내는지 (원작 문장)
+	private String feeWho(LifeDTO life, Tui t, boolean future) {
+		if (t.rest <= t.fee * 0.02) {
+			return t.fam > 0 ? (future ? "나머지는 부모님이 내 주세요." : "나머지는 부모님이 내 주셨다.") : "";
+		}
+		String self = stuLoanOK(life) ? (future ? "학자금 대출로 내요" : "학자금 대출로 냈다") : (future ? "스스로 마련해야 해요" : "스스로 마련했다");
+		if (t.fam > 0) {
+			int pct = (int) Math.round(t.famShare * 100);
+			return future ? "부모님이 " + pct + "%를 보태 주시고, 나머지는 " + self + "."
+					: "부모님이 " + pct + "%를 보태 주셨고, 나머지는 " + self + ".";
+		}
+		return (future ? "부모님 도움은 어려워, 등록금은 " : "부모님 도움 없이 등록금은 ") + self + ".";
 	}
 
 	private void uniFees(LifeDTO life, CountryStatDTO stat, double med) {
 		EngState es = engState(life);
+		boolean grad = "GRAD".equals(life.getEduLevel());
 		String key = "FEE_" + life.getEduLevel();
 		boolean first = !es.done.containsKey(key);
 		es.done.put(key, life.getCurrentAge());
 		if (freeUni(life)) {
 			if (first) {
-				addYearNote(life, "학비는 나라가 대 주었다. 기숙사에서 지내며 공부했다.");
+				String t = (grad ? "대학원" : "대학") + " 등록금은 없었다. 나라에서 주는 장학금을 받으며 기숙사에서 지냈다.";
+				saveEventLog(life, life.getCurrentAge(), null, null, t);
+				addYearNote(life, t);
 			}
 			return;
 		}
-		double tui = tuitionOf(life, stat, med);
-		double fam = tui * famPay(life);
-		double rest = tui - fam;
-		String how;
-		if (rest <= 0) {
-			how = "학비는 부모님이 모두 대 주셨다.";
-		} else if (stuLoanOK(life)) {
-			life.setAssets(life.getAssets() - Math.round(rest));
-			book(life, "학자금 대출", -rest);
-			how = (fam > 0 ? "학비 일부는 부모님이 대 주셨고, " : "") + "나머지는 학자금 대출을 받았다.";
-		} else if (random.nextDouble() < clamp((life.getKnowledge() - 55) / 50, 0.05, 0.6)) {
-			how = "성적 장학금을 받아 " + (fam > 0 ? "부모님 도움과 함께 " : "") + "학비를 해결했다.";
-		} else {
-			life.setAssets(life.getAssets() - Math.round(rest));
-			book(life, "대학 학비 (내가 낸 몫)", -rest);
-			how = (fam > 0 ? "부모님이 학비 일부를 보태 주셨고, " : "") + "나머지는 모은 돈과 아르바이트로 냈다.";
+		Tui t = tuition(life, stat, med, grad);
+		if (t == null) {
+			return; // 원작처럼 이 나라는 등록금을 따로 계산하지 않음
 		}
+		book(life, grad ? "대학원 등록금" : "대학 등록금", -t.fee);
+		if (t.schol > 0) {
+			book(life, t.scholName, t.schol);
+		}
+		if (t.fam > 0) {
+			book(life, "부모님이 내 준 등록금", t.fam);
+		}
+		life.setAssets(life.getAssets() - Math.round(t.rest));
 		if (first) {
-			String t = ("GRAD".equals(life.getEduLevel()) ? "대학원 " : "대학 ") + how;
-			saveEventLog(life, life.getCurrentAge(), null, null, t);
-			addYearNote(life, t);
+			StringBuilder sb = new StringBuilder((grad ? "대학원" : "대학") + " 등록금은 한 해 약 " + won(life, t.fee)
+					+ (t.priv ? " (사립)" : " (국공립)") + "이었다.");
+			if (t.schol > 0) {
+				sb.append(" ").append(t.scholName).append("으로 한 해 ").append(won(life, t.schol)).append("을 받았다.");
+			}
+			String who = feeWho(life, t, false);
+			if (!who.isEmpty()) {
+				sb.append(" ").append(who);
+			}
+			saveEventLog(life, life.getCurrentAge(), null, null, sb.toString());
+			addYearNote(life, sb.toString());
 		}
 	}
 
@@ -3738,7 +3891,10 @@ public class EngineService {
 
 	// 받침에 따라 이/가, (으)로
 	private static String iga(String w) {
-		char ch = w.charAt(w.length() - 1);
+		// 끝의 괄호·기호는 건너뛰고 마지막 한글로 판단: '주식 (지수)' → '주식 (지수)가'
+		int i = w.length() - 1;
+		while (i > 0 && (w.charAt(i) == ')' || w.charAt(i) == ' ')) i--;
+		char ch = w.charAt(i);
 		if (ch < 0xAC00 || ch > 0xD7A3) {
 			return w + "이(가)";
 		}
@@ -4064,6 +4220,9 @@ public class EngineService {
 				// 상황 문장만 기록하고, 효과는 고른 선택지로 (PENDING_EVENT_ID에 저장)
 				life.setPendingEventId(e.getEventId());
 				life.setNeedChoice(true);
+				if (isProposal(e) && !"Y".equals(life.getMarriedYn())) {
+					e.setLogText(e.getLogText() + " " + candLine(life, yearStat(life), true)); // 원작 wedtalk: 상대의 나이·일·형편·돈
+				}
 				life.setPendingEvent(e);
 				life.setChoiceCosts(cs);
 				saveEventLog(life, life.getCurrentAge(), e.getEventId(), null, e.getLogText());
@@ -4086,6 +4245,264 @@ public class EngineService {
 		}
 		all.addAll(events);
 		life.setEvents(all);
+	}
+
+	// ================= 수저별 부모님 도움 (원작 famCanHelp · richGiftYear · homeHelp · ESTATE, 11/23) =================
+	//   ① 첫 직장 살림 밑천: 30세 전 첫 일자리, 동수저 이상 → 형편 위치 소득 × 15% × (형편−1)
+	//   ② 학창 시절 빚 갚아 줌: 32세 전·빚이 있고·대학을 다녔고·금수저 이상 → 해마다 금 25% · 다이아 50% 확률, 한 번
+	//      (갚아 주는 돈: 중위 소득 × 금 0.6 · 다이아 1.5까지)
+	//   ③ 일자리를 찾는 동안 생활비: 35세 전·미혼·금수저 이상 → 중위 소득 × 원작 FAM_PAY × 0.6 (아주 부유하면 ×1)
+	//   ④ 아주 부유한 집 (원작 rich): 다이아수저 가운데 5% (그중 10%는 더 부유) →
+	//      18~25세 해마다 중위 소득 × 0.35 (더 부유 1.3), 28~45세에 한 번 재산 일부를 미리 물려줌 (해마다 12%)
+	//   ⑤ 집 살 때 도움: 45세 전·은수저 이상·한 번 → 중위 소득 × (형편−2) × (동아시아 1.5 · 그 밖 0.5)
+	//   ⑥ 부모님이 돌아가시면 남긴 재산 (원작 ESTATE): 중위 소득 × {0, 0.5, 1.5, 4, 8, 18}[형편] (+ 은수저 이상은 부모님 집)
+	//      × 0.5~1.5 ÷ (1 + 0.8 × 형제자매 수(최대 4)), 흙·동수저는 장례를 치르고 나면 거의 남지 않음
+	private static final double[] ESTATE = { 0, 0.5, 1.5, 4, 8, 18 };
+	private static final double[] PHOME_K = { 0, 0.5, 0.65, 0.8, 1, 1.4 };
+	private static final java.util.Set<String> HOME_HELP_CC = java.util.Set.of("CHN", "KOR", "JPN", "TWN", "HKG", "SGP", "VNM");
+	private static final Map<String, Double> EST_TAX = Map.of("KOR", 0.35, "JPN", 0.35, "TWN", 0.1, "PHL", 0.06, "THA", 0.05);
+
+	// 아주 부유한 집 (원작 S.flags.rich): 0 아님, 1 부유, 2 더 부유 - 다이아수저로 태어난 사람의 5%
+	private static int richLevel(LifeDTO life) {
+		if (originOf(life) < 5) {
+			return 0;
+		}
+		java.util.SplittableRandom r = new java.util.SplittableRandom(life.getLifeId() * 977L + 13);
+		if (r.nextDouble() >= 0.05) {
+			return 0;
+		}
+		return r.nextDouble() < 0.1 ? 2 : 1;
+	}
+
+	// 그 나라 소득 분포에서 p 위치의 소득 (원작 incomeAt)
+	private double incomeAt(String cc, CountryStatDTO stat, double p) {
+		double sg = sigmaOf(cc, stat);
+		return gdpOf(stat) * 0.9 * Math.exp(sg * invNorm(clamp(p, 0.01, 0.99)) - sg * sg / 2);
+	}
+
+	private boolean parentsHelp(LifeDTO life) {
+		return !"N".equals(life.getParentAlive());
+	}
+
+	// 부모님 도움 한 줄 (인생 기록 + 올해 화면)
+	private void parentNote(LifeDTO life, String text) {
+		saveEventLog(life, life.getCurrentAge(), null, null, text);
+		addYearNote(life, text);
+	}
+
+	// ① 첫 직장 살림 밑천 (chooseJob 에서)
+	private String startFund(LifeDTO life, CountryStatDTO stat) {
+		int q = (int) clamp(life.getWealthClass(), 1, 5);
+		EngState s = engState(life);
+		if (s.done.containsKey("PAR_SEED") || q < 2 || life.getCurrentAge() >= 30 || !parentsHelp(life)
+				|| life.getAssets() > medIncome(life.getCurrentCountry(), stat) * 0.5) {
+			return null;
+		}
+		s.done.put("PAR_SEED", life.getCurrentAge());
+		double a = incomeAt(life.getCurrentCountry(), stat, q / 5.0 - 0.1) * 0.15 * (q - 1);
+		life.setAssets(life.getAssets() + Math.round(a));
+		return "일을 시작하자 부모님이 살림 밑천으로 " + won(life, a) + "을 보태 주셨다.";
+	}
+
+	// ②③④ 해마다 (moneyStep 다음)
+	private void parentHelpYear(LifeDTO life, CountryStatDTO stat) {
+		if (!"PLAYING".equals(life.getStatus()) || !parentsHelp(life)) {
+			return;
+		}
+		int age = life.getCurrentAge();
+		int q = (int) clamp(life.getWealthClass(), 1, 5);
+		int rich = richLevel(life);
+		boolean married = "Y".equals(life.getMarriedYn());
+		boolean student = "ENROLLED".equals(life.getSchoolStatus());
+		double med = medIncome(life.getCurrentCountry(), stat);
+		EngState s = engState(life);
+		boolean uniDone = "UNI".equals(life.getEduLevel()) || "GRAD".equals(life.getEduLevel());
+
+		// ② 학창 시절 빚
+		if (!student && uniDone && age < 32 && life.getAssets() < 0 && q >= 4 && !s.done.containsKey("PAR_DEBT")
+				&& random.nextDouble() < (q == 5 ? 0.5 : 0.25)) {
+			double pay = Math.min(-life.getAssets(), med * (q == 5 ? 1.5 : 0.6));
+			life.setAssets(life.getAssets() + Math.round(pay));
+			book(life, "부모님이 갚아 준 빚", pay);
+			s.done.put("PAR_DEBT", age);
+			parentNote(life, "부모님이 학창 시절의 빚 " + won(life, pay) + "을 갚아 주셨다.");
+		}
+		// ③ 일자리를 찾는 동안 생활비
+		if (!student && !married && age < 35 && age >= 18 && q >= 4 && "UNEMPLOYED".equals(life.getJobStatus())) {
+			double a = med * FAM_PAY[q] * (rich > 0 ? 1 : 0.6) * 0.3; // 한 해 생활비 몫 (원작 q × FAM_PAY, q = 최소 생활비 중위 30%)
+			life.setAssets(life.getAssets() + Math.round(a));
+			book(life, "부모님이 보내 준 생활비", a);
+			if (!s.done.containsKey("PAR_LIVE")) {
+				s.done.put("PAR_LIVE", age);
+				parentNote(life, "일자리를 찾는 동안 부모님이 생활비를 보내 주셨다.");
+			}
+		}
+		// ④ 아주 부유한 집
+		if (rich > 0 && age >= 18 && age <= 25) {
+			double a = med * (rich == 2 ? 1.3 : 0.35);
+			life.setAssets(life.getAssets() + Math.round(a));
+			book(life, "부모님이 보태 준 살림 밑천", a);
+			if (!s.done.containsKey("PAR_RICH")) {
+				s.done.put("PAR_RICH", age);
+				parentNote(life, "부모님이 스물다섯이 될 때까지 해마다 " + won(life, a) + "씩 보내 주시기로 했다.");
+			}
+		}
+		if (rich > 0 && age >= 28 && age <= 45 && !s.done.containsKey("PAR_GIFT") && random.nextDouble() < 0.12) {
+			int sib = famSeed(life, stat).siblingGap.length;
+			double gift = med * (rich == 2 ? 300 : 60) * 0.15 * (0.6 + 0.6 * random.nextDouble()) / (1 + Math.min(6, sib));
+			double tax = gift * EST_TAX.getOrDefault(life.getCurrentCountry(), 0.0);
+			life.setAssets(life.getAssets() + Math.round(gift - tax));
+			book(life, "부모님이 미리 물려준 재산", gift - tax);
+			s.done.put("PAR_GIFT", age);
+			parentNote(life, "부모님이 재산의 일부를 미리 물려주셨다. (+" + won(life, gift - tax) + ")"
+					+ (tax > 0 ? " 증여세로 " + won(life, tax) + "을 냈다." : ""));
+		}
+	}
+
+	// ⑤ 집 살 때 부모님 도움 (돈이 모자랄 때만)
+	private double homeHelp(LifeDTO life, CountryStatDTO stat, double price, double cash) {
+		int q = (int) clamp(life.getWealthClass(), 1, 5);
+		if (!parentsHelp(life) || life.getCurrentAge() > 45 || q < 3 || engState(life).done.containsKey("PAR_HOUSE")) {
+			return 0;
+		}
+		double need = price - Math.max(0, cash);
+		if (need <= 0) {
+			return 0;
+		}
+		int rich = richLevel(life);
+		if (rich > 0) {
+			return Math.min(need, price * (rich == 2 ? 1 : 0.6));
+		}
+		double med = medIncome(life.getCurrentCountry(), stat);
+		return Math.min(need, med * (q - 2) * (HOME_HELP_CC.contains(life.getCurrentCountry()) ? 1.5 : 0.5));
+	}
+
+	// ⑥ 부모님이 남긴 재산 (부모님 별세 때)
+	private void parentEstate(LifeDTO life) {
+		CountryStatDTO stat = yearStat(life);
+		double med = medIncome(life.getCurrentCountry(), stat);
+		int q = (int) clamp(life.getWealthClass(), 1, 5);
+		if (q < 3) {
+			saveEventLog(life, life.getCurrentAge(), null, null, "부모님이 남긴 재산은 장례를 치르고 나니 거의 남지 않았다.");
+			addYearNote(life, "부모님이 남긴 재산은 장례를 치르고 나니 거의 남지 않았다.");
+			return;
+		}
+		boolean urban = "Y".equals(life.getIsUrban());
+		double o = med * ESTATE[q] * (urban ? 1 : 0.6);
+		double home = med * ("hi".equals(groupOf(life.getCurrentCountry(), stat)) ? 5.5 : 5) * (urban ? 1.4 : 0.7) * PHOME_K[q];
+		int sib = famSeed(life, stat).siblingGap.length;
+		double share = (home + o * 0.4) * (0.5 + random.nextDouble()) / (1 + 0.8 * Math.min(4, sib));
+		double tax = share > med * 10 ? (share - med * 10) * EST_TAX.getOrDefault(life.getCurrentCountry(), 0.0) : 0;
+		double got = share - tax;
+		life.setAssets(life.getAssets() + Math.round(got));
+		book(life, "부모님이 남긴 재산", got);
+		String t = "부모님이 남긴 재산 가운데 " + (sib > 0 ? "형제자매와 나누고 " : "") + "내 몫으로 " + won(life, got) + "을 물려받았다."
+				+ (tax > 0 ? " 상속세로 " + won(life, tax) + "을 냈다." : "");
+		saveEventLog(life, life.getCurrentAge(), null, null, t);
+		addYearNote(life, t);
+	}
+
+	// ================= 만난 사람 · 결혼 상대 (원작 partner · wedtalk, 11/23) =================
+	//   윤아님 '새로운 만남' 이벤트가 나올 때마다 새 사람 (k번째 만남, 인생 번호와 k로 늘 같게)
+	//   이름·나이·성격·하는 일·집안 형편(내 형편 ±1)을 바로 알려 주고, '청혼' 창에는 모아 둔 돈·빚까지
+	//   결혼하면 그 사람이 배우자 (가족과 삶 · 결혼 상대 소개 줄 · 배우자 소득이 모두 같은 사람)
+	private static final String[] PERSONA = { "다정한", "성실한", "유머 있는", "야무진", "조용한", "활달한" };
+
+	private static final class Cand {
+		String name, job, persona;
+		int gap, q;
+		double saveK;
+	}
+
+	private Cand cand(LifeDTO life, FamSeed f, int k) {
+		Cand c = new Cand();
+		java.util.SplittableRandom r = new java.util.SplittableRandom(life.getLifeId() * 7919L + 503 + k * 1009L);
+		boolean meM = "M".equals(life.getGender());
+		String sg = meM ? "F" : "M";
+		c.q = (int) clamp(life.getWealthClass() + r.nextInt(3) - 1, 1, 5);
+		c.persona = PERSONA[r.nextInt(PERSONA.length)];
+		c.saveK = r.nextDouble();
+		if (k == 0) {
+			c.name = f.spouse0;
+			c.gap = f.gap0;
+			c.job = f.job0;
+		} else {
+			c.name = pickName(life.getBirthCountry(), sg, r);
+			c.gap = (meM ? -1 : 1) * (1 + r.nextInt(4)) + (r.nextDouble() < 0.25 ? (meM ? 3 : -3) : 0);
+			c.job = parentJob(r, Math.max(2, c.q), "Y".equals(life.getIsUrban()), life.getBirthYear() + 25, "F".equals(sg));
+		}
+		return c;
+	}
+
+	// 지금 만나는 사람을 배우자 자리에 (famSeed 를 쓰는 곳 모두 같은 사람)
+	private void syncSpouse(LifeDTO life, FamSeed f) {
+		int k = engState(life).candK;
+		if (f.spouseK == k) {
+			return;
+		}
+		Cand c = cand(life, f, k);
+		f.spouse = c.name;
+		f.spouseGap = c.gap;
+		f.spouseJob = c.job;
+		f.spouseK = k;
+	}
+
+	// 그 사람이 모아 온 돈 (마이너스면 빚): 집안 형편과 나이로
+	private double candSaved(Cand c, double med, int age) {
+		double years = clamp((age - 20) / 10.0, 0, 3);
+		if (c.q <= 2 && c.saveK < 0.4) {
+			return -med * (0.1 + 0.5 * c.saveK);
+		}
+		return med * Math.max(0, c.q - 1.8) * 0.25 * years * (0.5 + c.saveK);
+	}
+
+	// 소개 문장 (proposal: 청혼 창이면 돈 이야기까지)
+	private String candLine(LifeDTO life, CountryStatDTO stat, boolean proposal) {
+		FamSeed f = famSeed(life, stat);
+		Cand c = cand(life, f, engState(life).candK);
+		int sa = Math.max(18, life.getCurrentAge() + c.gap);
+		String sex = "M".equals(life.getGender()) ? "여성" : "남성";
+		double rate = SPOUSE_RATE.getOrDefault(c.job, 1.0)
+				* (0.85 + new java.util.SplittableRandom(life.getLifeId() * 31L + 7 + engState(life).candK * 13L).nextDouble() * 0.3);
+		String job = rate > 0 ? c.job + " (월 소득 약 " + won(life, jobPay(gdpOf(stat), rate, life.getCurrentCountry(), stat) / 12) + ")" : "집안일";
+		String t = (proposal ? "청혼한 사람은 " : "만난 사람은 ") + c.name + ", " + sa + "세 " + c.persona + " " + sex + ". 하는 일: " + job
+				+ ". 집안 형편: " + SPOON[c.q] + ".";
+		if (proposal) {
+			double sv = candSaved(c, medIncome(life.getCurrentCountry(), stat), sa);
+			double med = medIncome(life.getCurrentCountry(), stat);
+			t += Math.abs(sv) < med * 0.05 ? " 모아 둔 돈도 빚도 거의 없다."
+					: sv > 0 ? " 모아 둔 돈은 약 " + won(life, sv) + "." : " 학자금이나 할부 같은 빚이 약 " + won(life, -sv) + " 있다.";
+		}
+		return t;
+	}
+
+	private static boolean isMeet(EventResultDTO e) {
+		return e.getEventId() != null && e.getLogText() != null && e.getLogText().contains("마음이 통하는 사람을 만났다");
+	}
+
+	private static boolean isProposal(EventResultDTO e) {
+		return e.getEventId() != null && (e.getEventId().contains("PROPOSAL") || e.getTitle() != null && e.getTitle().contains("청혼"));
+	}
+
+	// 올해 '새로운 만남'이 있으면 다음 사람으로 바꾸고 그 사람 소개 줄을 바로 뒤에
+	private void loveYear(LifeDTO life, CountryStatDTO stat) {
+		if (life.getEvents() == null || "Y".equals(life.getMarriedYn())) {
+			return;
+		}
+		EngState s = engState(life);
+		List<EventResultDTO> out = new ArrayList<>();
+		for (EventResultDTO e : life.getEvents()) {
+			out.add(e);
+			if (isMeet(e) && !s.wedFrozen) {
+				s.candK = s.meets;
+				s.meets++;
+				syncSpouse(life, famSeed(life, stat));
+				String t = candLine(life, stat, false);
+				saveEventLog(life, life.getCurrentAge(), null, null, t);
+				out.add(noteEvent(t));
+			}
+		}
+		life.setEvents(out);
 	}
 
 	// ================= 집안 형편 (출신 가정 · 부모님 형편 변동, 11/20) =================
@@ -4329,7 +4746,9 @@ public class EngineService {
 		// 3. 재산 변화율 (C06 재산 반영): 재산 × 비율 (0.3 = +30%, -0.5 = -50%)
 		//    재산이 0 이하(빚)면 변화 없음 → 빚이 있을 때 손실로 빚이 줄어드는 일 방지
 		long before = life.getAssets();
-		if (e.getEffWealthRate() != 0 && life.getAssets() > 0) {
+		// 출산은 재산 비율(−5%) 대신 실제 출산 비용으로 (11/23 동현님: 재산이 많으면 1,100만 원이 한 번에 나갔음)
+		boolean birth = "CHILD".equals(e.getResultAction());
+		if (e.getEffWealthRate() != 0 && life.getAssets() > 0 && !birth) {
 			long d = Math.round(life.getAssets() * e.getEffWealthRate());
 			life.setAssets(life.getAssets() + d);
 			String t = e.getLogText() == null ? "" : e.getLogText();
@@ -4339,6 +4758,9 @@ public class EngineService {
 
 		// 4. 상태 변경 (결혼·자녀·부모 사망·실직·조기 은퇴·이민)
 		applyAction(life, e.getResultAction(), e.getMigrateTo(), age);
+		if (birth) {
+			birthCost(life, age);
+		}
 
 		// 돈이 오갔으면 기록 끝에 한국 체감 금액 (원작처럼 "(−40만 원)")
 		long moved = life.getAssets() - before;
@@ -4358,6 +4780,21 @@ public class EngineService {
 
 		// 6. 인생 기록 문장 저장 (C03 기록 화면, C11 AI 서술 대상 표시)
 		saveEventLog(life, age, e.getEventId(), choiceId, e.getLogText());
+	}
+
+	// 출산 비용: 병원비 중위 소득 3% + 한국 2010년~ 산후조리원 10% (2023년 평균 약 286만 원, 보건복지부)
+	//   내 벌이에 따라 0.6~1.8배, 벌이도 재산도 없으면 안 냄 (아이 키우는 비용은 해마다 따로)
+	private void birthCost(LifeDTO life, int age) {
+		if (age < 18 || life.getIncome() <= 0 && life.getAssets() <= 0) {
+			return;
+		}
+		CountryStatDTO st = yearStat(life);
+		double med = medIncome(life.getCurrentCountry(), st);
+		boolean pp = "KOR".equals(life.getCurrentCountry()) && life.getBirthYear() + age >= 2010;
+		double k = clamp(Math.pow(Math.max(life.getIncome(), 1) / med, 0.3), 0.6, 1.8);
+		long pay = Math.round(med * (0.03 + (pp ? 0.1 : 0)) * k);
+		life.setAssets(life.getAssets() - pay);
+		book(life, pp ? "출산·산후조리 비용" : "출산 비용", -pay);
 	}
 
 	// LIFE_EVENT_LOG 한 줄 저장
@@ -4730,7 +5167,11 @@ public class EngineService {
 			if (age >= 18) {
 				CountryStatDTO wst = yearStat(life);
 				double med = medIncome(life.getCurrentCountry(), wst);
-				long brought = Math.round(med * (0.2 + random.nextDouble() * 0.3));
+				// 배우자가 가져온 돈 = 청혼 창에 보인 그 사람의 모은 돈 (빚이면 마이너스)
+				FamSeed wf = famSeed(life, wst);
+				Cand wc = cand(life, wf, engState(life).candK);
+				long brought = Math.round(candSaved(wc, med, Math.max(18, age + wc.gap)));
+				engState(life).wedFrozen = true;
 				long wedding = Math.round(med * ("sa".equals(groupOf(life.getCurrentCountry(), wst)) ? 1.2 : 0.4));
 				long help = 0;
 				if (!"N".equals(life.getParentAlive()) && age < 45) {
@@ -4741,7 +5182,7 @@ public class EngineService {
 					}
 				}
 				life.setAssets(life.getAssets() + brought - wedding + help);
-				book(life, "배우자가 가져온 돈", brought);
+				book(life, brought >= 0 ? "배우자가 가져온 돈" : "배우자의 빚", brought);
 				book(life, "결혼식 비용", -wedding);
 				if (help > 0) {
 					book(life, "부모님이 보태 준 혼례 비용", help);
@@ -4753,15 +5194,20 @@ public class EngineService {
 			break;
 		case "MARRIAGE_END": // 이혼·사별 (윤아님 이벤트 값): 결혼 상태 해제 (자녀 수는 그대로)
 		case "DIVORCE":
-			life.setMarriedYn("N"); // 다시 연애·재혼할 수 있게, 첫째 출산은 멈춤 (STATE_MARRIED가 빠짐)
+			life.setMarriedYn("N");
+			engState(life).wedFrozen = false; // 다시 연애·재혼할 수 있게, 첫째 출산은 멈춤 (STATE_MARRIED가 빠짐)
 			break;
 		case "SPOUSE_DEATH":
 			life.setMarriedYn("N");
+			engState(life).wedFrozen = false;
 			payFuneral(life, 0.3, "배우자 장례비"); // 원작 중간값 −208만 원
 			break;
 		case "PARENT_DEATH": // 부모 사망
-			life.setParentAlive("N");
-			payFuneral(life, 0.06, "부모 장례비 나눠 냄"); // 원작 중간값 −40만 원
+			if (!"N".equals(life.getParentAlive())) {
+				life.setParentAlive("N");
+				payFuneral(life, 0.06, "부모 장례비 나눠 냄"); // 원작 중간값 −40만 원
+				parentEstate(life); // 원작 ESTATE: 형편에 따라 남긴 재산
+			}
 			break;
 		case "JOB_LOSS": // 실직: 다음 해부터 다시 직업 제안 (jobStep)
 			if ("EMPLOYED".equals(life.getJobStatus())) {
@@ -4949,6 +5395,21 @@ public class EngineService {
 	// 이미 겪은 선택·기질은 인생 기록의 결과 문장으로 다시 찾음 (서버를 다시 켜도 같은 선택이 또 나오지 않게)
 	private static class EngState {
 		final Map<String, Integer> done = new HashMap<>();
+		int meets;          // 결혼 전 '새로운 만남' 횟수 (인생 기록으로 되살림)
+		// 습관·돈 약속 (원작 smoker · alc · gamb · lotto · lent · cosign) - 인생 기록 문장으로 되살림 (OWNS 칸이 100바이트라 따로 둠)
+		boolean smoker, alc, gamb, lotto;
+		Integer lottoAt;
+		double lendAmt;
+		Integer lendAt;
+		boolean lendOk;
+		double csAmt;
+		Integer csEnd;
+		Integer retUntil;   // 시간제·계속 일하기로 한 마지막 나이 (원작 retire)
+		boolean retireAsk;  // 올해 끝에 은퇴할지 물음
+		String jcJobId;     // 이직 제안 직업 (원작 jobchange)
+		Integer lastLife;   // 마지막 삶의 갈림길 나이 (2년에 하나까지)
+		int candK;          // 지금 만나는(결혼한) 사람 번호
+		boolean wedFrozen;  // 결혼 중이면 true (만남이 나와도 배우자가 바뀌지 않게)
 		Integer lastSmall;
 		Integer lastHum;
 		int humCount;
@@ -4984,10 +5445,84 @@ public class EngineService {
 		List<EventLogDTO> logs = engineDao.selectEventLogs(life.getLifeId());
 		if (logs != null) {
 			for (EventLogDTO g : logs) {
-				if (g.getEventId() != null || g.getLogText() == null) {
+				if (g.getLogText() == null) {
+					continue;
+				}
+				if (g.getEventId() != null) {
+					// 윤아님 연애 이벤트 기록으로 만남 번호 되살림
+					String lt = g.getLogText();
+					if (lt.contains("마음이 통하는 사람을 만났다") && !s.wedFrozen) {
+						s.candK = s.meets;
+						s.meets++;
+					}
+					if (lt.contains("결혼식을 올렸다")) {
+						s.wedFrozen = true;
+					}
+					if (lt.contains("각자의 길을 가기로") || lt.contains("이혼") || lt.contains("배우자를 먼저 떠나보내")) {
+						s.wedFrozen = false;
+					}
 					continue;
 				}
 				String t = g.getLogText();
+				// 습관 (원작 smoker · alc · gamb · lotto) · 은퇴 미루기
+				if (t.contains("담배를 피우기 시작했다")) {
+					s.smoker = true;
+				}
+				if (t.contains("담배를 끊었다")) {
+					s.smoker = false;
+				}
+				if (t.contains("술 없이는 잠들지 못하는")) {
+					s.alc = true;
+				}
+				if (t.contains("술을 끊었다")) {
+					s.alc = false;
+				}
+				if (t.contains("계속하게 되었다") || t.contains("또다시 손을 댔다")) {
+					s.gamb = true;
+				}
+				if (t.contains("도박을 끊었다")) {
+					s.gamb = false;
+				}
+				if (t.startsWith("매주 복권을 사기 시작했다")) {
+					s.lotto = true;
+					s.lottoAt = g.getAge();
+				}
+				if (t.contains("복권은 그만 사기로")) {
+					s.lotto = false;
+				}
+				if (t.startsWith("일을 줄여 시간제로 몇 해 더") || t.startsWith("몇 해 더 일하기로 했다")) {
+					s.retUntil = g.getAge() + 5;
+				}
+				if (t.contains("내 집을 마련했다")) {
+					markEngineDone(s, EngineChoice.byKey("BUYHOUSE"), g.getAge());
+				}
+				// 유언장 (남길 곳 이름이 문장에 들어가서 결과 문장 앞부분 비교로는 못 찾음)
+				if (t.startsWith("유언장을 썼다") || t.startsWith("유언장은 쓰지 않기로")) {
+					markEngineDone(s, EngineChoice.byKey("WILL"), g.getAge());
+				}
+				// 집값이 크게 움직인 해 (5년에 한 번만 기록)
+				if (t.startsWith("동네 집값이 크게") || t.startsWith("집값이 한 해 사이")) {
+					s.done.put("HP", g.getAge());
+				}
+				// 부모님 도움 (한 번만 받는 것들)
+				if (t.startsWith("일을 시작하자 부모님이 살림 밑천")) {
+					s.done.put("PAR_SEED", g.getAge());
+				}
+				if (t.startsWith("부모님이 학창 시절의 빚")) {
+					s.done.put("PAR_DEBT", g.getAge());
+				}
+				if (t.startsWith("일자리를 찾는 동안 부모님이")) {
+					s.done.put("PAR_LIVE", g.getAge());
+				}
+				if (t.startsWith("부모님이 스물다섯")) {
+					s.done.put("PAR_RICH", g.getAge());
+				}
+				if (t.startsWith("부모님이 재산의 일부를 미리")) {
+					s.done.put("PAR_GIFT", g.getAge());
+				}
+				if (t.contains("부모님의 도움") && t.contains("내 집을 마련")) {
+					s.done.put("PAR_HOUSE", g.getAge());
+				}
 				if (t.startsWith("결혼 상대 ")) {
 					s.spouseNoted = true;
 				}
@@ -4998,7 +5533,7 @@ public class EngineService {
 					s.done.put("Q:" + t.substring(QUEST_DONE.length()).trim(), g.getAge());
 				}
 				// 학비 안내는 대학·대학원마다 한 번 (uniFees)
-				if ((t.startsWith("대학 ") || t.startsWith("대학원 ")) && (t.contains("학비") || t.contains("학자금"))) {
+				if ((t.startsWith("대학 ") || t.startsWith("대학원 ")) && (t.contains("학비") || t.contains("학자금") || t.contains("등록금"))) {
 					s.done.put(t.startsWith("대학원 ") ? "FEE_GRAD" : "FEE_UNI", g.getAge());
 				}
 				for (EngineChoice.Dec d : EngineChoice.ALL) {
@@ -5121,6 +5656,14 @@ public class EngineService {
 				return;
 			}
 		}
+		// 은퇴할지 (원작 retire): 정년이 된 해
+		if (s.retireAsk) {
+			s.retireAsk = false;
+			openEngineChoice(life, s, EngineChoice.indexOf("RETIRE"), lived);
+			if (s.pend != null) {
+				return;
+			}
+		}
 		if (life.isNeedJob()) {
 			return;
 		}
@@ -5129,6 +5672,15 @@ public class EngineService {
 		if (pick >= 0) {
 			openEngineChoice(life, s, pick, lived);
 			return;
+		}
+		// 삶의 갈림길 (원작 jobchange · rankup · buy · care · smoke · drink · lotto …, 11/23)
+		pick = lifePick(life, s, lived);
+		if (pick >= 0) {
+			openEngineChoice(life, s, pick, lived);
+			if (s.pend != null) {
+				return;
+			}
+			pick = -1;
 		}
 		if (lived == 2) {
 			pick = pickEngine(life, s, lived, EngineChoice.TEMPER);
@@ -5152,6 +5704,189 @@ public class EngineService {
 		}
 		if (pick >= 0) {
 			openEngineChoice(life, s, pick, lived);
+		}
+	}
+
+	// 삶의 갈림길 고르기 (원작에서 자주 나오는 결정, 아시아 303번 기준 나오는 비율에 맞춘 해마다 확률)
+	//   2년에 하나까지, 조건이 맞는 것 가운데 확률을 넘긴 것 하나를 무작위로
+	private int lifePick(LifeDTO life, EngState s, int lived) {
+		if (s.lastLife != null && lived - s.lastLife < 2) {
+			return -1;
+		}
+		boolean work = "EMPLOYED".equals(life.getJobStatus()) && !"ENROLLED".equals(life.getSchoolStatus());
+		boolean employee = work && !"JOB_OWNER".equals(life.getJobId());
+		String edu = life.getEduLevel();
+		List<String> keys = new ArrayList<>();
+		java.util.function.BiConsumer<String, Double> add = (k, p) -> {
+			EngineChoice.Dec d = EngineChoice.byKey(k);
+			if (d != null && engineOk(life, s, d, lived) && random.nextDouble() < p) {
+				keys.add(k);
+			}
+		};
+		if (employee) {
+			add.accept("MENTOR", 0.05);
+			add.accept("HARASS", 0.015);
+			if (life.getJobYears() >= 5) {
+				add.accept("RANKUP", 0.08);
+			}
+			if (life.getJobYears() >= 3 && jcCandidate(life, lived) != null) {
+				add.accept("JOBCHANGE", 0.07);
+			}
+			if (!"UNI".equals(edu) && !"GRAD".equals(edu)) {
+				add.accept("ADULTEDU", 0.03);
+			}
+		}
+		if (!ownSet(life).contains("HOUSE") && ("Y".equals(life.getMarriedYn()) || lived >= 30) && houseOk(life)) {
+			add.accept("BUYHOUSE", 0.12);
+		}
+		if (lived >= 45) {
+			add.accept("CARE", 0.05);
+		}
+		add.accept("OLDHOME", 0.12);
+		add.accept("CITY", 0.04);
+		if (famSeed(life, yearStat(life)).siblingGap.length > 0) {
+			add.accept("KINASK", 0.04);
+		}
+		add.accept("LEND", 0.025);
+		add.accept("COSIGN", 0.012);
+		add.accept("SMOKE", s.smoker ? 0 : 0.06);
+		if (s.smoker) {
+			add.accept("QUITSMOKE", 0.15);
+		}
+		if (life.getHappiness() < 50 && !s.alc) {
+			add.accept("DRINK", 0.06);
+		}
+		if (s.alc) {
+			add.accept("QUITDRINK", 0.2);
+		}
+		if (!s.lotto) {
+			add.accept("LOTTO", 0.025);
+		}
+		if (!s.gamb) {
+			add.accept("GAMBLE", 0.012);
+		} else {
+			add.accept("QUITGAMBLE", 0.25);
+		}
+		if (keys.isEmpty()) {
+			return -1;
+		}
+		s.lastLife = lived;
+		return EngineChoice.indexOf(keys.get(random.nextInt(keys.size())));
+	}
+
+	// 지금 집을 살 수 있는지 (돈 쓰기 '내 집 마련'이 열려 있는지)
+	private boolean houseOk(LifeDTO life) {
+		try {
+			for (ShopItemDTO it : shop(life).getItems()) {
+				if ("BUY_HOUSE".equals(it.getId())) {
+					return it.isOk();
+				}
+			}
+		} catch (RuntimeException e) {
+			// 목록을 못 만들면 묻지 않음
+		}
+		return false;
+	}
+
+	// 이직 제안 직업 (원작 jobchange): 학력이 되는 일 가운데 지금보다 벌이가 15~100% 나은 것 하나 (그해엔 늘 같게)
+	private JobDTO jcCandidate(LifeDTO life, int lived) {
+		if (life.getIncomeRate() == null) {
+			return null;
+		}
+		double now = life.getIncomeRate();
+		int fin = finishedLevel(life);
+		List<JobDTO> pool = new ArrayList<>();
+		for (JobDTO j : jobs()) {
+			if (levelIndex(j.getRequiredEdu()) <= fin && !j.getJobId().equals(life.getJobId()) && !"JOB_OWNER".equals(j.getJobId())
+					&& j.getIncomeRate() > now * 1.15 && j.getIncomeRate() < now * 2) {
+				pool.add(j);
+			}
+		}
+		if (pool.isEmpty()) {
+			return null;
+		}
+		return pool.get(new java.util.SplittableRandom(life.getLifeId() * 613L + lived).nextInt(pool.size()));
+	}
+
+	// 습관·돈 약속의 해마다 일 (원작 담뱃값 · 술 · 도박 · lottoYear · 빌려준 돈 · 보증)
+	private void habitYear(LifeDTO life, CountryStatDTO stat) {
+		if (!"PLAYING".equals(life.getStatus())) {
+			return;
+		}
+		EngState s = engState(life);
+		int age = life.getCurrentAge();
+		double med = medIncome(life.getCurrentCountry(), stat);
+		if (s.smoker && age >= 18) {
+			double c = Math.min(med * 0.025, Math.max(life.getIncome(), med * 0.3) * 0.06);
+			life.setAssets(life.getAssets() - Math.round(c));
+			book(life, "담뱃값", -c);
+			life.setHealth(life.getHealth() - 0.5);
+		}
+		if (s.alc) {
+			double c = med * 0.02;
+			life.setAssets(life.getAssets() - Math.round(c));
+			book(life, "술값", -c);
+			life.setHealth(life.getHealth() - 0.8);
+			life.setHappiness(life.getHappiness() - 0.5);
+			life.setRelation(life.getRelation() - 0.3);
+		}
+		if (s.gamb) {
+			double c = med * 0.05 * (0.5 + random.nextDouble());
+			life.setAssets(life.getAssets() - Math.round(c));
+			book(life, "도박으로 잃은 돈", -c);
+			life.setHappiness(life.getHappiness() - 0.6);
+			life.setRelation(life.getRelation() - 0.4);
+		}
+		if (s.lotto) {
+			double c = med * 0.004;
+			life.setAssets(life.getAssets() - Math.round(c));
+			book(life, "복권 값", -c);
+			double r = random.nextDouble(), n = "KOR".equals(life.getCurrentCountry()) ? 32e-6 : 15e-6;
+			if (r < n) {
+				double a = med * 45 * (0.6 + random.nextDouble() * 0.8);
+				life.setAssets(life.getAssets() + Math.round(a));
+				book(life, "복권 당첨금", a);
+				life.setHappiness(life.getHappiness() + 12);
+				parentNote(life, "복권 1등에 당첨되었다! 세금을 떼고 " + won(life, a) + "이 들어왔다. 몇 번이고 번호를 다시 맞춰 보았다.");
+			} else if (r < n + 19e-5) {
+				double a = med * 1.2;
+				life.setAssets(life.getAssets() + Math.round(a));
+				book(life, "복권 당첨금", a);
+				life.setHappiness(life.getHappiness() + 6);
+				parentNote(life, "복권 2등에 당첨되었다. " + won(life, a) + ", 큰돈이었지만 삶이 바뀔 만큼은 아니었다.");
+			} else if (r < n + 19e-5 + 0.0073) {
+				double a = med * 0.045;
+				life.setAssets(life.getAssets() + Math.round(a));
+				book(life, "복권 당첨금", a);
+				life.setHappiness(life.getHappiness() + 3);
+				parentNote(life, "복권 3등에 당첨되었다. " + won(life, a) + "으로 가족과 근사한 저녁을 먹었다.");
+			} else if (s.lottoAt != null && age - s.lottoAt >= 5 && random.nextDouble() < 0.04) {
+				s.lotto = false;
+				parentNote(life, "몇 해째 꽝만 이어져 복권은 그만 사기로 했다.");
+			}
+		}
+		if (s.lendAt != null && age - s.lendAt >= 2) {
+			if (s.lendOk) {
+				life.setAssets(life.getAssets() + Math.round(s.lendAmt));
+				book(life, "돌려받은 돈", s.lendAmt);
+				parentNote(life, "친구가 빌려 간 돈 " + won(life, s.lendAmt) + "을 갚았다. 고맙다며 밥을 샀다.");
+				s.lendAt = null;
+			} else if (age - s.lendAt >= 4) {
+				life.setRelation(life.getRelation() - 2);
+				parentNote(life, "친구에게 빌려준 돈은 끝내 돌려받지 못했다.");
+				s.lendAt = null;
+			}
+		}
+		if (s.csEnd != null && age >= s.csEnd) {
+			if (random.nextDouble() < 0.25) {
+				life.setAssets(life.getAssets() - Math.round(s.csAmt));
+				book(life, "대신 갚은 보증 빚", -s.csAmt);
+				life.setHappiness(life.getHappiness() - 6);
+				parentNote(life, "보증을 서 준 대출을 그 사람이 갚지 못해, " + won(life, s.csAmt) + "을 대신 갚았다.");
+			} else {
+				parentNote(life, "보증을 서 준 대출이 무사히 끝났다. 마음의 짐을 하나 내려놓았다.");
+			}
+			s.csEnd = null;
 		}
 	}
 
@@ -5252,6 +5987,46 @@ public class EngineService {
 			for (int i = 0; i < cs.size(); i++) {
 				cs.get(i).setChoiceOrder(i + 1);
 			}
+		}
+		if ("WILL".equals(d.key)) {
+			for (EventChoiceDTO c : cs) {
+				c.setChoiceText(willWords(life, c.getChoiceText()));
+			}
+		}
+		// 이직 제안 (원작 jobchange): 그 직업과 벌이
+		if ("JOBCHANGE".equals(d.key)) {
+			JobDTO j = jcCandidate(life, lived);
+			if (j == null) {
+				return;
+			}
+			s.jcJobId = j.getJobId();
+			CountryStatDTO st = yearStat(life);
+			e.setLogText("다른 곳에서 " + j.getJobName() + " 자리로 함께 일하자는 제안이 왔어요. 벌이는 지금보다 나아요.");
+			cs.get(0).setChoiceText(j.getJobName() + "로 옮긴다 (월 약 " + won(life, jobPay(gdpOf(st), j.getIncomeRate(), life.getCurrentCountry(), st) / 12) + ")");
+		}
+		// 은퇴 (원작 retire): 연금 안내
+		if ("RETIRE".equals(d.key)) {
+			CountryStatDTO st = yearStat(life);
+			long pen = pensionOf(life, st);
+			e.setLogText("은퇴할 나이가 되었어요. 지금 은퇴하면 연금은 한 달에 약 " + won(life, pen / 12.0) + "이에요. 모아 둔 돈은 약 "
+					+ won(life, Math.max(0, life.getAssets())) + "이에요.");
+		}
+		// 내 집 (원작 buy): 지금 집값
+		if ("BUYHOUSE".equals(d.key)) {
+			for (ShopItemDTO it : shop(life).getItems()) {
+				if ("BUY_HOUSE".equals(it.getId())) {
+					e.setLogText("집값은 약 " + won(life, it.getPrice()) + "이에요. 모은 돈은 " + won(life, Math.max(0, life.getAssets()))
+							+ ". 모자라는 만큼은 대출로 채울 수 있어요.");
+				}
+			}
+		}
+		// 가족이 돈 부탁·친구 돈·보증: 금액
+		double askMed = medIncome(life.getCurrentCountry(), yearStat(life));
+		if ("LEND".equals(d.key)) {
+			cs.get(0).setChoiceText("빌려준다 (약 " + won(life, askMed * 0.08) + ")");
+		}
+		if ("COSIGN".equals(d.key)) {
+			e.setLogText("가까운 사람이 대출을 받으려는데 보증을 서 달라고 해요. 그 사람이 못 갚으면 약 " + won(life, askMed * 0.6) + "을 내가 갚아야 해요.");
 		}
 		if (cs.size() < 2) {
 			return; // 고를 게 하나뿐이면 띄우지 않음
@@ -5385,12 +6160,124 @@ public class EngineService {
 		if ("PSTOCK_GO".equals(o.act)) {
 			text = text + " " + pstock(life);
 		}
+		// ---- 삶의 갈림길 (11/23, 원작 결정) ----
+		boolean logged = false; // 이미 기록을 남긴 결정 (집 사기는 돈 쓰기가 기록)
+		double am = medIncome(life.getCurrentCountry(), yearStat(life));
+		if ("RANKUP".equals(o.act) && life.getIncomeRate() != null) {
+			life.setIncomeRate(life.getIncomeRate() * 1.2);
+			text = text + " 벌이는 늘었지만 퇴근이 늦어졌다.";
+		} else if ("JOBCHANGE".equals(o.act)) {
+			JobDTO j = s.jcJobId == null ? null : findJob(s.jcJobId);
+			if (j != null) {
+				life.setJobId(j.getJobId());
+				life.setIncomeRate(j.getIncomeRate());
+				life.setJobYears(0);
+				life.setJobName(j.getJobName());
+				addExperience(life, j.getJobId());
+				text = text + " " + j.getJobName() + " 일을 시작했다.";
+			}
+		} else if ("QUIT_JOB".equals(o.act) && "EMPLOYED".equals(life.getJobStatus())) {
+			life.setJobStatus("UNEMPLOYED");
+			life.setJobYears(0);
+		} else if ("RETIRE_NOW".equals(o.act)) {
+			life.setJobStatus("RETIRED");
+			life.setPension(pensionOf(life, yearStat(life)));
+			text = text + " " + (life.getJobName() == null ? "일을 그만두고 은퇴했다." : life.getJobName() + " 일을 마치고 은퇴했다.") + pensionText(life);
+		} else if ("RETIRE_LESS".equals(o.act)) {
+			if (life.getIncomeRate() != null) {
+				life.setIncomeRate(life.getIncomeRate() * 0.5);
+			}
+			s.retUntil = age + 5;
+		} else if ("RETIRE_WORK".equals(o.act)) {
+			s.retUntil = age + 5;
+		} else if ("BUYHOUSE".equals(o.act)) {
+			ShopDTO bought = buy(life, "BUY_HOUSE", age);
+			if (bought != null && bought.getMessage() != null) {
+				text = bought.getMessage();
+				logged = true; // buy 가 기록을 남김
+			} else {
+				text = "집을 알아봤지만 이번에는 사지 못했다.";
+			}
+		} else if ("CITY".equals(o.act)) {
+			life.setIsUrban("Y");
+		} else if ("LEND".equals(o.act)) {
+			s.lendAmt = am * 0.08;
+			s.lendAt = age;
+			s.lendOk = random.nextDouble() < 0.55;
+			life.setAssets(life.getAssets() - Math.round(s.lendAmt));
+			book(life, "친구에게 빌려준 돈", -s.lendAmt);
+			text = text + " (−" + won(life, s.lendAmt) + ")";
+		} else if ("COSIGN".equals(o.act)) {
+			s.csAmt = am * 0.6;
+			s.csEnd = age + 3 + random.nextInt(4);
+		} else if ("SMOKE_TRY".equals(o.act)) {
+			if (random.nextDouble() < 0.6) {
+				s.smoker = true;
+				text = text + " 친구들과 어울려 담배를 피우기 시작했다. 한 대 피우면 마음이 놓이는 것 같았다.";
+			} else {
+				text = text + " 몇 번 피우다 그만두었다.";
+			}
+		} else if ("QUIT_SMOKE".equals(o.act)) {
+			if (random.nextDouble() < 0.3) {
+				s.smoker = false;
+				life.setHealth(life.getHealth() + 3);
+				text = text + " 몇 번의 실패 끝에 담배를 끊었다.";
+			} else {
+				text = text + " 며칠 못 가 다시 담배를 물었다.";
+			}
+		} else if ("DRINK_GO".equals(o.act)) {
+			if (random.nextDouble() < 0.5) {
+				s.alc = true;
+				text = text + " 술 없이는 잠들지 못하는 날이 늘었다.";
+			} else {
+				text = text + " 한동안 술이 늘었다가, 스스로 줄였다.";
+			}
+		} else if ("QUIT_DRINK".equals(o.act)) {
+			if (random.nextDouble() < 0.5) {
+				s.alc = false;
+				life.setHealth(life.getHealth() + 3);
+				text = text + " 몇 달을 버틴 끝에 술을 끊었다.";
+			} else {
+				text = text + " 몇 달 뒤 다시 잔을 들었다.";
+			}
+		} else if ("LOTTO_WEEKLY".equals(o.act)) {
+			s.lotto = true;
+			s.lottoAt = age;
+		} else if ("LOTTO_ONCE".equals(o.act)) {
+			text = text + (random.nextDouble() < 0.05 ? " 가장 작은 금액에 당첨됐다. 그 돈으로 한 장을 더 샀다가 꽝이었다."
+					: " 역시 꽝이었다. 그래도 추첨까지 일주일 동안은 즐거웠다.");
+		} else if ("GAMBLE".equals(o.act)) {
+			boolean win = random.nextDouble() < 0.3;
+			double g = win ? am * 0.08 : -am * 0.06;
+			life.setAssets(life.getAssets() + Math.round(g));
+			book(life, win ? "도박으로 딴 돈" : "도박으로 잃은 돈", g);
+			if (random.nextDouble() < (win ? 0.2 : 0.13)) {
+				s.gamb = true;
+				text = text + (win ? " 처음엔 땄다. 그 기분을 잊을 수 없어 계속하게 되었다." : " 잃은 돈을 되찾고 싶어 다시, 또다시 손을 댔다.");
+			} else {
+				text = text + (win ? " 조금 땄지만, 그걸로 그만두었다." : " 조금 잃고 나서 그만두었다.");
+			}
+			text = text + " (" + wonSigned(life, g) + ")";
+		} else if ("QUIT_GAMBLE".equals(o.act)) {
+			if (random.nextDouble() < 0.6) {
+				s.gamb = false;
+				text = text + " 몇 달 동안 상담을 받으며 도박을 끊었다.";
+			} else {
+				text = text + " 상담을 받았지만 다시 판에 앉았다.";
+			}
+		}
 		// 유언장 (원작 will): OWNS 에 WILL-방식-나이 하나 (세상을 떠날 때 inheritText 가 읽음)
 		if (o.act != null && o.act.startsWith("WILL_") && !"WILL_LAW".equals(o.act)) {
 			java.util.LinkedHashSet<String> owns = ownSet(life);
 			owns.removeIf(x -> x.startsWith("WILL-"));
-			owns.add("WILL-" + o.act.substring(5).toLowerCase() + "-" + age);
+			owns.add("WILL-" + o.act.substring(5).toLowerCase() + "-" + age); // 남길 곳은 세상을 떠날 때 마지막 일·학력으로 (OWNS 칸이 100바이트라 짧게)
 			life.setOwns(String.join(",", owns));
+			text = willWords(life, text);
+			// 유언장에 직접 적은 말 (화면 '남길 말' 칸, 비우면 없음)
+			String words = petName == null ? "" : petName.replaceAll("[\\r\\n\"“”]", " ").trim();
+			if (!words.isEmpty()) {
+				text = text + " 유언장 끝에 이렇게 적었다. “" + (words.length() > 100 ? words.substring(0, 100) : words) + "”";
+			}
 		}
 		if (o.act != null && d.key.startsWith("SCHOOL_")) {
 			int nx = java.util.Arrays.asList(levels).indexOf(d.key.substring("SCHOOL_".length()));
@@ -5402,7 +6289,9 @@ public class EngineService {
 		}
 		markEngineDone(s, d, age);
 		fixStats(life);
-		saveEventLog(life, age, null, null, text);
+		if (!logged) {
+			saveEventLog(life, age, null, null, text);
+		}
 		closeBook(life, startAssets);
 
 		life.setNeedChoice(false);
@@ -5455,6 +6344,46 @@ public class EngineService {
 	}
 
 	// 세상을 떠날 때 재산이 어떻게 나뉘었는지 (원작 상속: 유언장 · 나라별 법 · 빚)
+	// 유언으로 남길 곳 (원작 giveList · GIVE_N): 의료 일 → 병원비 기금, 가르친 일·대학 → 장학금, 그 밖 → 어린이 단체
+	private static final Map<String, String> GIVE_N = Map.of("med", "아픈 이웃의 병원비를 돕는 기금", "edu", "형편이 어려운 학생들의 장학금",
+			"child", "어린이를 돕는 단체");
+
+	private String giveKey(LifeDTO life) {
+		String j = life.getJobName() == null ? "" : life.getJobName();
+		if (j.matches(".*(의사|간호|약사|요양|의료|치과|병원).*")) {
+			return "med";
+		}
+		if (j.matches(".*(교사|교수|강사).*") || "UNI".equals(life.getEduLevel()) || "GRAD".equals(life.getEduLevel())) {
+			return "edu";
+		}
+		return "child";
+	}
+
+	// 첫째 자녀 이름 (살아 있는 아이 가운데 맨 처음)
+	private String firstKidName(LifeDTO life) {
+		try {
+			for (FamilyMemberDTO m : family(life, yearStat(life))) {
+				if (("아들".equals(m.getRole()) || "딸".equals(m.getRole())) && m.isAlive() && m.getName() != null) {
+					return m.getName();
+				}
+			}
+		} catch (RuntimeException e) {
+			// 이름을 못 찾으면 '첫째'
+		}
+		return "첫째";
+	}
+
+	// 유언장 문구의 빈칸: '구호 단체' → 남길 곳 이름, '{첫째}' → 첫째 이름
+	private String willWords(LifeDTO life, String t) {
+		if (t == null) {
+			return null;
+		}
+		if (t.contains("{첫째}")) {
+			t = t.replace("{첫째}", firstKidName(life));
+		}
+		return t.replace("구호 단체", GIVE_N.get(giveKey(life)));
+	}
+
 	private String inheritText(LifeDTO life) {
 		long a = life.getAssets();
 		boolean sp = "Y".equals(life.getMarriedYn());
@@ -5465,12 +6394,16 @@ public class EngineService {
 		}
 		String amt = "남긴 재산은 약 " + won(life, a) + ".";
 		String will = null;
+		String to = GIVE_N.get(giveKey(life));
 		int at = 0;
 		for (String x : ownSet(life)) {
 			if (x.startsWith("WILL-")) {
 				String[] p = x.split("-");
 				will = p[1];
 				at = p.length > 2 ? Integer.parseInt(p[2]) : 0;
+				if (p.length > 3 && GIVE_N.containsKey(p[3])) {
+					to = GIVE_N.get(p[3]);
+				}
 			}
 		}
 		boolean heirs = sp || kids > 0;
@@ -5484,10 +6417,13 @@ public class EngineService {
 				how = "가족이 똑같이 나눠 가졌다.";
 				break;
 			case "give":
-				how = "5분의 1은 구호 단체에, 나머지는 " + (heirs ? "가족에게 갔다." : "형제자매와 친척에게 갔다.");
+				how = "5분의 1은 " + to + "에, 나머지는 " + (heirs ? "가족에게 갔다." : "형제자매와 친척에게 갔다.");
+				break;
+			case "home":
+				how = "집은 " + firstKidName(life) + "에게 가고, 나머지는 법이 정한 몫대로 나뉘었다.";
 				break;
 			default:
-				how = "모두 구호 단체에 남겼다.";
+				how = "모두 " + to + "에 남겼다.";
 			}
 			return amt + " " + at + "세에 쓴 유언장대로 나뉘었다. " + how;
 		}
