@@ -54,6 +54,7 @@ public class LifeDTO {
 	private String histName;	// [화면용] 당시 국가명
 	private Double lifeExpectancy;	// [화면용] 기대수명
 	private Double infantMortality;	// [화면용] 영아사망률
+	private Double u5Mortality;	// [화면용] 5세 미만 사망률(‰) - 잠시 멈춤 5세 문장 (원작 reflect)
 	private Double gdpPerCapita;	// [화면용] 1인당 GDP
 	private List<EventResultDTO> events;	// [화면용] 올해 일어난 일 (C09)
 	private String pendingEventId;	// 고르기를 기다리는 선택 이벤트 (C09, PENDING_EVENT_ID)
@@ -462,6 +463,14 @@ public class LifeDTO {
 
 	public void setInfantMortality(Double infantMortality) {
 		this.infantMortality = infantMortality;
+	}
+
+	public Double getU5Mortality() {
+		return u5Mortality;
+	}
+
+	public void setU5Mortality(Double u5Mortality) {
+		this.u5Mortality = u5Mortality;
 	}
 
 	public Double getGdpPerCapita() {
