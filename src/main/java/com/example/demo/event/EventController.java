@@ -77,7 +77,8 @@ public class EventController {
 	@GetMapping("/test/states")
 	public List<String> testStates(@RequestParam(defaultValue = "0") int lifeId, @RequestParam String country,
 			@RequestParam(defaultValue = "N") String married, @RequestParam(required = false) String school,
-			@RequestParam(required = false) String job, @RequestParam(required = false) String birthCountry) {
+			@RequestParam(required = false) String job, @RequestParam(required = false) String birthCountry,
+			@RequestParam(required = false) String parentAlive, @RequestParam(required = false) String owns) {
 		LifeDTO life = new LifeDTO();
 		life.setLifeId(lifeId);
 		life.setCurrentCountry(country);
@@ -85,7 +86,27 @@ public class EventController {
 		life.setMarriedYn(married);
 		life.setSchoolStatus(school);
 		life.setJobStatus(job);
+		life.setParentAlive(parentAlive);
+		life.setOwns(owns);
 		return eServ.stateExps(life);
+	}
+
+	// 테스트: 부모님 별세 이벤트 (최종 전에 삭제)
+	// 예: /event/test/parent?eventId=LE_PARENT_DEATH_MOTHER&age=52&birthYear=1972&country=KOR&gender=M&name=김민준
+	@GetMapping("/test/parent")
+	public EventResultDTO testParent(@RequestParam String eventId, @RequestParam int age, @RequestParam int birthYear,
+			@RequestParam String country, @RequestParam String gender, @RequestParam String name,
+			@RequestParam(required = false) String owns) {
+		LifeDTO life = new LifeDTO();
+		life.setLifeId(0);
+		life.setCurrentAge(age);
+		life.setBirthYear(birthYear);
+		life.setCurrentCountry(country);
+		life.setBirthCountry(country);
+		life.setGender(gender);
+		life.setName(name);
+		life.setOwns(owns);
+		return eServ.parentDeathEvent(life, eventId);
 	}
 	
 	// 테스트: 선택지 고르기 (최종 전에 삭제)

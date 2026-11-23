@@ -122,5 +122,10 @@ public class EventDAO {
 	public Map<String, Object> selectLoveAges(int lifeId) {
 		return mybatis.selectOne("Event.selectLoveAges", lifeId);
 	}
+
+	// 이벤트 하나 (부모님 별세처럼 엔진이 직접 고른 이벤트, 없으면 null)
+	public GameEventDTO selectEvent(String eventId) {
+		return mybatis.selectOne("Event.selectEvent", eventId);
+	}
 	
 }

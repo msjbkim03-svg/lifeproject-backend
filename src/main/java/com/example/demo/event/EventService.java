@@ -179,6 +179,15 @@ public class EventService {
 		}
 		return false;
 	}
+	
+	// 부모님 별세 이벤트 → 엔진 결과 동작 (템플릿 동작 PARENT_DEATH 대신 누가 떠나셨는지 알려 줌)
+	// CAR·FIRE 는 사고로 함께 별세 (내 이벤트가 낮은 확률로 굴림)
+	private static final Map<String, String> PARENT_ACTION = Map.of(
+			"LE_PARENT_DEATH_MOTHER", "PARENT_DEATH_MOTHER",
+			"LE_PARENT_DEATH_FATHER", "PARENT_DEATH_FATHER",
+			"LE_PARENT_DEATH_SAMEYEAR", "PARENT_DEATH_BOTH",
+			"LE_PARENT_DEATH_CAR", "PARENT_DEATH_BOTH",
+			"LE_PARENT_DEATH_FIRE", "PARENT_DEATH_BOTH");
 
 	// ===== 4단계: 문장 만들기 + 효과 계산 =====
 
@@ -228,7 +237,7 @@ public class EventService {
 			r.setEffIncomeRate(round3(nz(t.getEffIncomeRate()) * scale));
 			r.setEffWealthRate(round3(nz(t.getEffWealthRate()) * scale));
 		}
-		r.setResultAction(t.getResultAction());
+		r.setResultAction(PARENT_ACTION.getOrDefault(e.getEventId(), t.getResultAction())); // 부모 별세는 누가 떠나셨는지
 
 		return r;
 	}
@@ -270,7 +279,58 @@ public class EventService {
 		if (!married) {
 			states.add(isDating(life.getLifeId()) ? "STATE_DATING" : "STATE_SINGLE"); // 만남 / 이별·청혼
 		}
+		if (bothParents(life)) {
+			states.add("STATE_BOTH_PARENTS"); // 부모님 두 분 다 살아 계심 (사고로 함께 별세 조건)
+		}
 		return states;
+	}
+
+	// 부모님 두 분 다 살아 계심: 부모 생존이 N이 아니고, 먼저 떠나신 분 표시(PAR-M-, PAR-F-)도 없음
+	private boolean bothParents(LifeDTO life) {
+		if ("N".equals(life.getParentAlive())) {
+			return false;
+		}
+		String owns = life.getOwns() == null ? "" : life.getOwns();
+		return !owns.contains("PAR-M-") && !owns.contains("PAR-F-");
+	}
+
+	// ===== 부모님 별세 (엔진 parentYear 가 famSeed 수명으로 그해 떠나실 분을 정하면 호출) =====
+	// eventId: LE_PARENT_DEATH_MOTHER / LE_PARENT_DEATH_FATHER /
+	// LE_PARENT_DEATH_SAMEYEAR
+	// 결과 동작은 PARENT_ACTION 표대로, 이벤트가 없으면 null (엔진은 임시 문장으로 처리)
+	public EventResultDTO parentDeathEvent(LifeDTO life, String eventId) {
+		GameEventDTO e = eDAO.selectEvent(eventId);
+		if (e == null) {
+			return null;
+		}
+		EventTemplateDTO t = findTemplate(e.getTemplateId());
+		if (t == null) {
+			return null;
+		}
+		int age = life.getCurrentAge();
+		int year = life.getBirthYear() + age;
+		EventResultDTO r = buildResult(t, e, life.getName(), age, year, life.getCurrentCountry());
+
+		// 한 분이 먼저 떠나셨으면 '~에 이어 ~마저' 문장으로 (엔진이 OWNS 에 PAR-M-·PAR-F- 저장)
+		String owns = life.getOwns() == null ? "" : life.getOwns();
+		if ("LE_PARENT_DEATH_MOTHER".equals(eventId) && owns.contains("PAR-F-")) {
+			r.setLogText(year + "년, 아버지에 이어 어머니마저 세상을 떠나셨다.");
+		} else if ("LE_PARENT_DEATH_FATHER".equals(eventId) && owns.contains("PAR-M-")) {
+			r.setLogText(year + "년, 어머니에 이어 아버지마저 세상을 떠나셨다.");
+		}
+
+		narrateService.narrate(life, r, age, year); // AI 서술 대상이면 문장 다듬기 (실패하면 위 문장 그대로)
+		return r;
+	}
+
+	// 템플릿 ID로 템플릿 찾기 (캐시에서)
+	private EventTemplateDTO findTemplate(String templateId) {
+		for (EventTemplateDTO t : getTemplates()) {
+			if (t.getTemplateId().equals(templateId)) {
+				return t;
+			}
+		}
+		return null;
 	}
 
 	// 사귀는 중: 마지막 만남이 그 뒤의 이별·청혼·이혼·사별·결혼 위기보다 나중
