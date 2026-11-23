@@ -196,9 +196,15 @@ public class EventService {
 			r.setChoices(eDAO.selectChoices(e.getEventId()));
 		}
 
-		// 1. 문장: 템플릿 문장 2~3개 중 하나를 랜덤으로 고르기
-		List<String> texts = eDAO.selectTexts(t.getTemplateId());
-		String sentence = texts.isEmpty() ? e.getTitle() : texts.get((int) (Math.random() * texts.size()));
+		// 1. 문장: 이벤트 전용 문장(BASE_TEXT)이 있으면 그것, 없으면 템플릿 문장 2~3개 중 하나를 랜덤으로
+		// (예: 화재는 사고 템플릿 문장 '몇 달을 쉬어야 했다·크게 다쳤다'가 안 맞아서 전용 문장 사용)
+		String sentence;
+		if (e.getBaseText() != null) {
+			sentence = e.getBaseText();
+		} else {
+			List<String> texts = eDAO.selectTexts(t.getTemplateId());
+			sentence = texts.isEmpty() ? e.getTitle() : texts.get((int) (Math.random() * texts.size()));
+		}
 
 		// 2. 변수 치환
 		String countryName = eDAO.selectCountryName(countryCode);
@@ -237,18 +243,55 @@ public class EventService {
 		return Math.round(v * 1000) / 1000.0;
 	}
 
+	// 지금 처지를 나타내는 메모리 전용 경험 (DB 저장 안 함, REQUIRED·EXCLUDED 조건 판정용)
+	// STATE_MARRIED 결혼 중 / STATE_ABROAD 태어난 나라 밖 / STATE_STUDENT 재학 중 /
+	// STATE_EMPLOYED 취업 중
+	// STATE_TROPICAL 남·동남아시아(말라리아) / STATE_DATING 사귀는 중 / STATE_SINGLE 미혼이고 사귀는 사람
+	// 없음
+	public List<String> stateExps(LifeDTO life) {
+		List<String> states = new ArrayList<>();
+		boolean married = "Y".equals(life.getMarriedYn());
+		if (married) {
+			states.add("STATE_MARRIED");
+		}
+		if (life.getBirthCountry() != null && !life.getBirthCountry().equals(life.getCurrentCountry())) {
+			states.add("STATE_ABROAD");
+		}
+		if ("ENROLLED".equals(life.getSchoolStatus())) {
+			states.add("STATE_STUDENT"); // 장학금
+		}
+		if ("EMPLOYED".equals(life.getJobStatus())) {
+			states.add("STATE_EMPLOYED"); // 직장 표창
+		}
+		String region = eDAO.selectRegionCode(life.getCurrentCountry());
+		if ("SOUTH".equals(region) || "SOUTHEAST".equals(region)) {
+			states.add("STATE_TROPICAL"); // 말라리아
+		}
+		if (!married) {
+			states.add(isDating(life.getLifeId()) ? "STATE_DATING" : "STATE_SINGLE"); // 만남 / 이별·청혼
+		}
+		return states;
+	}
+
+	// 사귀는 중: 마지막 만남이 그 뒤의 이별·청혼·이혼·사별·결혼 위기보다 나중
+	// (청혼을 거절했거나 결혼이 끝났으면 그 만남은 끝난 것)
+	private boolean isDating(int lifeId) {
+		Map<String, Object> ages = eDAO.selectLoveAges(lifeId);
+		if (ages == null || ages.get("MEET_AGE") == null) {
+			return false; // 만난 적 없음
+		}
+		int meet = ((Number) ages.get("MEET_AGE")).intValue();
+		Object end = ages.get("END_AGE");
+		return end == null || meet > ((Number) end).intValue();
+	}
+
 	// ===== 엔진 연결: 1년치 이벤트 굴리기 (EngineService가 호출) =====
 	public List<EventResultDTO> rollYear(LifeDTO life) {
 		int age = life.getCurrentAge();
 		int year = life.getBirthYear() + age;
 		List<String> expIds = eDAO.selectExpIds(life.getLifeId());
 		Map<String, Double> traits = getTraitEffects(life.getLifeId()); // C13 특성 효과 (없으면 Lv.1)
-		if ("Y".equals(life.getMarriedYn())) {
-			expIds.add("STATE_MARRIED"); // 지금 결혼 중 (DB 저장 안 함, 조건 판정용)
-		}
-		if (life.getBirthCountry() != null && !life.getBirthCountry().equals(life.getCurrentCountry())) {
-			expIds.add("STATE_ABROAD"); // 지금 태어난 나라 밖에 사는 중 (DB 저장 안 함, 조건 판정용)
-		}
+		expIds.addAll(stateExps(life)); // 지금 처지 (결혼·이민·학생·직장인·열대·연애, DB 저장 안 함)
 		// 재혼하면 자녀 계획 다시 묻기: 마지막 결혼보다 먼저 정한 자녀 계획은 지난 결혼 것이라 판정에서 뺌
 		Integer marryAge = eDAO.selectLastExpAge(life.getLifeId(), "LE_LOVE_PROPOSAL_1");
 		Integer planAge = eDAO.selectLastExpAge(life.getLifeId(), "LE_CHILD_PLAN_%");
@@ -283,12 +326,12 @@ public class EventService {
 
 			results.add(buildResult(t, e, life.getName(), age, year, life.getCurrentCountry()));
 		}
-		
+
 		// 3. AI 서술 (C11): AI 서술 대상만, 실패하면 기본 문구 그대로
 		for (EventResultDTO r : results) {
 			narrateService.narrate(life, r, age, year);
 		}
-		
+
 		return results;
 	}
 
