@@ -1547,21 +1547,33 @@ public class EngineService {
 		// ⑤-1-2 집안 형편 변동: 부모님 일이 기울거나 잘 풀림 (11/20)
 		familyFortune(life);
 		// ⑤-1-3 만난 사람 소개 (새로운 만남마다 새 사람) · 수저별 부모님 도움 (11/23)
-		loveYear(life, stat);
-		parentHelpYear(life, stat);
+		// ⑤-0-2 수감 (윤아님 '위험한 제안' PRISON, 11/23): 안에서 보내는 한 해 (원작: 건강 −3 · 행복 −6 · 관계 −4)
+		boolean jailed = inPrison(life);
+		if (jailed) {
+			prisonYear(life);
+		} else {
+			loveYear(life, stat);
+			parentHelpYear(life, stat);
+		}
 
 		// ⑤-2 돈 쓰기·투자 (C06-3): 모은 돈 굴리기 + 가진 물건 유지비
 		investStep(life, stat);
 		// ⑤-3 스마트폰이 흔해진 해부터 장만 (원작 phoneYear)
-		phoneYear(life, stat);
+		if (!jailed) {
+			phoneYear(life, stat);
+		}
 		// ⑤-4 반려동물 돌봄·떠나보냄 (원작 petYear)
 		petYear(life, stat);
 		// ⑤-5 병역 복무·전역 (원작 service)
 		svcYear(life);
 		// ⑤-6 취미 (원작 hobby): 해마다 작은 효과와 비용
-		hobbyYear(life, stat);
+		if (!jailed) {
+			hobbyYear(life, stat);
+		}
 		// ⑤-7 습관·돈 약속 (원작 담배·술·도박·복권·빌려준 돈·보증, 11/23)
-		habitYear(life, stat);
+		if (!jailed) {
+			habitYear(life, stat);
+		}
 		fixStats(life);
 
 		// ⑥ 사망 판정 (C07): 올해(현재 나이)를 못 넘기면 사망
@@ -1916,6 +1928,14 @@ public class EngineService {
 	//   빚이 있거나 벌이·재산이 없으면 EngineStory 가 돈 안 드는 문장(음식 준비를 거듦 등)을 고름
 	private List<String> storyLines(LifeDTO life, CountryStatDTO stat, int age, int already) {
 		List<String> out = new ArrayList<>();
+		int[] jail = prisonSpan(life);
+		if (jail != null && age >= jail[0] && age < jail[0] + jail[1]) {
+			// 그 해를 교도소에서 보냄: 바깥 일상 줄 대신 안에서의 한 줄 (들어간 해는 이벤트 문장이 있으니 기록이 없을 때만)
+			if (age > jail[0] || already == 0) {
+				out.add(prisonLine(life));
+			}
+			return out;
+		}
 		double med = medIncome(life.getCurrentCountry(), stat);
 		// 형제자매 (가족 칸과 같은 씨앗): 외동인데 '형제자매와 다퉜다' 같은 줄이 나오지 않게
 		int sibNow = 0, sibYounger = 0;
@@ -1995,13 +2015,18 @@ public class EngineService {
 			notes.add(SCHOOL_NAME.getOrDefault(edu, "학교") + "에 " + ("ELEM".equals(edu) ? "입학했다." : "진학했다."));
 		} else if (wasIn && "GRADUATED".equals(school)) {
 			notes.add(schoolObj(edu) + " 졸업했다.");
-		} else if (wasIn && "DROPPED".equals(school)) {
+		} else if (wasIn && "DROPPED".equals(school) && !PRISON_DROP.equals(life.getDropReason())) {
 			// 원작 outWhy · dropOwn: 그만둔 까닭과 그 뒤 (예전엔 '고등학교를 그만두었다'만 덩그러니 나왔음)
 			boolean poorDrop = life.getDropReason() != null && life.getDropReason().contains("형편");
 			notes.add(poorDrop ? "집안 형편이 어려워져 " + schoolObj(edu) + " 그만두었다. 일을 해서 살림을 보태야 했다."
 					: "공부에 흥미를 잃고 " + schoolObj(edu) + " 그만두었다. 교실보다 바깥이 더 궁금했다.");
 		}
 
+		if ("PRISON".equals(jobBefore) && !inPrison(life)) {
+			int[] pr = prisonSpan(life);
+			notes.add((pr == null ? "" : pr[1] + "년 만에 ") + "교도소에서 나왔다. 세상은 그사이 많이 바뀌어 있었다."
+					+ " 전과가 있어 일자리를 구하기가 쉽지 않을 것 같았다.");
+		}
 		if ("EMPLOYED".equals(jobBefore) && "RETIRED".equals(life.getJobStatus())) {
 			JobDTO job = jobIdBefore == null ? null : engineDao.selectJob(jobIdBefore);
 			notes.add((job == null ? "일을 그만두고 은퇴했다." : job.getJobName() + " 일을 마치고 은퇴했다.") + pensionText(life));
@@ -2898,8 +2923,8 @@ public class EngineService {
 	// 건강 관리의 건강 효과는 나이가 들수록 줄어듦 (원작 fitK)
 	private void applyFocus(LifeDTO life) {
 		String f = life.getFocusCode();
-		if (f == null) {
-			return; // 0~5세
+		if (f == null || inPrison(life)) { // 0~5세 · 수감 중
+			return;
 		}
 		double hl = 0, hp = 0, re = 0;
 		switch (f) {
@@ -3072,6 +3097,9 @@ public class EngineService {
 	// 1년 학교 처리 (새 나이 기준)
 	private void schoolStep(LifeDTO life, CountryStatDTO stat) {
 		int age = life.getCurrentAge();
+		if (inPrison(life)) {
+			return; // 수감 중엔 진학 없음 (다니던 학교는 들어갈 때 그만둠)
+		}
 		int idx = levelIndex(life.getEduLevel());
 		String status = life.getSchoolStatus();
 
@@ -3333,6 +3361,13 @@ public class EngineService {
 	// 1년 직업 처리 (새 나이 기준)
 	private void jobStep(LifeDTO life, CountryStatDTO stat) {
 		int age = life.getCurrentAge();
+
+		// 0. 출소 (원작: 형기를 채운 해 끝에 구직 중으로) - 출소 문장은 milestones
+		int[] pr = prisonSpan(life);
+		if (inPrison(life) && (pr == null || age >= pr[0] + pr[1])) {
+			life.setJobStatus("UNEMPLOYED");
+			life.setJobYears(0);
+		}
 
 		// 1. 정년 은퇴 (원작 연금 규칙)
 		//    은퇴 나이 전에 시작한 일만 정년 은퇴, 은퇴 후 다시 구한 일은 75세 또는 건강 40 미만까지
@@ -4085,6 +4120,12 @@ public class EngineService {
 		if (!canGetJob(life, stat)) {
 			return;
 		}
+		// 범죄 기록 (원작 recW · jobSure): 출소 뒤 6년까지는 그대로, 그 뒤 5년마다 절반 → 0.5 × 무게 확률로 그해 일자리 없음
+		//   새로고침·이어하기에도 같은 결과가 나오게 인생·나이로 정한 난수
+		double rw = recordWeight(life);
+		if (rw > 0 && new java.util.SplittableRandom(life.getLifeId() * 7919L + life.getCurrentAge() * 31L).nextDouble() < 0.5 * rw) {
+			return;
+		}
 		EngState es = engStates.get(life.getLifeId());
 		if (es != null && es.schoolNext != null) {
 			return; // 진학할지 고르는 해 (고른 뒤 안 가면 chooseEngine 에서 제안)
@@ -4224,7 +4265,7 @@ public class EngineService {
 			life.setJobYears(y + 1);
 		} else if (retired && life.getPension() != null) {
 			income = life.getPension(); // 연금
-		} else if ("PARTTIME".equals(focus)) {
+		} else if ("PARTTIME".equals(focus) && !inPrison(life)) {
 			income = gdp * 0.15; // 아르바이트
 		}
 		life.setIncome(Math.round(income));
@@ -4238,6 +4279,20 @@ public class EngineService {
 		}
 
 		double change = 0;
+		if (inPrison(life)) {
+			// 수감 중: 먹고 자는 건 교도소에서, 벌이도 생활비도 없음 → 배우자 벌이에서 남긴 돈과 빚 이자만
+			if ("Y".equals(life.getMarriedYn()) && age < retireAge(life, stat)) {
+				change = med * saveRate(med, med) * 0.7;
+				book(life, "배우자 벌이에서 남긴 돈", change);
+			}
+			if (life.getAssets() + change < 0) {
+				double interest = (life.getAssets() + change) * DEBT_RATE;
+				change += interest;
+				book(life, "빚 이자", interest);
+			}
+			life.setAssets(life.getAssets() + Math.round(change));
+			return;
+		}
 		if (income > 0) {
 			double sr = saveRate(income, med);
 			if (retired) {
@@ -4944,6 +4999,12 @@ public class EngineService {
 		}
 
 		// 4. 상태 변경 (결혼·자녀·부모 사망·실직·조기 은퇴·이민)
+		if ("PRISON".equals(e.getResultAction())) {
+			String closed = startPrison(life, prisonYearsOf(e)); // 윤아님 '위험한 제안' 붙잡힘 (11/23)
+			if (closed != null && e.getLogText() != null) {
+				e.setLogText(e.getLogText() + " " + closed);
+			}
+		}
 		applyAction(life, e.getResultAction(), e.getMigrateTo(), age);
 		if (birth) {
 			birthCost(life, age);
@@ -5433,8 +5494,8 @@ public class EngineService {
 
 	// 부모님 별세 (11/23 윤아님과 합의): famSeed 에 정해 둔 수명대로 그해 떠나실 분을 엔진이 정함
 	//   어머니·아버지 따로, 두 분 수명이 같은 해면 '같은 해 다른 날'로 한 번에 (사고로 함께 떠나시는 건 윤아님 이벤트)
-	//   TODO 윤아님 EventService.parentDeathEvent(life, 이벤트ID) 가 생기면 아래 임시 문장 대신 그 결과를 applyEvent 로
-	//        (LE_PARENT_DEATH_MOTHER / LE_PARENT_DEATH_FATHER / LE_PARENT_DEATH_SAMEYEAR)
+	//   문장·효과는 윤아님 EventService.parentDeathEvent (LE_PARENT_DEATH_MOTHER / FATHER / SAMEYEAR) 결과를 applyEvent 로,
+	//   그 이벤트가 DB에 없으면 아래 엔진 문장으로
 	private void parentYear(LifeDTO life, CountryStatDTO stat) {
 		if ("N".equals(life.getParentAlive()) || !"PLAYING".equals(life.getStatus())) {
 			return; // 윤아님 예전 별세 이벤트로 이미 두 분 다 떠나셨으면 다시 띄우지 않음
@@ -5458,6 +5519,20 @@ public class EngineService {
 		} else {
 			action = "PARENT_DEATH_FATHER";
 			text = momGone ? "어머니에 이어 아버지마저 세상을 떠나셨다." : "아버지가 세상을 떠나셨다.";
+		}
+		String evId = "PARENT_DEATH_BOTH".equals(action) ? "LE_PARENT_DEATH_SAMEYEAR"
+				: "PARENT_DEATH_MOTHER".equals(action) ? "LE_PARENT_DEATH_MOTHER" : "LE_PARENT_DEATH_FATHER";
+		EventResultDTO pe = eventService.parentDeathEvent(life, evId);
+		if (pe != null && action.equals(pe.getResultAction())) {
+			// 슬픔은 엔진 문장 때와 같게 최소 −8 (두 분 같은 해 −12)
+			pe.setEffHappiness(Math.min(pe.getEffHappiness(), "PARENT_DEATH_BOTH".equals(action) ? -12 : -8));
+			applyEvent(life, pe, age, null); // 장례비·유산 문장도 applyEvent 가 붙임
+			addExperience(life, "LE_PARENT_DEATH");
+			fixStats(life);
+			List<EventResultDTO> list = life.getEvents() == null ? new ArrayList<>() : new ArrayList<>(life.getEvents());
+			list.add(pe);
+			life.setEvents(list);
+			return;
 		}
 		long before = life.getAssets();
 		EngState es = engState(life);
@@ -5491,6 +5566,108 @@ public class EngineService {
 		long pay = Math.round(med * ratio * k);
 		life.setAssets(life.getAssets() - pay);
 		book(life, label, -pay);
+	}
+
+	// ================= 수감·범죄 기록 (윤아님 '위험한 제안', 원작 goPrison · recW, 11/23) =================
+	//   OWNS 에 PRI-들어간 나이-형기 (마지막 한 번만): 그 나이부터 형기만큼의 해를 교도소에서 보냄
+	//   들어가면 일·학교 중단, 엔진 선택지·취업 제안 없음 (윤아님 rollYear 도 PRISON 이면 이벤트 없음)
+	private static final String PRISON_DROP = "수감으로 학교를 그만둠";
+
+	private static boolean inPrison(LifeDTO l) {
+		return "PRISON".equals(l.getJobStatus());
+	}
+
+	// {들어간 나이, 형기} - 수감 기록이 없으면 null
+	private static int[] prisonSpan(LifeDTO life) {
+		for (String o : ownSet(life)) {
+			if (o.startsWith("PRI-")) {
+				String[] p = o.split("-");
+				try {
+					return new int[] { Integer.parseInt(p[1]), Integer.parseInt(p[2]) };
+				} catch (RuntimeException ex) {
+					return null;
+				}
+			}
+		}
+		return null;
+	}
+
+	// 윤아님 EventResultDTO.prisonYears (1~4) - 아직 필드가 없을 때도 컴파일되게 이름으로 읽음, 없으면 원작 기본 2년
+	//   TODO 윤아님 DTO 에 prisonYears 가 들어가면 e.getPrisonYears() 로 바꿔도 됨
+	private static int prisonYearsOf(EventResultDTO e) {
+		try {
+			Object v = e.getClass().getMethod("getPrisonYears").invoke(e);
+			if (v instanceof Number && ((Number) v).intValue() > 0) {
+				return Math.max(1, Math.min(4, ((Number) v).intValue()));
+			}
+		} catch (ReflectiveOperationException ex) {
+			// 필드 없음 → 기본값
+		}
+		return 2;
+	}
+
+	// 교도소에 들어감: 지금 나이(다음에 살 해)부터 형기만큼, 하던 일·학교는 그만둠
+	//   반환: 가게를 하던 사람이면 붙일 문장 (없으면 null)
+	private String startPrison(LifeDTO life, int years) {
+		String note = null;
+		if ("EMPLOYED".equals(life.getJobStatus()) && life.getJobId() != null
+				&& (life.getJobId().contains("BIZ") || "JOB_OWNER".equals(life.getJobId()))) {
+			note = "안에서는 가게를 이어 갈 수 없어 문을 닫았다.";
+		}
+		if ("ENROLLED".equals(life.getSchoolStatus())) {
+			life.setSchoolStatus("DROPPED");
+			life.setDropReason(PRISON_DROP);
+		}
+		life.setJobStatus("PRISON");
+		life.setJobYears(0);
+		life.setIncome(0);
+		life.setNeedJob(false);
+		life.setJobOffers(null);
+		engState(life).schoolNext = null;
+		java.util.LinkedHashSet<String> owns = ownSet(life);
+		owns.removeIf(x -> x.startsWith("PRI-"));
+		owns.add("PRI-" + life.getCurrentAge() + "-" + years);
+		life.setOwns(String.join(",", owns));
+		return note;
+	}
+
+	// 수감 중 한 해 (원작: 건강 −3 · 행복 −6 · 관계 −4)
+	private void prisonYear(LifeDTO life) {
+		life.setHealth(life.getHealth() - 3);
+		life.setHappiness(life.getHappiness() - 6);
+		life.setRelation(life.getRelation() - 4);
+	}
+
+	// 범죄 기록 무게 (원작 recW): 수감 중 1, 출소 뒤 6년까지 1, 그 뒤 5년마다 절반, 기록 없으면 0
+	private static double recordWeight(LifeDTO life) {
+		if (inPrison(life)) {
+			return 1;
+		}
+		int[] pr = prisonSpan(life);
+		if (pr == null) {
+			return 0;
+		}
+		int t = life.getCurrentAge() - (pr[0] + pr[1]); // 출소 뒤 지난 햇수
+		return t <= 6 ? 1 : Math.pow(0.5, (t - 6) / 5.0);
+	}
+
+	// 교도소 안에서의 한 해 (원작 pr_visit · pr_novisit 갈래를 우리 말로)
+	private String prisonLine(LifeDTO life) {
+		List<String> c = new ArrayList<>();
+		c.add("교도소에서 또 한 해를 보냈다. 같은 시간에 일어나고 같은 시간에 잠들었다.");
+		c.add("작업장에서 하루 종일 일했다. 손에 남는 돈은 얼마 되지 않았다.");
+		c.add("안에서 다시 공부를 시작했다. 나가면 무엇을 할지 자주 생각했다.");
+		boolean married = "Y".equals(life.getMarriedYn());
+		boolean family = married || !"N".equals(life.getParentAlive()) || life.getChildCount() > 0;
+		if (married) {
+			c.add("배우자가 면회를 왔다. 혼자 살림을 꾸리느라 많이 지쳐 보였다.");
+		}
+		if (family) {
+			c.add("가족이 면회를 왔다. 짧은 시간이 금방 지나갔다.");
+		} else {
+			c.add("면회 오는 사람 없이 한 해가 지나갔다.");
+		}
+		return c.get(random.nextInt(c.size()));
 	}
 
 	// 이벤트 결과의 상태 변경 처리 (RESULT_ACTION)
@@ -5601,6 +5778,16 @@ public class EngineService {
 				long debt = Math.round(med);
 				life.setAssets(life.getAssets() - debt);
 				book(life, "치료비로 진 빚", -debt);
+			}
+			break;
+		case "PRISON": // 수감: applyEvent 에서 startPrison (형기 prisonYears 가 필요해서)
+			break;
+		case "CRIME_PAY": // 위험한 제안의 대가 (원작: 약속한 큰돈은 안 들어오고 몇 주 치 벌이만) - 중위 소득 × 4~12%
+			{
+				double med = medIncome(life.getCurrentCountry(), yearStat(life));
+				long pay = Math.round(med * (0.04 + random.nextDouble() * 0.08));
+				life.setAssets(life.getAssets() + pay);
+				book(life, "위험한 일로 받은 돈", pay);
 			}
 			break;
 		default: // INVEST 등: 재산 변화율만 반영 (위 3번)
@@ -6006,6 +6193,10 @@ public class EngineService {
 	// 한 해가 끝날 때 (nextYear 마지막): 다른 결정 창이 없으면 엔진 선택지를 굴림
 	private void rollEngineChoice(LifeDTO life, int lived) {
 		EngState s = engState(life);
+		if (inPrison(life)) {
+			s.schoolNext = null;
+			return; // 수감 중엔 엔진 선택지(집·자녀·취미 …) 없음
+		}
 		if (s.schoolNext != null) {
 			// 진학 선택 (붙은 해): 다른 결정 창이 이미 떠 있으면 예전처럼 바로 진학
 			int nx = s.schoolNext;
