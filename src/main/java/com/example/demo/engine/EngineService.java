@@ -1678,8 +1678,12 @@ public class EngineService {
 			life.setStatus("ENDED");
 			life.setDeathAge(life.getCurrentAge());
 			// 사망 원인: 역사 사건 몫(histAdd ÷ 전체 확률)만큼의 확률로 사건 원인, 아니면 평소 원인
+			//   역사 사건이 아니면: 올해 겪은 큰 병·사고가 있으면 그것, 없으면 권역 통계 (11/24 동현님: 물놀이 사고로 크게 다친 해에 죽었는데 원인이 폐렴으로 나옴)
+			String evCause = eventCause(life);
 			if (histCause != null && random.nextDouble() < histAdd / deathP) {
 				life.setDeathCause(histCause);
+			} else if (evCause != null) {
+				life.setDeathCause(evCause);
 			} else {
 				life.setDeathCause(deathCause(life));
 			}
@@ -5959,6 +5963,46 @@ public class EngineService {
 			return "질병";
 		}
 		return "노환";
+	}
+
+	// 올해 인생 기록에 남은 큰 병·사고 → 그해 세상을 떠나면 사망 원인 (윤아님 이벤트 ID로 알아봄, 읽기만)
+	//   급한 병·사고는 그대로, 오래 앓는 병(당뇨·고혈압·간염)은 반만 그 병으로 (나머지는 평소 통계)
+	//   목록에 없는 새 병·사고 ID는 문장에서 이름을 찾음 ('폐렴으로 앓아누웠다' · '말라리아라고 했다' · '교통사고로')
+	private static final Map<String, String> EVENT_CAUSE = Map.ofEntries(
+			Map.entry("LE_DISEASE_CANCER", "암"), Map.entry("LE_DISEASE_HEART", "심장병"),
+			Map.entry("LE_DISEASE_STROKE", "뇌졸중"), Map.entry("LE_DISEASE_PNEUMONIA", "폐렴"),
+			Map.entry("LE_DISEASE_TB", "결핵"), Map.entry("LE_DISEASE_MALARIA", "말라리아"),
+			Map.entry("LE_DISEASE_MEASLES", "홍역"), Map.entry("LE_DISEASE_HEPATITIS", "간염"),
+			Map.entry("LE_DISEASE_DIABETES", "당뇨병"), Map.entry("LE_DISEASE_HYPERTEN", "고혈압"),
+			Map.entry("LE_ACCIDENT_WATER", "물놀이 사고"), Map.entry("LE_ACCIDENT_TRAFFIC", "교통사고"),
+			Map.entry("LE_ACCIDENT_NATURAL", "홍수·태풍 피해"));
+	private static final java.util.Set<String> CHRONIC = java.util.Set.of("LE_DISEASE_DIABETES", "LE_DISEASE_HYPERTEN", "LE_DISEASE_HEPATITIS");
+	private static final java.util.regex.Pattern CAUSE_W = java.util.regex.Pattern.compile("([가-힣·]{1,8}?)(으로 |로 |이라고|라고| 진단)");
+
+	private String eventCause(LifeDTO life) {
+		if (life.getEvents() == null) {
+			return null;
+		}
+		String found = null;
+		for (EventResultDTO e : life.getEvents()) {
+			String id = e.getEventId();
+			if (id == null || !(id.startsWith("LE_DISEASE_") || id.startsWith("LE_ACCIDENT_"))) {
+				continue;
+			}
+			String name = EVENT_CAUSE.get(id);
+			if (name == null && e.getLogText() != null) {
+				java.util.regex.Matcher m = CAUSE_W.matcher(e.getLogText().replaceAll("^\\d+(세|년),\\s*", ""));
+				name = m.find() ? m.group(1) : null;
+			}
+			if (name == null || (CHRONIC.contains(id) && random.nextDouble() >= 0.5)) {
+				continue;
+			}
+			found = name;
+			if (id.startsWith("LE_ACCIDENT_")) {
+				break; // 사고가 있으면 사고가 먼저
+			}
+		}
+		return found;
 	}
 
 	// 어린이(15세 미만) 사망 원인 이름 다듬기: 통계 분류 "에이즈 등 성매개 감염"은 아이에겐 모자 감염
