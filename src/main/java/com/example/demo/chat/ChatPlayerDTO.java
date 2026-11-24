@@ -20,6 +20,9 @@ public class ChatPlayerDTO {
 	@JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
 	private String token;
 
+	@JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+	private String guestToken;
+
 	public int getMemberId() { return memberId; }
 	public void setMemberId(int memberId) { this.memberId = memberId; }
 
@@ -49,4 +52,7 @@ public class ChatPlayerDTO {
 
 	public String getToken() { return token; }
 	public void setToken(String token) { this.token = token; }
+
+	public String getGuestToken() { return guestToken; }
+	public void setGuestToken(String guestToken) { this.guestToken = guestToken; }
 }

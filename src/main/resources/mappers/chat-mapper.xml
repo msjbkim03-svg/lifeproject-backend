@@ -7,6 +7,18 @@
 		SELECT NICKNAME FROM MEMBER WHERE MEMBER_ID = #{memberId} AND STATUS = 'ACTIVE'
 	</select>
 
+	<!-- 이 회원이 지금 이 나라에서 살고 있는지 (진행 중인 인생의 사는 나라) -->
+	<select id="countMemberLife" parameterType="map" resultType="int">
+		SELECT COUNT(*) FROM LIFE
+		WHERE MEMBER_ID = #{memberId} AND STATUS = 'PLAYING' AND CURRENT_COUNTRY = #{countryCode}
+	</select>
+
+	<!-- 이 비회원(임시 토큰)이 지금 이 나라에서 살고 있는지 -->
+	<select id="countGuestLife" parameterType="map" resultType="int">
+		SELECT COUNT(*) FROM LIFE
+		WHERE GUEST_TOKEN = #{guestToken} AND MEMBER_ID IS NULL AND STATUS = 'PLAYING' AND CURRENT_COUNTRY = #{countryCode}
+	</select>
+
 	<select id="selectBannedWords" resultType="string">
 		SELECT WORD FROM BANNED_WORD
 	</select>

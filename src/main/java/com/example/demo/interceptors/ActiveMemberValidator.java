@@ -43,8 +43,9 @@ public class ActiveMemberValidator implements HandlerInterceptor {
 		// 3. 토큰에서 회원 번호 꺼내기 (잘못된 토큰이면 통과 → 각 주소의 원래 처리에 맡김)
 		int memberId;
 		String pv;
+		DecodedJWT token;
 		try {
-			DecodedJWT token = jwt.verifyToken(authHeader.substring(7));
+			token = jwt.verifyToken(authHeader.substring(7));
 			memberId = Integer.parseInt(token.getSubject());
 			pv = token.getClaim("pv").asString();
 		} catch (Exception e) {
@@ -62,6 +63,14 @@ public class ActiveMemberValidator implements HandlerInterceptor {
 		if (pv != null && !pv.equals(JwtUtil.passwordVersion(member.getPassword()))) {
 			response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
 			return false;
+		}
+
+		// 6. 남은 시간이 1시간보다 적으면 새 토큰을 응답 헤더(New-Token)로 줌 → 게임하는 동안 로그인 자동 연장
+		long left = token.getExpiresAt().getTime() - System.currentTimeMillis();
+		if (left < 60 * 60 * 1000) {
+			String newToken = jwt.createToken(token.getSubject(), token.getClaim("role").asString(),
+					JwtUtil.passwordVersion(member.getPassword()));
+			response.setHeader("New-Token", newToken);
 		}
 		return true;
 	}
