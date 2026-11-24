@@ -2,6 +2,7 @@ package com.example.demo.chat;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,6 +20,7 @@ public class ChatService {
 	private ChatDAO dao;
 	private JwtUtil jwt;
 	private Map<Integer,Long> lastTime = new ConcurrentHashMap<>();
+	private Map<String, ChatPlayerDTO> players = new ConcurrentHashMap<>();
 	
 	public ChatService(ChatDAO dao,JwtUtil jwt) {
 		this.dao=dao;
@@ -62,6 +64,66 @@ public class ChatService {
 	
 	public List<ChatDTO> recent(String countryCode) {
 		return dao.selectRecent(countryCode);
+	}
+	
+	public boolean join(String sessionId, String countryCode, ChatPlayerDTO dto) {
+		ChatPlayerDTO old = players.get(sessionId);
+		if (old != null && countryCode.equals(old.getCountryCode())) {
+			old.setAge(fixAge(dto.getAge()));
+			old.setGender(fixGender(dto.getGender()));
+			return true;
+		}
+
+		Integer memberId = readMemberId(dto.getToken());
+		if (memberId == null) return false;
+		String nickname = dao.selectNickname(memberId);
+		if (nickname == null) return false;
+
+		dto.setMemberId(memberId);
+		dto.setNickname(nickname);
+		dto.setCountryCode(countryCode);
+		dto.setAge(fixAge(dto.getAge()));
+		dto.setGender(fixGender(dto.getGender()));
+		dto.setToken(null);
+		setPosition(dto, dto);
+		players.put(sessionId, dto);
+		return true;
+	}
+
+	public ChatPlayerDTO move(String sessionId, String countryCode, ChatPlayerDTO dto) {
+		ChatPlayerDTO me = players.get(sessionId);
+		if (me == null || !countryCode.equals(me.getCountryCode())) return null;
+		setPosition(me, dto);
+		return me;
+	}
+
+	public String leave(String sessionId) {
+		ChatPlayerDTO old = players.remove(sessionId);
+		return old == null ? null : old.getCountryCode();
+	}
+
+	public List<ChatPlayerDTO> players(String countryCode) {
+		List<ChatPlayerDTO> list = new ArrayList<>();
+		for (ChatPlayerDTO p : players.values()) {
+			if (countryCode.equals(p.getCountryCode())) list.add(p);
+		}
+		return list;
+	}
+
+	private void setPosition(ChatPlayerDTO me, ChatPlayerDTO pos) {
+		String place = pos.getPlace();
+		me.setPlace(place == null || place.length() > 20 ? "home" : place);
+		me.setX(Math.max(0, Math.min(100, pos.getX())));
+		me.setDir("left".equals(pos.getDir()) ? "left" : "right");
+		me.setWalking(pos.isWalking());
+	}
+
+	private int fixAge(int age) {
+		return age < 0 || age > 150 ? 0 : age;
+	}
+
+	private String fixGender(String gender) {
+		return "F".equals(gender) ? "F" : "M";
 	}
 	
 	private Integer readMemberId(String token) {
