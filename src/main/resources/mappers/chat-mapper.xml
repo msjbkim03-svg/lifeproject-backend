@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+	"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="chat">
+
+	<select id="selectNickname" parameterType="int" resultType="string">
+		SELECT NICKNAME FROM MEMBER WHERE MEMBER_ID = #{memberId} AND STATUS = 'ACTIVE'
+	</select>
+
+	<select id="selectBannedWords" resultType="string">
+		SELECT WORD FROM BANNED_WORD
+	</select>
+
+	<insert id="insertChat" parameterType="com.example.demo.chat.ChatDTO">
+		<selectKey keyProperty="msgId" resultType="int" order="BEFORE">
+			SELECT SEQ_CHAT_MESSAGE.NEXTVAL FROM DUAL
+		</selectKey>
+		INSERT INTO CHAT_MESSAGE (MSG_ID, COUNTRY_CODE, MEMBER_ID, CONTENT, IS_DELETED, CREATED_AT)
+		VALUES (#{msgId}, #{countryCode}, #{memberId}, #{content}, 'N', SYSDATE)
+	</insert>
+
+	<select id="selectRecent" parameterType="string" resultType="com.example.demo.chat.ChatDTO">
+		SELECT *
+		FROM (
+			SELECT c.MSG_ID       AS msgId,
+			       c.COUNTRY_CODE AS countryCode,
+			       c.MEMBER_ID    AS memberId,
+			       m.NICKNAME     AS nickname,
+			       c.CONTENT      AS content,
+			       TO_CHAR(c.CREATED_AT, 'HH24:MI') AS createdAt
+			FROM CHAT_MESSAGE c
+			JOIN MEMBER m ON m.MEMBER_ID = c.MEMBER_ID
+			WHERE c.COUNTRY_CODE = #{countryCode}
+			  AND c.IS_DELETED = 'N'
+			ORDER BY c.MSG_ID DESC
+		)
+		WHERE ROWNUM &lt;= 30
+		ORDER BY msgId
+	</select>
+
+</mapper>
