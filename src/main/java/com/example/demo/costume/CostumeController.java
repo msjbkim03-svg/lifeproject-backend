@@ -2,6 +2,7 @@ package com.example.demo.costume;
 
 import java.util.Map;
 
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -65,7 +66,12 @@ public class CostumeController {
 		String error;
 		String done;
 		if (action.equals("buy")) {
-			error = service.buy(life, costumeId);
+			try {
+				error = service.buy(life, costumeId);
+			} catch (DuplicateKeyException e) {
+				// 거의 동시에 두 번 삼 → DB 제약이 막아 줌 (두 번째 돈 차감도 같이 취소됨)
+				error = "이미 가진 물건이에요.";
+			}
 			done = "사서 바로 착용했어요.";
 		} else if (action.equals("equip")) {
 			error = service.equip(life, costumeId);

@@ -27,18 +27,13 @@ public class ChatController {
 		this.template = template;
 	}
 	
-	@GetMapping("/{countryCode}")
-	public List<ChatDTO> recent(@PathVariable String countryCode){
-		return service.recent(countryCode);
-	}
-	
 	@MessageMapping("/chat/{countryCode}")
 	@SendToUser("/queue/chatError")
-	public Map<String,String> send(@DestinationVariable String countryCode,ChatDTO dto) {
+	public Map<String,String> send(@DestinationVariable String countryCode, @Header("simpSessionId") String sessionId, ChatDTO dto) {
 		if (countryCode == null || countryCode.length() != 3) {
 			return Map.of("message", "나라를 찾지 못했어요.");
 		}
-		String error = service.send(countryCode, dto);
+		String error = service.send(sessionId, countryCode, dto);
 		if(error != null) {
 			return Map.of("message", error);
 		}

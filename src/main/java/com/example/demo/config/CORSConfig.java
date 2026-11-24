@@ -12,6 +12,7 @@ public class CORSConfig implements WebMvcConfigurer{
 		registry.addMapping("/**")
 		.allowedOrigins("*")
 		.allowedMethods("*")
-		.allowedHeaders("*");
+		.allowedHeaders("*")
+		.exposedHeaders("New-Token");
 	}
 }
