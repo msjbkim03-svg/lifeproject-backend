@@ -31,6 +31,7 @@ public class AdminDraftService {
 	private static final int MAX_IDS = 10; // 한 번에 묶는 이벤트 수 (Gemini 1번 호출)
 	private static final int TIMEOUT_SEC = 30; // 10건 묶음이라 C11(4초)보다 넉넉하게
 	private static final int DESC_LEN = 600; // 사건 설명은 앞부분만
+	private static final int MAX_TRY = 2; // 응답이 중간에 끊기면 한 번 더 요청
 
 	// 게임(EventService)이 실제로 바꿔 주는 자리 표시만 허용
 	private static final List<String> ALLOWED = List.of("{연도}", "{이름}", "{나이}", "{나라}");
@@ -129,24 +130,29 @@ public class AdminDraftService {
 		BeanOutputConverter<List<Draft>> converter = new BeanOutputConverter<>(
 				new ParameterizedTypeReference<List<Draft>>() {
 				});
-		List<Draft> result;
-		String reason = null; // 실패 로그용: Gemini가 응답을 끝낸 이유
-		int rawLen = 0; // 실패 로그용: 받은 글자 수
-		try {
-			ChatResponse res = CompletableFuture
-					.supplyAsync(() -> gemini.prompt().system(SYSTEM_PROMPT)
-							.user(userPrompt + "\n" + converter.getFormat()).call().chatResponse())
-					.get(TIMEOUT_SEC, TimeUnit.SECONDS);
-			reason = res.getResult().getMetadata().getFinishReason();
-			String raw = res.getResult().getOutput().getText();
-			rawLen = raw == null ? 0 : raw.length();
-			result = converter.convert(raw);
-		} catch (Exception ex) {
-			Throwable root = ex;
-			while (root.getCause() != null) {
-				root = root.getCause();
+		List<Draft> result = null;
+		for (int attempt = 1; attempt <= MAX_TRY && result == null; attempt++) {
+			String reason = null; // 실패 로그용: Gemini가 응답을 끝낸 이유
+			int rawLen = 0; // 실패 로그용: 받은 글자 수
+			try {
+				ChatResponse res = CompletableFuture
+						.supplyAsync(() -> gemini.prompt().system(SYSTEM_PROMPT)
+								.user(userPrompt + "\n" + converter.getFormat()).call().chatResponse())
+						.get(TIMEOUT_SEC, TimeUnit.SECONDS);
+				reason = res.getResult().getMetadata().getFinishReason();
+				String raw = res.getResult().getOutput().getText();
+				rawLen = raw == null ? 0 : raw.length();
+				result = converter.convert(raw);
+			} catch (Exception ex) {
+				Throwable root = ex;
+				while (root.getCause() != null) {
+					root = root.getCause();
+				}
+				log.warn("C10 역사 문장 초안 실패 {}/{}회 (finishReason={}, 길이={}): {}", attempt, MAX_TRY, reason, rawLen,
+						root.toString());
 			}
-			log.warn("C10 역사 문장 초안 실패 (finishReason={}, 길이={}): {}", reason, rawLen, root.toString());
+		}
+		if (result == null) { // 두 번 다 실패
 			for (Map<String, Object> item : byId.values()) {
 				item.put("error", "AI 호출 실패");
 			}
