@@ -188,10 +188,23 @@ public class EventService {
 		return true;
 	}
 
-	// 최근에 이 선택 이벤트를 물어봤는지 (선택 이벤트 경험 ID = 이벤트ID_선택지순서)
-	private boolean askedRecently(String eventId, List<String> recentIds) {
-		for (String id : recentIds) {
-			if (id.startsWith(eventId + "_"))
+	// 선택 이벤트를 다시 물을 수 있을 때까지의 최소 간격(년), 표에 없으면 DEFAULT_COOLDOWN
+	//   예: 3 → 40세에 물어봤으면 43세부터 다시 나옴
+	//   기본 5년: 귀향·이민(FAMILY·WORK)·큰 병·위험한 제안 (큰 결정이거나 5년 완치 기준)
+	private static final int DEFAULT_COOLDOWN = 5;
+	private static final int MAX_COOLDOWN = 5; // 최근 경험을 조회할 범위 (가장 긴 간격)
+	private static final Map<String, Integer> COOLDOWN = Map.of(
+			"LE_LOVE_PROPOSAL", 2, "LE_LOVE_WEDTALK", 2, // 연애는 금방 다시 (새 사람·다시 이야기)
+			"LE_INVEST_BUSINESS", 3, "LE_INVEST_LAND", 3, "LE_INVEST_STOCK", 3, // 권유는 자주 오지만 연달아는 어색
+			"LE_MARRIAGE_CRISIS", 3, "LE_MIGRANT_DISCRIM", 3, "LE_CHILD_SICK", 3);
+
+	// 최근에 이 선택 이벤트를 물어봤는지 (경험 ID = 이벤트ID_선택지순서, 지금 나이 - 물어본 나이 < 최소 간격)
+	private boolean askedRecently(String eventId, List<Map<String, Object>> recentExps, int age) {
+		int cooldown = COOLDOWN.getOrDefault(eventId, DEFAULT_COOLDOWN);
+		for (Map<String, Object> row : recentExps) {
+			String id = (String) row.get("EXP_ID");
+			int askedAge = ((Number) row.get("AGE")).intValue();
+			if (id.startsWith(eventId + "_") && age - askedAge < cooldown)
 				return true;
 		}
 		return false;
@@ -394,7 +407,7 @@ public class EventService {
 		}
 		List<EventResultDTO> results = new ArrayList<>();
 		boolean hasChoice = false; // 한 해에 선택 이벤트는 1개만 (역사 + 인생 합쳐서)
-		List<String> recentIds = eDAO.selectRecentExpIds(life.getLifeId(), age - 5); // 최근 5년 경험
+		List<Map<String, Object>> recentExps = eDAO.selectRecentExps(life.getLifeId(), age - MAX_COOLDOWN); // 최근 경험 + 나이
 
 		// 1. 역사 이벤트 (C10): 먼저 굴림
 		for (EventResultDTO h : rollHist(life.getCurrentCountry(), year, age, life.getGender(), life.getName(),
@@ -413,8 +426,8 @@ public class EventService {
 			if (e == null)
 				continue; // 조건 맞는 이벤트 없음
 			if ("Y".equals(e.getIsChoice())) {
-				if (hasChoice || askedRecently(e.getEventId(), recentIds))
-					continue; // 이미 선택 이벤트가 있거나, 최근 5년 안에 물어본 이벤트면 건너뜀
+				if (hasChoice || askedRecently(e.getEventId(), recentExps, age))
+					continue; // 이미 선택 이벤트가 있거나, 최소 간격이 안 지난 이벤트면 건너뜀
 				hasChoice = true;
 			}
 

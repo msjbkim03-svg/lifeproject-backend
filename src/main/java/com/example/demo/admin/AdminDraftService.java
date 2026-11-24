@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 
@@ -36,13 +38,13 @@ public class AdminDraftService {
 
 	private static final String SYSTEM_PROMPT = """
 			너는 아시아 역사 기반 인생 시뮬레이션 게임의 문구 작가야.
-			역사 사건마다 인생 기록에 들어갈 기본 문장을 한국어 한 문장(60~100자)으로 써.
+			역사 사건마다 인생 기록에 들어갈 기본 문장을 한국어 한 문장(40~60자)으로 짧게 써. 60자를 넘기지 마.
 			- 문장은 반드시 {연도}년, 으로 시작해. {연도}는 게임이 실제 연도로 바꿔.
 			- 쓸 수 있는 자리 표시는 {연도}, {이름}, {나라}뿐이야. 다른 중괄호는 쓰지 마.
 			- {이름} 뒤 조사는 은(는), 이(가), 을(를)처럼 써. 게임이 받침에 맞게 바꿔.
 			- 이 문장은 사건 기간 중 어느 해에나 나올 수 있어. 기간이 여러 해면 그해에도 맞게 '이어졌다', '계속됐다' 같은 표현을 써.
 			- 사건 설명에 있는 사실만 써. 숫자, 인물, 장소를 지어내지 마.
-			- 사건 설명의 사실 하나와, 그 시기 {나라} 사람들이 어떤 분위기 속에 살았는지를 함께 써.
+			- 사건 설명의 핵심 사실 하나만 써. 분위기 묘사는 짧은 표현 하나면 충분해.
 			- 개인이 겪은 결과(다침, 실직, 이사 등)는 쓰지 마. 효과는 게임이 따로 계산해.
 			- 선택이 Y인 사건은 선택지를 고민하게 되는 상황으로 문장을 끝내. 어떤 선택을 할지, 결과는 쓰지 마.
 			- 3인칭 과거형으로, 따옴표 없이 써.
@@ -123,17 +125,28 @@ public class AdminDraftService {
 		String userPrompt = sb.toString();
 
 		// 2. Gemini 1번 호출 (다른 스레드에서 실행, TIMEOUT_SEC 까지만 기다림)
+		// 형식 안내(JSON으로 답하기)를 붙여 보내고, 받은 글을 직접 List<Draft>로 바꿈
+		BeanOutputConverter<List<Draft>> converter = new BeanOutputConverter<>(
+				new ParameterizedTypeReference<List<Draft>>() {
+				});
 		List<Draft> result;
+		String reason = null; // 실패 로그용: Gemini가 응답을 끝낸 이유
+		int rawLen = 0; // 실패 로그용: 받은 글자 수
 		try {
-			result = CompletableFuture.supplyAsync(() -> gemini.prompt().system(SYSTEM_PROMPT).user(userPrompt).call()
-					.entity(new ParameterizedTypeReference<List<Draft>>() {
-					})).get(TIMEOUT_SEC, TimeUnit.SECONDS);
+			ChatResponse res = CompletableFuture
+					.supplyAsync(() -> gemini.prompt().system(SYSTEM_PROMPT)
+							.user(userPrompt + "\n" + converter.getFormat()).call().chatResponse())
+					.get(TIMEOUT_SEC, TimeUnit.SECONDS);
+			reason = res.getResult().getMetadata().getFinishReason();
+			String raw = res.getResult().getOutput().getText();
+			rawLen = raw == null ? 0 : raw.length();
+			result = converter.convert(raw);
 		} catch (Exception ex) {
 			Throwable root = ex;
 			while (root.getCause() != null) {
 				root = root.getCause();
 			}
-			log.warn("C10 역사 문장 초안 실패: {}", root.toString());
+			log.warn("C10 역사 문장 초안 실패 (finishReason={}, 길이={}): {}", reason, rawLen, root.toString());
 			for (Map<String, Object> item : byId.values()) {
 				item.put("error", "AI 호출 실패");
 			}
