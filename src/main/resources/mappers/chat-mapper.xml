@@ -31,23 +31,4 @@
 		VALUES (#{msgId}, #{countryCode}, #{memberId}, #{content}, 'N', SYSDATE)
 	</insert>
 
-	<select id="selectRecent" parameterType="string" resultType="com.example.demo.chat.ChatDTO">
-		SELECT *
-		FROM (
-			SELECT c.MSG_ID       AS msgId,
-			       c.COUNTRY_CODE AS countryCode,
-			       c.MEMBER_ID    AS memberId,
-			       m.NICKNAME     AS nickname,
-			       c.CONTENT      AS content,
-			       TO_CHAR(c.CREATED_AT, 'HH24:MI') AS createdAt
-			FROM CHAT_MESSAGE c
-			JOIN MEMBER m ON m.MEMBER_ID = c.MEMBER_ID
-			WHERE c.COUNTRY_CODE = #{countryCode}
-			  AND c.IS_DELETED = 'N'
-			ORDER BY c.MSG_ID DESC
-		)
-		WHERE ROWNUM &lt;= 30
-		ORDER BY msgId
-	</select>
-
 </mapper>
