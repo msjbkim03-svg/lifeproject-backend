@@ -48,6 +48,17 @@ public class MemorialController {
 		return ResponseEntity.ok(room);
 	}
 
+	// 추모관 영상·사진첩 재료 (엔딩 영상과 같은 재료)  GET /api/memorials/{lifeId}/film
+	@GetMapping("/{lifeId}/film")
+	public ResponseEntity<Map<String, Object>> film(@PathVariable int lifeId,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		Map<String, Object> film = service.film(lifeId, readMemberId(auth));
+		if (film == null) {
+			return ResponseEntity.notFound().build();
+		}
+		return ResponseEntity.ok(film);
+	}
+
 	@PostMapping("/{lifeId}/open")
 	public ResponseEntity<Map<String, Object>> open(@PathVariable int lifeId, @RequestAttribute("memberId") String memberId,
 			@RequestBody Map<String, String> body) {

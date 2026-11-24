@@ -44,7 +44,7 @@ public class MemberService {
 	}
 
 	public boolean isNicknameAvailable(String nickname) {
-		return dao.countByNickname(nickname) == 0;
+		return dao.countByNickname(nickname == null ? null : nickname.trim()) == 0;
 	}
 
 	public boolean isEmailAvailable(String email) {
@@ -62,6 +62,7 @@ public class MemberService {
 	public String join(MemberDTO dto) {
 		dto.setEmail(cleanEmail(dto.getEmail()));
 		if (dto.getLoginId() != null) dto.setLoginId(dto.getLoginId().trim());
+		if (dto.getNickname() != null) dto.setNickname(dto.getNickname().trim()); // "민승 " 과 "민승" 을 같은 닉네임으로
 
 		// 1. 입력 형식 검사 (화면에서도 검사하지만 서버에서 한 번 더)
 		if (dto.getLoginId() == null || !dto.getLoginId().matches("^[a-zA-Z0-9]{4,20}$")) {
@@ -183,6 +184,7 @@ public class MemberService {
 	@Transactional // 인증번호 '사용함' 처리와 회원 정보 저장을 한 번에 (하나라도 실패하면 둘 다 취소)
 	public String update(int memberId, MemberUpdateDTO dto) {
 		dto.setEmail(cleanEmail(dto.getEmail()));
+		if (dto.getNickname() != null) dto.setNickname(dto.getNickname().trim());
 
 		// 1. DB 에서 지금 내 정보 꺼내기 (비밀번호 비교용)
 		MemberDTO me = dao.selectById(memberId);

@@ -8,6 +8,11 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.demo.costume.CostumeLifeDTO;
+import com.example.demo.costume.CostumeService;
+import com.example.demo.engine.EngineService;
+import com.example.demo.result.ResultService;
+
 @Service
 public class MemorialService {
 
@@ -19,9 +24,16 @@ public class MemorialService {
 			"CAR", "자동차", "TV", "텔레비전", "PC", "컴퓨터", "HOUSE", "집 열쇠");
 
 	private MemorialDAO dao;
+	private EngineService engineService;   // 엔딩 영상 재료 (C22, 동현님 것을 불러 쓰기만)
+	private ResultService resultService;   // 인생 결과 (C18, 신영님 것을 불러 쓰기만)
+	private CostumeService costumeService; // 그 생에 입은 옷 (C21)
 
-	public MemorialService(MemorialDAO dao) {
+	public MemorialService(MemorialDAO dao, EngineService engineService, ResultService resultService,
+			CostumeService costumeService) {
 		this.dao = dao;
+		this.engineService = engineService;
+		this.resultService = resultService;
+		this.costumeService = costumeService;
 	}
 
 	public Map<String, Object> list(int page) {
@@ -60,6 +72,27 @@ public class MemorialService {
 		}
 		room.setComments(comments);
 		return room;
+	}
+
+	// 추모관 영상·사진첩 재료 = 엔딩 영상(C22)과 같은 재료 { result, film, wear }
+	// 열린 추모관이면 누구나, 안 열렸으면 주인만 → 볼 수 없으면 null
+	// (엔진·결과 API 는 '내 인생'만 주니까, 추모관이 주인 번호로 대신 꺼내 줌)
+	public Map<String, Object> film(int lifeId, Integer memberId) {
+		MemorialRoomDTO room = dao.selectRoom(lifeId);
+		if (room == null || room.getOwnerId() == null) return null;
+		boolean mine = memberId != null && memberId.equals(room.getOwnerId());
+		if (room.getPostId() == null && !mine) return null;
+
+		int ownerId = room.getOwnerId();
+		Map<String, Object> film = engineService.filmData(lifeId, ownerId, null);
+		if (film == null || film.isEmpty()) return null;
+
+		CostumeLifeDTO life = costumeService.myLife(lifeId, ownerId, null);
+		Map<String, Object> out = new HashMap<>();
+		out.put("result", resultService.getResult(lifeId));
+		out.put("film", film);
+		out.put("wear", life == null ? null : costumeService.list(life).get("wear"));
+		return out;
 	}
 
 	public String open(int lifeId, int memberId, String message) {
