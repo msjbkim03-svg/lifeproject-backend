@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 
@@ -123,11 +125,17 @@ public class AdminDraftService {
 		String userPrompt = sb.toString();
 
 		// 2. Gemini 1번 호출 (다른 스레드에서 실행, TIMEOUT_SEC 까지만 기다림)
+		// 형식 안내(JSON으로 답하기)를 붙여 보내고, 받은 글을 직접 List<Draft>로 바꿈
+		BeanOutputConverter<List<Draft>> converter = new BeanOutputConverter<>(
+				new ParameterizedTypeReference<List<Draft>>() {
+				});
 		List<Draft> result;
 		try {
-			result = CompletableFuture.supplyAsync(() -> gemini.prompt().system(SYSTEM_PROMPT).user(userPrompt).call()
-					.entity(new ParameterizedTypeReference<List<Draft>>() {
-					})).get(TIMEOUT_SEC, TimeUnit.SECONDS);
+			ChatResponse res = CompletableFuture.supplyAsync(() -> gemini.prompt().system(SYSTEM_PROMPT)
+					.user(userPrompt + "\n" + converter.getFormat()).call().chatResponse())
+					.get(TIMEOUT_SEC, TimeUnit.SECONDS);
+			String raw = res.getResult().getOutput().getText();
+			result = converter.convert(raw);
 		} catch (Exception ex) {
 			Throwable root = ex;
 			while (root.getCause() != null) {
