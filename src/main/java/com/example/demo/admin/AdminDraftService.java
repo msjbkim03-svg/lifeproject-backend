@@ -130,18 +130,23 @@ public class AdminDraftService {
 				new ParameterizedTypeReference<List<Draft>>() {
 				});
 		List<Draft> result;
+		String reason = null; // 실패 로그용: Gemini가 응답을 끝낸 이유
+		int rawLen = 0; // 실패 로그용: 받은 글자 수
 		try {
-			ChatResponse res = CompletableFuture.supplyAsync(() -> gemini.prompt().system(SYSTEM_PROMPT)
-					.user(userPrompt + "\n" + converter.getFormat()).call().chatResponse())
+			ChatResponse res = CompletableFuture
+					.supplyAsync(() -> gemini.prompt().system(SYSTEM_PROMPT)
+							.user(userPrompt + "\n" + converter.getFormat()).call().chatResponse())
 					.get(TIMEOUT_SEC, TimeUnit.SECONDS);
+			reason = res.getResult().getMetadata().getFinishReason();
 			String raw = res.getResult().getOutput().getText();
+			rawLen = raw == null ? 0 : raw.length();
 			result = converter.convert(raw);
 		} catch (Exception ex) {
 			Throwable root = ex;
 			while (root.getCause() != null) {
 				root = root.getCause();
 			}
-			log.warn("C10 역사 문장 초안 실패: {}", root.toString());
+			log.warn("C10 역사 문장 초안 실패 (finishReason={}, 길이={}): {}", reason, rawLen, root.toString());
 			for (Map<String, Object> item : byId.values()) {
 				item.put("error", "AI 호출 실패");
 			}
