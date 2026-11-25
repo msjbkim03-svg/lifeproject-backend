@@ -1034,15 +1034,22 @@ public class EngineService {
 			// 이름은 태어난 나라(집안) 이름으로: 이민 간 뒤에도 부모 집안 이름을 따름 (배우자 이름도 같은 나라에서 정해짐)
 			String cc = life.getBirthCountry();
 			String dadName = "M".equals(life.getGender()) ? life.getName() : f.spouse;
+			java.util.Set<String> usedNames = new java.util.HashSet<>(); // 형제끼리 같은 이름이 나오지 않게 (11/25 엔딩 크레딧에서 '자녀 요가 수리야디'가 두 번 나옴)
 			for (int i = 0; i < life.getChildCount(); i++) {
 				String sex = r.nextDouble() < 0.51 ? "M" : "F";
-				String nm = pickName(cc, sex, r);
-				if (nm != null && dadName != null) {
-					if (SURNAME_CC.contains(cc)) {
-						nm = joinName(splitName(dadName)[0], splitName(nm)[1], nm); // 한·중·일 …: 아버지 성 + 이름
-					} else if (dadName.indexOf(' ') > 0 && nm.indexOf(' ') > 0) {
-						// 띄어 쓰는 이름 (아랍·서양 …): 아이 이름 + 아버지 집안 이름 (형제끼리 같은 집안 이름)
-						nm = nm.substring(0, nm.indexOf(' ')) + dadName.substring(dadName.lastIndexOf(' '));
+				String nm = null;
+				for (int tries = 0; tries < 8; tries++) {
+					nm = pickName(cc, sex, r);
+					if (nm != null && dadName != null) {
+						if (SURNAME_CC.contains(cc)) {
+							nm = joinName(splitName(dadName)[0], splitName(nm)[1], nm); // 한·중·일 …: 아버지 성 + 이름
+						} else if (dadName.indexOf(' ') > 0 && nm.indexOf(' ') > 0) {
+							// 띄어 쓰는 이름 (아랍·서양 …): 아이 이름 + 아버지 집안 이름 (형제끼리 같은 집안 이름)
+							nm = nm.substring(0, nm.indexOf(' ')) + dadName.substring(dadName.lastIndexOf(' '));
+						}
+					}
+					if (nm == null || usedNames.add(nm)) {
+						break; // 처음 나온 이름이면 그대로 (겹치면 다시 뽑음, 8번까지)
 					}
 				}
 				Integer born = births != null && i < births.size() ? births.get(i) : null;
