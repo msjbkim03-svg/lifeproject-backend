@@ -62,6 +62,20 @@
 		  AND STATUS = 'PLAYING'
 	</update>
 
+	<!-- M02: 이 브라우저에서 비회원으로 진행 중인 인생이 있는지 -->
+	<select id="countGuestPlayingLife" parameterType="string" resultType="int">
+		SELECT COUNT(*) FROM LIFE
+		WHERE GUEST_TOKEN = #{guestToken} AND MEMBER_ID IS NULL AND STATUS = 'PLAYING'
+	</select>
+
+	<!-- M02: 비회원 인생을 이어가기로 했을 때 회원이 하던 인생은 포기 처리 -->
+	<update id="abandonPlayingLife" parameterType="int">
+		UPDATE LIFE
+		SET STATUS = 'ABANDONED', ENDED_AT = SYSDATE
+		WHERE MEMBER_ID = #{memberId}
+		  AND STATUS = 'PLAYING'
+	</update>
+
 	<!-- M04: 마이페이지
 	     ① MEMBER 에서 가입 정보·포인트
 	     ② 살아본 인생 수 = 끝난(ENDED) 인생 개수 (포기한 ABANDONED 는 빼기)
@@ -234,7 +248,6 @@
 				       l.BIRTH_YEAR,
 				       l.DEATH_AGE,
 				       l.DEATH_CAUSE,
-				       TO_CHAR(l.ENDED_AT, 'YYYY-MM-DD') AS ENDED_AT,
 				       (SELECT COUNT(*) FROM LIFE_QUEST q WHERE q.LIFE_ID = l.LIFE_ID) AS QUEST_TOTAL,
 				       (SELECT COUNT(*) FROM LIFE_QUEST q WHERE q.LIFE_ID = l.LIFE_ID AND q.ACHIEVED = 'Y') AS QUEST_DONE,
 				       (SELECT NVL(SUM(p.AMOUNT), 0) FROM POINT_HISTORY p

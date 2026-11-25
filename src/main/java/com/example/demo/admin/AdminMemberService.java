@@ -4,6 +4,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.example.demo.member.MemberDAO;
 
 // A01 관리자 회원 관리 - 검색·페이지 계산, 강제 탈퇴 검사
 @Service
@@ -12,9 +15,11 @@ public class AdminMemberService {
 	private static final int SIZE = 10; // 한 페이지에 10명
 
 	private final AdminMemberDAO dao;
+	private final MemberDAO memberDAO; // 진행 중 인생 포기 처리는 회원 쪽 SQL 을 같이 씀
 
-	public AdminMemberService(AdminMemberDAO dao) {
+	public AdminMemberService(AdminMemberDAO dao, MemberDAO memberDAO) {
 		this.dao = dao;
+		this.memberDAO = memberDAO;
 	}
 
 	// ===== 회원 목록 =====
@@ -47,14 +52,17 @@ public class AdminMemberService {
 
 	// ===== 강제 탈퇴 =====
 	// 문제가 있으면 오류 문구, 성공하면 null
-	// 회원이 스스로 탈퇴(M06)할 때와 똑같이 STATUS 만 바꾸고 전화번호를 지움 (인생·추모관 기록은 남김)
+	// 회원이 스스로 탈퇴(M06)할 때와 똑같이 STATUS 를 바꾸고 전화번호를 지움 + 진행 중 인생은 포기 처리 (끝난 인생·추모관 기록은 남김)
+	@Transactional
 	public String withdraw(int memberId) {
 		AdminMemberDTO m = dao.selectMember(memberId);
 		if (m == null) return "없는 회원이에요.";
 		if ("ADMIN".equals(m.getMemberRole())) return "관리자 계정은 탈퇴시킬 수 없어요.";
 		if ("WITHDRAWN".equals(m.getStatus())) return "이미 탈퇴한 회원이에요.";
 
-		dao.updateWithdrawn(memberId);
+		if (dao.updateWithdrawn(memberId) > 0) {
+			memberDAO.abandonPlayingLife(memberId);
+		}
 		return null;
 	}
 }

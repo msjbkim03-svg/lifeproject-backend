@@ -33,6 +33,10 @@ public class ChatController {
 		if (countryCode == null || countryCode.length() != 3) {
 			return Map.of("message", "나라를 찾지 못했어요.");
 		}
+		// 비회원으로 들어왔다가 로그인했으면 먼저 회원으로 바꾸고, 영향받은 나라의 명단도 새로 보냄
+		for (String code : service.upgradeGuest(sessionId, countryCode, dto.getToken())) {
+			sendPlayers(code);
+		}
 		String error = service.send(sessionId, countryCode, dto);
 		if(error != null) {
 			return Map.of("message", error);
@@ -49,8 +53,8 @@ public class ChatController {
 	@MessageMapping("/chat/{countryCode}/join")
 	public void join(@DestinationVariable String countryCode, @Header("simpSessionId") String sessionId, ChatPlayerDTO dto) {
 		if (countryCode.length() != 3) return;
-		if (service.join(sessionId, countryCode, dto)) {
-			sendPlayers(countryCode);
+		for (String code : service.join(sessionId, countryCode, dto)) {
+			sendPlayers(code);
 		}
 	}
 
