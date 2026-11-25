@@ -53,10 +53,10 @@
 		WHERE MEMBER_ID = #{memberId} AND STATUS = 'PLAYING'
 	</select>
 
-	<!-- M02: 비회원 인생 → 회원 인생으로 전환 (START_TYPE 은 GUEST 그대로 둠) -->
+	<!-- M02: 비회원 인생 → 회원 인생으로 전환 (결과 화면 추모관 버튼 등이 회원 인생으로 알아보게 START_TYPE 도 MEMBER 로 변경) -->
 	<update id="convertGuestLife" parameterType="map">
 		UPDATE LIFE
-		SET MEMBER_ID = #{memberId}, GUEST_TOKEN = NULL
+		SET MEMBER_ID = #{memberId}, GUEST_TOKEN = NULL, START_TYPE = 'MEMBER'
 		WHERE GUEST_TOKEN = #{guestToken}
 		  AND MEMBER_ID IS NULL
 		  AND STATUS = 'PLAYING'
