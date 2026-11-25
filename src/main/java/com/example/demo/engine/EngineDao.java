@@ -74,4 +74,14 @@ public interface EngineDao {
 
 	// 진행 화면: 이 인생에서 고른 퀘스트 (LIFE_QUEST + QUEST 읽기만)
 	List<LifeQuestDTO> selectLifeQuests(int lifeId);
+
+	// 메인 실시간 목록 (실제 플레이어): 방금 시작된 인생 · 방금 끝난 인생
+	List<LiveLifeDTO> selectLiveBorn(int n);
+	List<LiveLifeDTO> selectLiveDied(int n);
+
+	// 진행 화면 '같은 해에 태어난 사람들' (실제 플레이어 또래, 최대 4명)
+	List<LiveLifeDTO> selectRealPeers(Map<String, Object> cond);
+
+	// 삶을 마감: 진행 중인 내 인생과 그 기록을 모두 지움
+	int deleteLife(int lifeId);
 }
