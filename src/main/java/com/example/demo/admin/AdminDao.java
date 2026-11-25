@@ -14,4 +14,8 @@ public interface AdminDao {
 	List<QuestRateDTO> selectQuestRates();
 	List<TraitLevelDTO> selectTraitLevels();
 	List<CountryLifeDTO> selectCountryLife();
+	List<DailyPlayDTO> selectDailyPlays();			// 최근 14일 (11/25)
+	List<DeathCauseDTO> selectDeathCauses();		// 사망 원인 분포 (11/25)
+	List<AgeBucketDTO> selectAgeBuckets();			// 수명 분포 (11/25)
+	List<RecentLifeDTO> selectRecentEnded(int n);	// 최근 끝난 인생 n개 (11/25)
 }

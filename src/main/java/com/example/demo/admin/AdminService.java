@@ -30,6 +30,10 @@ public class AdminService {
 		d.setQuests(adminDao.selectQuestRates());
 		d.setTraits(adminDao.selectTraitLevels());
 		d.setCountries(adminDao.selectCountryLife());
+		d.setDaily(adminDao.selectDailyPlays());
+		d.setCauses(adminDao.selectDeathCauses());
+		d.setAges(adminDao.selectAgeBuckets());
+		d.setRecent(adminDao.selectRecentEnded(8));
 		return d;
 	}
 }
