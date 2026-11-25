@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -112,7 +113,12 @@ public class MemorialService {
 		}
 		String error = checkText(message);
 		if (error != null) return error;
-		dao.insertPost(lifeId, memberId, message.trim());
+		try {
+			dao.insertPost(lifeId, memberId, message.trim());
+		} catch (DuplicateKeyException e) {
+			// [열기]를 거의 동시에 두 번 눌러서 다른 요청이 먼저 열었으면 (LIFE_ID UNIQUE)
+			return "이미 열린 추모관이에요.";
+		}
 		return null;
 	}
 
@@ -202,9 +208,6 @@ public class MemorialService {
 
 	private Map<String, Object> makeLast(MemorialRoomDTO room, int lifeId) {
 		Map<String, Object> last = new HashMap<>();
-		if (room.getDeathCause() != null) {
-			last.put("scene", "떠난 이유: " + room.getDeathCause());
-		}
 		if (room.getChildCount() > 0) {
 			last.put("mourners", "자녀 " + room.getChildCount() + "명이 마지막 길을 배웅했어요.");
 		}

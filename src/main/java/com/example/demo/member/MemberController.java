@@ -78,11 +78,26 @@ public class MemberController {
 		String token = jwtUtil.createToken(String.valueOf(member.getMemberId()), member.getMemberRole(),
 				JwtUtil.passwordVersion(member.getPassword()));
 
+		// 전환 못 했는데 비회원 인생이 남아 있음 = 회원에게 이미 진행 중인 인생이 있음 → 화면이 어느 쪽을 할지 물어봄
+		boolean guestPending = !converted && service.hasGuestLife(dto.getGuestToken());
+
 		return ResponseEntity.ok(Map.of(
 				"token", token,
 				"nickname", member.getNickname(),
 				"memberRole", member.getMemberRole(),
-				"guestConverted", converted));
+				"guestConverted", converted,
+				"guestPending", guestPending));
+	}
+
+	// 로그인 뒤 "비회원 인생 이어가기" (M02)  POST /api/members/me/takeGuestLife  { guestToken }
+	// 회원이 하던 인생은 포기하고 비회원 인생을 회원 인생으로 옮김
+	@PostMapping("/me/takeGuestLife")
+	public ResponseEntity<Map<String, Object>> takeGuestLife(@RequestAttribute("memberId") String memberId,
+			@RequestBody MemberLoginDTO dto) {
+		if (!service.takeGuestLife(Integer.parseInt(memberId), dto.getGuestToken())) {
+			return ResponseEntity.badRequest().body(Map.of("message", "비회원으로 하던 인생을 찾지 못했어요."));
+		}
+		return ResponseEntity.ok(Map.of("message", "비회원으로 하던 인생을 이어서 해요."));
 	}
 
 	// 마이페이지 (M04)  GET /api/members/me

@@ -3,13 +3,18 @@ package com.example.demo.chat;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Service;
 
+import com.auth0.jwt.interfaces.DecodedJWT;
 import com.example.demo.commons.JwtUtil;
+import com.example.demo.member.MemberDAO;
+import com.example.demo.member.MemberDTO;
 
 @Service
 public class ChatService {
@@ -19,22 +24,47 @@ public class ChatService {
 	
 	private ChatDAO dao;
 	private JwtUtil jwt;
+	private MemberDAO memberDAO;
 	private Map<Integer,Long> lastTime = new ConcurrentHashMap<>();
 	private Map<String, ChatPlayerDTO> players = new ConcurrentHashMap<>();
 	
-	public ChatService(ChatDAO dao,JwtUtil jwt) {
+	public ChatService(ChatDAO dao,JwtUtil jwt, MemberDAO memberDAO) {
 		this.dao=dao;
 		this.jwt=jwt;
+		this.memberDAO=memberDAO;
+	}
+
+	// 토큰 → 지금도 쓸 수 있는 회원 번호 (없거나 가짜 · 탈퇴 · 토큰 받은 뒤 비밀번호가 바뀌었으면 null)
+	// ※ 웹소켓은 /api 문지기(ActiveMemberValidator)를 안 거쳐서 여기서 같은 검사를 한 번 더 함
+	private Integer activeMemberId(String token) {
+		if (token == null || token.isEmpty()) return null;
+		DecodedJWT t;
+		int memberId;
+		try {
+			t = jwt.verifyToken(token);
+			memberId = Integer.parseInt(t.getSubject());
+		} catch (Exception e) {
+			return null;
+		}
+		MemberDTO member = memberDAO.selectById(memberId);
+		if (member == null || !"ACTIVE".equals(member.getStatus())) return null;
+		String pv = t.getClaim("pv").asString();
+		if (pv != null && !pv.equals(JwtUtil.passwordVersion(member.getPassword()))) return null;
+		return memberId;
 	}
 	
 	public String send(String sessionId, String countryCode,ChatDTO dto) {
-		Integer memberId = jwt.memberIdOf(dto.getToken());
+		Integer memberId = activeMemberId(dto.getToken());
 		if(memberId == null) {
 			return "로그인한 회원만 말할 수 있어요.";
 		}
 
 		// 이 나라 마을에 들어와 있는(join 할 때 DB로 나라를 확인한) 회원인지
 		ChatPlayerDTO me = players.get(sessionId);
+		if (me != null && me.getMemberId() < 0 && countryCode.equals(me.getCountryCode())) {
+			// 손님으로 남아 있음 = 로그인했지만 지금 하는 인생은 비회원 인생 (회원에게 진행 중인 인생이 이미 있으면 안 옮겨짐)
+			return "로그인 전에 시작한 비회원 인생이라 말할 수 없어요.";
+		}
 		if (me == null || me.getMemberId() != memberId || !countryCode.equals(me.getCountryCode())) {
 			return "지금 살고 있는 나라 마을에서만 말할 수 있어요.";
 		}
@@ -81,23 +111,30 @@ public class ChatService {
 		return null;
 	}
 	
-	public boolean join(String sessionId, String countryCode, ChatPlayerDTO dto) {
+	// 마을 입장 → 명단을 다시 보내야 할 나라 코드 목록을 돌려줌 (입장 실패 시 빈 Set)
+	public Set<String> join(String sessionId, String countryCode, ChatPlayerDTO dto) {
+		Integer memberId = activeMemberId(dto.getToken());
+
+		// 같은 연결 · 같은 나라 · 같은 사람이면 나이 · 성별 · 위치만 바꿈
+		// ※ 비회원으로 놀다가 로그인하면 같은 연결인데 사람이 바뀜 → 아래에서 회원으로 다시 들어가게 함
 		ChatPlayerDTO old = players.get(sessionId);
-		if (old != null && countryCode.equals(old.getCountryCode())) {
+		boolean samePerson = old != null
+				&& (memberId == null ? old.getMemberId() < 0 : old.getMemberId() == memberId);
+		if (samePerson && countryCode.equals(old.getCountryCode())) {
 			old.setAge(fixAge(dto.getAge()));
 			old.setGender(fixGender(dto.getGender()));
-			return true;
+			setPosition(old, dto);
+			return Set.of(countryCode);
 		}
 
-		Integer memberId = jwt.memberIdOf(dto.getToken());
 		String nickname;
 		if(memberId != null) {
 			nickname = dao.selectNickname(memberId);
-			if(nickname == null) return false; 
-			if(dao.countMemberLife(memberId, countryCode) == 0) return false;
+			if(nickname == null) return Set.of(); 
+			if(dao.countMemberLife(memberId, countryCode) == 0) return Set.of();
 		} else {
-			if(dto.getMemberId() >= 0) return false;
-			if(dto.getGuestToken() == null || dao.countGuestLife(dto.getGuestToken(), countryCode) == 0) return false;
+			if(dto.getMemberId() >= 0) return Set.of();
+			if(dto.getGuestToken() == null || dao.countGuestLife(dto.getGuestToken(), countryCode) == 0) return Set.of();
 			memberId = dto.getMemberId();
 			nickname="손님";
 		}
@@ -111,18 +148,54 @@ public class ChatService {
 		dto.setGuestToken(null);
 		setPosition(dto, dto);
 
-		// 같은 회원이 탭을 여러 개 열면 마지막에 들어온 탭 하나만 남김 (캐릭터가 왔다 갔다 하지 않게)
+		Set<String> refresh = new HashSet<>();
+		refresh.add(countryCode);
+		// 이민 등으로 같은 연결이 다른 나라에서 옮겨 왔으면 예전 나라 명단도 새로 고침
+		if (old != null && old.getCountryCode() != null && !countryCode.equals(old.getCountryCode())) {
+			refresh.add(old.getCountryCode());
+		}
+		// 같은 회원이 탭을 여러 개 열면 마지막에 들어온 탭 하나만 남기고, 예전 탭이 있던 나라 명단도 새로 고침
 		if (memberId > 0) {
-			final int id = memberId;
-			players.values().removeIf(p -> p.getMemberId() == id);
+			refresh.addAll(removeOtherSessions(memberId, sessionId));
 		}
 		players.put(sessionId, dto);
-		return true;
+		return refresh;
+	}
+
+	// 비회원으로 마을에 들어왔다가 로그인한 경우 → 명단의 손님을 회원(닉네임)으로 바꾸고 갱신할 나라 목록 반환
+	// (화면이 다시 join 을 못 보냈어도 말하기 전에 여기서 한 번 더 맞춰 줌)
+	public Set<String> upgradeGuest(String sessionId, String countryCode, String token) {
+		ChatPlayerDTO me = players.get(sessionId);
+		if (me == null || me.getMemberId() >= 0 || !countryCode.equals(me.getCountryCode())) return Set.of();
+		Integer memberId = activeMemberId(token);
+		if (memberId == null || dao.countMemberLife(memberId, countryCode) == 0) return Set.of();
+		String nickname = dao.selectNickname(memberId);
+		if (nickname == null) return Set.of();
+		Set<String> refresh = removeOtherSessions(memberId, sessionId);
+		refresh.add(countryCode);
+		me.setMemberId(memberId);
+		me.setNickname(nickname);
+		return refresh;
+	}
+
+	// 같은 회원의 다른 탭 연결을 명단에서 빼고, 그 탭들이 있던 나라 코드 목록을 돌려줌
+	private Set<String> removeOtherSessions(int memberId, String keepSessionId) {
+		Set<String> countries = new HashSet<>();
+		players.entrySet().removeIf(e -> {
+			if (e.getValue().getMemberId() == memberId && !e.getKey().equals(keepSessionId)) {
+				if (e.getValue().getCountryCode() != null) {
+					countries.add(e.getValue().getCountryCode());
+				}
+				return true;
+			}
+			return false;
+		});
+		return countries;
 	}
 
 	// 이 나라 채팅방을 들을 수 있는지 (지금 그 나라에서 살고 있는 회원·비회원만)
 	public boolean canListen(String countryCode, String token, String guestToken) {
-		Integer memberId = jwt.memberIdOf(token);
+		Integer memberId = activeMemberId(token);
 		if (memberId != null) {
 			return dao.countMemberLife(memberId, countryCode) > 0;
 		}

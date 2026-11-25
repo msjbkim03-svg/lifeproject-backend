@@ -3,6 +3,8 @@ package com.example.demo.member;
 import java.security.SecureRandom;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -19,6 +21,9 @@ import jakarta.mail.internet.MimeMessage;
 
 @Service
 public class MemberService {
+
+	// 인증 메일은 이 일꾼 2명이 차례로 보냄 (요청마다 새 스레드를 만들지 않게 → 한꺼번에 몰려도 서버가 버팀)
+	private static final ExecutorService MAIL_WORKERS = Executors.newFixedThreadPool(2);
 
 	private MemberDAO dao;
 	private JavaMailSender mailSender; // 메일 보내는 도구 (M09)
@@ -173,6 +178,22 @@ public class MemberService {
 		return dao.convertGuestLife(memberId, guestToken) > 0;
 	}
 
+	// 로그인했는데 회원 인생이 이미 있어서 전환을 못 했을 때: 이 브라우저에 비회원 인생이 남아 있는지
+	// → 있으면 화면이 "어느 인생을 이어갈까요?" 를 물어봄
+	public boolean hasGuestLife(String guestToken) {
+		if (guestToken == null || guestToken.isBlank()) return false;
+		return dao.countGuestPlayingLife(guestToken) > 0;
+	}
+
+	// "비회원 인생 이어가기"를 골랐을 때: 회원이 하던 인생은 포기하고, 비회원 인생을 회원 인생으로 전환
+	// (진행 중 인생 1개 규칙 때문에 포기 → 전환 순서, 둘 중 하나라도 실패하면 둘 다 취소)
+	@Transactional
+	public boolean takeGuestLife(int memberId, String guestToken) {
+		if (!hasGuestLife(guestToken)) return false;
+		dao.abandonPlayingLife(memberId);
+		return dao.convertGuestLife(memberId, guestToken) > 0;
+	}
+
 	// ===== 마이페이지 (M04) =====
 	// 회원 정보 + 포인트 + 살아본 인생 수 + 퀘스트 달성 수 + 진행 중인 인생 (없으면 null)
 	public MyPageDTO myPage(int memberId) {
@@ -243,12 +264,16 @@ public class MemberService {
 	// ===== 회원 탈퇴 (M06) =====
 	// 비밀번호가 맞으면 STATUS 를 'WITHDRAWN' 으로 바꾸고 true
 	// (회원 줄은 지우지 않음 → 인생·추모관 글과 외래키 오류 방지)
+	@Transactional // 탈퇴 + 진행 중 인생 포기를 한 묶음으로
 	public boolean withdraw(int memberId, String password) {
 		MemberDTO me = dao.selectById(memberId);
 		if (me == null || "WITHDRAWN".equals(me.getStatus())) return false;
 		if (password == null || !encoder.matches(password, me.getPassword())) return false;
 
-		return dao.updateWithdrawn(memberId) > 0;
+		if (dao.updateWithdrawn(memberId) == 0) return false;
+		// 하던 인생이 '진행 중'으로 영원히 남지 않게 포기 처리 (끝난 인생 · 추모관은 그대로)
+		dao.abandonPlayingLife(memberId);
+		return true;
 	}
 
 	// ===== 인증번호 보내기 (M09) =====
@@ -288,17 +313,17 @@ public class MemberService {
 				? dao.selectActiveByEmail(dto.getEmail())
 				: dao.selectActiveByLoginIdAndEmail(dto.getLoginId(), dto.getEmail());
 
-		// Gmail 보내기는 몇 초 걸려서, 메일은 다른 스레드에 맡기고 화면에는 바로 대답함
+		// Gmail 보내기는 몇 초 걸려서, 메일은 일꾼(MAIL_WORKERS)에게 맡기고 화면에는 바로 대답함
 		if (member != null) {
 			String email = dto.getEmail();
-			new Thread(() -> {
+			MAIL_WORKERS.execute(() -> {
 				try {
 					sendCodeMail(email, code, purpose);
 				} catch (Exception e) {
 					// 메일이 안 나가도 화면에는 똑같은 문구를 보여 줌 (가입 여부 노출 방지)
 					e.printStackTrace();
 				}
-			}).start();
+			});
 		}
 		return null;
 	}

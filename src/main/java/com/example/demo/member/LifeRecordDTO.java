@@ -9,7 +9,6 @@ public class LifeRecordDTO {
 	private int birthYear;       // 출생 연도
 	private Integer deathAge;    // 수명 (int 는 null 을 못 담아서 Integer)
 	private String deathCause;   // 사망 원인
-	private String endedAt;      // 끝난 날짜 (YYYY-MM-DD)
 	private int questTotal;      // 고른 퀘스트 수
 	private int questDone;       // 달성한 퀘스트 수
 	private int earnedPoint;           // 이 인생으로 받은 포인트
@@ -31,9 +30,6 @@ public class LifeRecordDTO {
 
 	public String getDeathCause() { return deathCause; }
 	public void setDeathCause(String deathCause) { this.deathCause = deathCause; }
-
-	public String getEndedAt() { return endedAt; }
-	public void setEndedAt(String endedAt) { this.endedAt = endedAt; }
 
 	public int getQuestTotal() { return questTotal; }
 	public void setQuestTotal(int questTotal) { this.questTotal = questTotal; }

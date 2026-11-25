@@ -51,6 +51,16 @@ public class MemberDAO {
 		return mybatis.selectOne("member.countPlayingLife", memberId);
 	}
 
+	// 이 비회원 토큰으로 진행 중인 인생 수 (0 또는 1)
+	public int countGuestPlayingLife(String guestToken) {
+		return mybatis.selectOne("member.countGuestPlayingLife", guestToken);
+	}
+
+	// 회원이 하던 인생 포기 (비회원 인생을 이어가기로 했을 때)
+	public int abandonPlayingLife(int memberId) {
+		return mybatis.update("member.abandonPlayingLife", memberId);
+	}
+
 	// 비회원 인생에 회원 번호 채우기 → 바뀐 줄 수 (0이면 전환된 인생 없음)
 	public int convertGuestLife(int memberId, String guestToken) {
 		return mybatis.update("member.convertGuestLife",
