@@ -12,7 +12,7 @@
 		       QUESTION   AS question,
 		       ANSWER     AS answer,
 		       SOURCE_IDS AS sourceIds,
-		       TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI') AS createdAt
+		       TO_CHAR(CREATED_AT + 9 / 24, 'YYYY-MM-DD HH24:MI') AS createdAt /* DB 시계가 UTC 라 한국 시간으로 +9시간 (11/25) */
 		FROM QA_LOG
 		WHERE LIFE_ID = #{lifeId}
 		ORDER BY QA_ID
@@ -37,7 +37,7 @@
 		       QUESTION   AS question,
 		       ANSWER     AS answer,
 		       SOURCE_IDS AS sourceIds,
-		       TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI') AS createdAt
+		       TO_CHAR(CREATED_AT + 9 / 24, 'YYYY-MM-DD HH24:MI') AS createdAt
 		FROM QA_LOG
 		WHERE QA_ID = #{qaId}
 	</select>

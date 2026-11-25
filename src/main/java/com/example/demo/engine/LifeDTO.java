@@ -71,6 +71,8 @@ public class LifeDTO {
 	private Double krwPerUsd;	// [화면용] 달러 → 한국 체감 원 (원작: 구매력 달러 × 850원)
 	private Double incomeRankCountry;	// [화면용] 소득 위치: 그 나라에서 0~1 (1에 가까울수록 상위)
 	private Double incomeRankAsia;	// [화면용] 소득 위치: 등록된 나라 전체에서 0~1 (출생아 수로 가중)
+	private Integer homeTopPct;	// [출생 화면] 태어난 집이 그 나라에서 상위 몇 % (1~100)
+	private Integer homeTopPctAsia;	// [출생 화면] 태어난 집이 아시아(등록된 나라 전체)에서 상위 몇 %
 	private String investType;	// C06-3 여유 자금 굴리기 (CASH, DEPOSIT, BOND, MIX, STOCK, WORLD, PROPERTY, TRADE / null = 알아서)
 	private String owns;	// C06-3 가진 물건 코드 (쉼표: CAR,TV,HOUSE …)
 	private Long spouseIncome;	// [화면용] 배우자 소득 (엔진은 그 나라 중위 소득을 버는 배우자로 봄)
@@ -600,6 +602,22 @@ public class LifeDTO {
 
 	public void setIncomeRankCountry(Double incomeRankCountry) {
 		this.incomeRankCountry = incomeRankCountry;
+	}
+
+	public Integer getHomeTopPct() {
+		return homeTopPct;
+	}
+
+	public void setHomeTopPct(Integer homeTopPct) {
+		this.homeTopPct = homeTopPct;
+	}
+
+	public Integer getHomeTopPctAsia() {
+		return homeTopPctAsia;
+	}
+
+	public void setHomeTopPctAsia(Integer homeTopPctAsia) {
+		this.homeTopPctAsia = homeTopPctAsia;
 	}
 
 	public Double getIncomeRankAsia() {

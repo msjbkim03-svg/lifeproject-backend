@@ -24,4 +24,31 @@ public class AiText {
 		}
 		return sb.toString();
 	}
+
+	// AI 글 다듬기 (C19 · C20 공통, 11/25 점검)
+	//  - '[2, 3]' · '[2,3]' → '[2][3]' (화면은 [번호] 하나씩만 작은 글자로 바꿈)
+	//  - 규칙으로 막아도 자꾸 나오는 뻔한 꾸밈말 빼기 ('묵묵히', '굴곡진' - 빼도 문장이 성립하는 말만)
+	//  - **굵게** 표시 빼기, 빈 줄 정리
+	public static String tidy(String s) {
+		if (s == null) {
+			return "";
+		}
+		java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\[(\\d+(?:\\s*,\\s*\\d+)+)\\]").matcher(s);
+		StringBuilder sb = new StringBuilder();
+		while (m.find()) {
+			StringBuilder rep = new StringBuilder();
+			for (String n : m.group(1).split(",")) {
+				rep.append("[").append(n.trim()).append("]");
+			}
+			m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(rep.toString()));
+		}
+		m.appendTail(sb);
+		return sb.toString()
+				.replace("**", "")
+				.replace("묵묵히 ", "")
+				.replace("굴곡진 ", "")
+				.replaceAll(" +\\[", "[")
+				.replaceAll("\\n{3,}", "\n\n")
+				.trim();
+	}
 }

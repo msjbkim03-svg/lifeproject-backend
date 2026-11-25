@@ -485,9 +485,29 @@ public class EngineService {
 		life.setInfantMortality(country.getInfantMortality());
 		life.setU5Mortality(country.getU5Mortality());
 		life.setGdpPerCapita(country.getGdpPerCapita());
+		fillHomePct(life, country);
 		fillRegion(life);
 
 		return life;
+	}
+
+	// [출생 화면] 태어난 집이 상위 몇 % (11/25 동현님)
+	//   가정형편 1~5는 그 나라 소득 5분위 → 분위 안의 자리는 인생 번호로 정함 (같은 인생은 늘 같은 값)
+	//   그 나라 소득 분포(로그정규, σ = 지니계수)에서 그 자리의 소득을 구해 → 아시아(등록된 나라, 출생아 수 가중)에서의 위치도 계산
+	private void fillHomePct(LifeDTO life, CountryStatDTO country) {
+		try {
+			double u = (life.getLifeId() * 0.6180339887) % 1.0;
+			double p = (life.getWealthClass() - 1 + 0.1 + 0.8 * u) / 5.0; // 아래에서 몇 % (0~1)
+			life.setHomeTopPct((int) Math.max(1, Math.min(100, Math.round((1 - p) * 100))));
+			double s = sigmaOf(country.getCountryCode(), country);
+			double income = gdpOf(country) * Math.exp(s * invNorm(p));
+			Double asia = asiaPct(income, life.getBirthYear());
+			if (asia != null) {
+				life.setHomeTopPctAsia((int) Math.max(1, Math.min(100, Math.round((1 - asia) * 100))));
+			}
+		} catch (RuntimeException e) {
+			// 통계가 모자라면 칸만 비움
+		}
 	}
 
 	// [화면용] 지금 사는 나라의 권역 (C08 마을 그림 고르기, 이민하면 바뀜)
@@ -517,6 +537,16 @@ public class EngineService {
 	// 달러 → '한국 체감' 원 (원작 KRW): 구매력(PPP) 달러 × 850원
 	//   그 나라 물가 수준은 1인당 GDP로 계산 (toPpp(GDP) ÷ GDP) → 같은 달러라도 물가 싼 나라에선 더 큰돈
 	private static final double KRW = 850;
+
+	// C18 결과 화면: 세상을 떠난 해 · 사는 나라 기준 '한국 체감 원' 배율 (진행 화면과 같은 계산)
+	public double krwPerUsdOf(String countryCode, int birthYear, int age) {
+		LifeDTO g = new LifeDTO();
+		g.setBirthCountry(countryCode);
+		g.setCurrentCountry(countryCode);
+		g.setBirthYear(birthYear);
+		g.setCurrentAge(age);
+		return krwPerUsd(yearStat(g));
+	}
 
 	private double krwPerUsd(CountryStatDTO stat) {
 		double gdp = gdpOf(stat);
@@ -1007,7 +1037,8 @@ public class EngineService {
 			int k = wordI.merge(w, 1, Integer::sum);
 			sib.add((wordN.get(w) > 1 ? sibOrd(w, k) : w) + " " + x[1] + "세");
 		}
-		String sibText = sib.isEmpty() ? "없음" : sib.size() <= 7 ? String.join(" · ", sib) : sib.size() + "명";
+		// 8명 이상이면 손위부터 6명 + '외 n명' (예전엔 '8명'만 떠서 엔딩 크레딧이 형제자매를 못 그렸음, 11/25 점검)
+		String sibText = sib.isEmpty() ? "없음" : sib.size() <= 7 ? String.join(" · ", sib) : String.join(" · ", sib.subList(0, 6)) + " 외 " + (sib.size() - 6) + "명";
 		if (left > 0) {
 			sibText = sibText + " · " + (left == sib.size() ? "모두 집을 떠남" : left + "명은 집을 떠남");
 		}
@@ -1321,8 +1352,11 @@ public class EngineService {
 
 	private List<PeerDTO> peers(LifeDTO life) {
 		int age = life.getCurrentAge();
-		List<PeerDTO> out = new ArrayList<>();
+		List<PeerDTO> out = realPeers(life);
 		for (PeerSeed p : peerSeeds(life)) {
+			if (out.size() >= 4) {
+				break;
+			}
 			PeerDTO d = new PeerDTO();
 			d.setName(p.name);
 			d.setCountryCode(p.cc);
@@ -1337,6 +1371,76 @@ public class EngineService {
 			out.add(d);
 		}
 		return out;
+	}
+
+	// 실제 플레이어 또래 (11/25 동현님): 같은 연대에 태어난 다른 플레이어의 인생, 내 나이였을 때의 모습
+	//   - 내 나이 전에 세상을 떠났으면 'n세에 세상을 떠남 (원인)'
+	//   - 내 나이였을 때 기록이 있으면 그해 직업 (없으면 어린 시절 · 학교 다닐 나이 · 일 없이 지냄) + 다른 나라에 살았으면 '○○에서'
+	//   - 아직 내 나이까지 못 살았으면 그 사람 지금 나이 · '지금 살고 있음'
+	private List<PeerDTO> realPeers(LifeDTO life) {
+		List<PeerDTO> out = new ArrayList<>();
+		int age = life.getCurrentAge();
+		try {
+			Map<String, Object> cond = new HashMap<>();
+			cond.put("lifeId", life.getLifeId());
+			cond.put("birthYear", life.getBirthYear());
+			cond.put("decade", life.getBirthYear() / 10 * 10);
+			cond.put("age", age);
+			cond.put("memberId", life.getMemberId());
+			cond.put("guestToken", life.getMemberId() == null ? life.getGuestToken() : null);
+			for (LiveLifeDTO r : engineDao.selectRealPeers(cond)) {
+				PeerDTO d = new PeerDTO();
+				d.setReal(true);
+				d.setName(r.getName());
+				d.setCountryCode(r.getCountryCode());
+				d.setCountryName(r.getCountryName());
+				d.setGender(r.getGender());
+				d.setBirthYear(r.getBirthYear());
+				boolean ended = "ENDED".equals(r.getStatus());
+				if (ended && r.getDeathAge() != null && r.getDeathAge() <= age) {
+					d.setAlive(false);
+					d.setStatus(r.getDeathAge() + "세에 세상을 떠남" + (r.getDeathCause() == null ? "" : " (" + r.getDeathCause() + ")"));
+				} else if (r.getLogAge() != null) {
+					d.setAge(age);
+					String s = r.getJobName() != null ? r.getJobName()
+							: age < 7 ? "어린 시절" : age < 19 ? "학교 다닐 나이" : age >= 65 ? "노년을 보내는 중" : "일 없이 지내는 중";
+					if (r.getYearCountry() != null && !r.getYearCountry().equals(r.getCountryCode())) {
+						s = s + " · " + (r.getYearCountryName() == null ? r.getYearCountry() : r.getYearCountryName()) + "에서";
+					}
+					d.setStatus(s);
+				} else {
+					d.setAge(r.getCurrentAge());
+					d.setStatus("지금 살고 있음");
+				}
+				out.add(d);
+			}
+		} catch (RuntimeException e) {
+			// 읽기 실패해도 만든 또래로 채움
+		}
+		return out;
+	}
+
+	// 메인 실시간 목록 (실제 플레이어): 방금 시작된 인생 · 방금 끝난 인생 n개씩
+	public Map<String, Object> liveFeed(int n) {
+		Map<String, Object> out = new HashMap<>();
+		out.put("born", engineDao.selectLiveBorn(n));
+		out.put("died", engineDao.selectLiveDied(n));
+		return out;
+	}
+
+	// 삶을 마감 (진행 화면): 진행 중인 내 인생과 그 기록을 모두 지움. 문제가 있으면 이유 글, 성공하면 null
+	@Transactional
+	public String deleteMyLife(int lifeId, Integer memberId, String guestToken) {
+		LifeDTO life = loadMyLife(lifeId, memberId, guestToken);
+		if (life == null) {
+			return "내 인생이 아니에요.";
+		}
+		if (!"PLAYING".equals(life.getStatus())) {
+			return "진행 중인 인생만 마감할 수 있어요.";
+		}
+		engineDao.deleteLife(lifeId);
+		peerCache.remove(lifeId);
+		return null;
 	}
 
 	private static String peerStatus(PeerSeed p, int age) {
@@ -2224,6 +2328,7 @@ public class EngineService {
 
 	// 몇 살 고비마다: 같은 해 같은 나라에서 태어난 또래 중 지금도 살아 있는 비율 (원작 생명표로 계산)
 	private static final java.util.Set<Integer> SURVIVAL_AGES = java.util.Set.of(1, 5, 15, 30, 45, 60, 75, 90);
+	private static final java.util.Map<Integer, Long> SURVIVAL_SHOWN = new java.util.concurrent.ConcurrentHashMap<>();
 
 	private String survivalLine(LifeDTO life, CountryStatDTO stat, int age) {
 		if (stat == null || !SURVIVAL_AGES.contains(age)) {
@@ -2235,10 +2340,27 @@ public class EngineService {
 					stat.getInfantMortality(), stat.getU5Mortality(), life.getGender(), a));
 		}
 		String country = stat.getNameKo() != null ? stat.getNameKo() : life.getCurrentCountry();
-		String kid = "M".equals(life.getGender()) ? "남자아이" : "여자아이";
+		// 어른이 되면 '남자아이'가 아니라 '남자' (11/25: 75세에 '같은 해 태어난 남자아이 가운데')
+		String kid = "M".equals(life.getGender()) ? (age < 15 ? "남자아이" : "남자") : (age < 15 ? "여자아이" : "여자");
 		long pct = Math.round(alive * 100);
-		String part = pct >= 100 ? "거의 모두가" : "약 " + pct + "%가";
-		return age + "세. 같은 해 " + country + "에서 태어난 " + kid + " 가운데 " + part + " 아직 살아 있다.";
+		// 그해 나라 통계로 다시 계산해서, 의료가 좋아진 나라는 '5세 79% → 15세 82%'처럼 거꾸로 늘어났음 (11/25)
+		//   → 앞서 보여 준 비율보다 크지 않게 (인생마다 마지막으로 보여 준 값)
+		Long prev = SURVIVAL_SHOWN.get(life.getLifeId());
+		if (prev != null && pct > prev) {
+			pct = prev;
+		}
+		SURVIVAL_SHOWN.put(life.getLifeId(), pct);
+		if (SURVIVAL_SHOWN.size() > 5000) {
+			SURVIVAL_SHOWN.clear(); // 서버 메모리 보호
+		}
+		if (pct >= 100) {
+			return age + "세. 같은 해 " + country + "에서 태어난 " + kid + "는 거의 모두 아직 살아 있다.";
+		}
+		// 같은 틀이 8번 되풀이되지 않게 두 가지로 번갈아
+		if (age >= 30 && age % 30 == 0) {
+			return age + "세. 같은 해 " + country + "에서 태어난 " + kid + " 100명 가운데 " + pct + "명쯤이 아직 살아 있다.";
+		}
+		return age + "세. 같은 해 " + country + "에서 태어난 " + kid + " 가운데 약 " + pct + "%가 아직 살아 있다.";
 	}
 
 	// C09 '가게를 차린다'(LE_INVEST_BUSINESS)가 성공하면 자영업 사장이 됨 (예전엔 일자리 상태가 그대로라 다음 해 직업 제안이 떴음)
@@ -6134,24 +6256,39 @@ public class EngineService {
 		s = new EngState();
 		List<EventLogDTO> logs = engineDao.selectEventLogs(life.getLifeId());
 		if (logs != null) {
+			// 윤아님 연애 이벤트 기록으로 만남 번호 되살림 (11/25: 기록이 나이 내림차순으로 와서 결혼식을 먼저 보고
+			//   그 앞 만남을 다 건너뛰어, 끝난 인생의 배우자가 첫 만남 상대로 나오던 것 → 나이순으로 다시 셈)
+			List<EventLogDTO> love = new ArrayList<>();
+			for (EventLogDTO g : logs) {
+				if (g.getEventId() != null && g.getLogText() != null) {
+					love.add(g);
+				}
+			}
+			love.sort(java.util.Comparator.comparingInt(EventLogDTO::getAge)); // 같은 나이 안에서는 기록 순서 그대로 (안정 정렬)
+			for (EventLogDTO g : love) {
+				String lt = g.getLogText();
+				String id = g.getEventId();
+				if (lt.contains("마음이 통하는 사람을 만났다") && !s.wedFrozen) {
+					s.candK = s.meets;
+					s.meets++;
+				}
+				if (lt.contains("결혼식을 올렸다")) {
+					s.wedFrozen = true;
+				}
+				// 결혼이 끝남: 이혼 · 부부의 '각자의 길' · 부부 위기 끝에 '헤어졌다' · 사별 ('떠나보냈다'는 '떠나보내'로 안 잡혔음)
+				boolean lover = lt.contains("연인");
+				if (!lover && (lt.contains("각자의 길을 가기로") || lt.contains("이혼"))
+						|| id.startsWith("LE_MARRIAGE_") && !lover && (lt.contains("헤어졌") || lt.contains("갈라섰"))
+						|| id.startsWith("LE_MARRIAGE_WIDOW") || lt.contains("배우자를 먼저 떠나보")) {
+					s.wedFrozen = false;
+				}
+			}
 			for (EventLogDTO g : logs) {
 				if (g.getLogText() == null) {
 					continue;
 				}
 				if (g.getEventId() != null) {
-					// 윤아님 연애 이벤트 기록으로 만남 번호 되살림
-					String lt = g.getLogText();
-					if (lt.contains("마음이 통하는 사람을 만났다") && !s.wedFrozen) {
-						s.candK = s.meets;
-						s.meets++;
-					}
-					if (lt.contains("결혼식을 올렸다")) {
-						s.wedFrozen = true;
-					}
-					if (lt.contains("각자의 길을 가기로") || lt.contains("이혼") || lt.contains("배우자를 먼저 떠나보내")) {
-						s.wedFrozen = false;
-					}
-					continue;
+					continue; // 연애 이벤트 기록은 아래에서 나이순으로 따로 되살림
 				}
 				String t = g.getLogText();
 				// 전공 (원작 major)
@@ -7648,13 +7785,53 @@ public class EngineService {
 		return "첫째";
 	}
 
-	// 유언장 문구의 빈칸: '구호 단체' → 남길 곳 이름, '{첫째}' → 첫째 이름
+	// 유언으로 남길 수 있는 몫 (원작 giveMax): 물려받을 배우자 · 자녀가 없거나 자유 유언 나라면 전부, 아니면 절반 (가족 몫 절반은 법이 지켜 줌)
+	//   원작 FREE_WILL 가운데 아시아 나라만 (이슬람 상속법 3분의 1 은 우리 엔진에 종교가 없어 뺌)
+	private static final java.util.Set<String> FREE_WILL = java.util.Set.of("IND", "SGP", "HKG", "ISR");
+
+	private double giveMax(LifeDTO life) {
+		boolean heirs = "Y".equals(life.getMarriedYn()) || life.getChildCount() > 0;
+		return !heirs || FREE_WILL.contains(life.getCurrentCountry()) ? 1 : 0.5;
+	}
+
+	// 유언장이 없으면 어떻게 나뉘는지 (원작 will 선택지 '쓰지 않고 법에 맡긴다' 아래 줄)
+	private String willLawSub(LifeDTO life) {
+		boolean sp = "Y".equals(life.getMarriedYn());
+		int k = life.getChildCount();
+		if (!sp && k == 0) {
+			return "Y".equals(life.getParentAlive()) ? "부모님께 돌아감" : "형제자매와 친척에게 돌아감";
+		}
+		if (!sp) {
+			return k > 1 ? "자녀들이 똑같이 나눔" : "자녀가 모두 받음";
+		}
+		if (k > 0 && "KOR".equals(life.getCurrentCountry())) {
+			return "배우자 1.5 : 자녀 1씩";
+		}
+		if (k > 0 && "JPN".equals(life.getCurrentCountry())) {
+			return "배우자 절반, 자녀가 절반";
+		}
+		return "법이 정한 몫대로";
+	}
+
+	// 유언장 문구의 빈칸: '구호 단체' → 남길 곳 이름, '{첫째}' → 첫째 이름, '{법}' · '{유류분}' · '{기부전부}' → 원작 선택지 문구
 	private String willWords(LifeDTO life, String t) {
 		if (t == null) {
 			return null;
 		}
 		if (t.contains("{첫째}")) {
 			t = t.replace("{첫째}", firstKidName(life));
+		}
+		if (t.contains("{법}")) {
+			t = t.replace("{법}", willLawSub(life));
+		}
+		if (t.contains("{유류분}")) {
+			// 자유 유언 나라는 자녀 몫을 법이 지켜 주지 않음 → 괄호째 뺌
+			t = FREE_WILL.contains(life.getCurrentCountry()) ? t.replace(" ({유류분})", "") : t.replace("{유류분}", "자녀 몫의 절반은 법이 지켜 줌");
+		}
+		if (t.contains("{기부전부}")) {
+			t = t.replace("{기부전부}", giveMax(life) >= 1
+					? "모두 구호 단체에 남긴다" + (life.getChildCount() > 0 ? " (자녀에게는 남기지 않음)" : "")
+					: "법이 허락하는 만큼 구호 단체에 남긴다 (가족의 몫 절반은 법이 지켜 줌)");
 		}
 		return t.replace("구호 단체", GIVE_N.get(giveKey(life)));
 	}
@@ -7704,8 +7881,9 @@ public class EngineService {
 			case "home":
 				how = "집은 " + firstKidName(life) + "에게 가고, 나머지는 법이 정한 몫대로 나뉘었다.";
 				break;
-			default:
-				how = "모두 " + to + "에 남겼다.";
+			default: // giveall (원작: 남길 수 있는 만큼)
+				how = giveMax(life) >= 1 ? "모두 " + to + "에 남겼다."
+						: "법이 허락하는 만큼인 절반을 " + to + "에 남기고, 나머지 절반은 가족에게 갔다.";
 			}
 			return amt + " " + at + "세에 쓴 유언장대로 나뉘었다. " + how;
 		}

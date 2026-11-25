@@ -70,6 +70,25 @@ public class EngineController {
 	}
 
 	// C03 이어하기: 진행 중인 인생 불러오기  GET /api/engine/current?guestToken=...
+	// 메인 실시간 목록 (실제 플레이어)  GET /api/engine/live
+	//   { born: [방금 시작된 인생 10개], died: [방금 끝난 인생 10개] } - 로그인 없이, 게임 속 인물 정보만
+	@GetMapping("/api/engine/live")
+	public ResponseEntity<?> live() {
+		return ResponseEntity.ok(engineService.liveFeed(10));
+	}
+
+	// 삶을 마감 (진행 화면)  POST /api/engine/delete  { lifeId, guestToken }
+	//   진행 중인 내 인생과 그 기록을 모두 지움 (되돌릴 수 없음)
+	@PostMapping("/api/engine/delete")
+	public ResponseEntity<?> deleteLife(@RequestBody EngineRequestDTO req,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		String err = engineService.deleteMyLife(req.getLifeId(), loginMemberId(auth), req.getGuestToken());
+		if (err != null) {
+			return ResponseEntity.status(403).body(err);
+		}
+		return ResponseEntity.ok("삶을 마감했어요.");
+	}
+
 	@GetMapping("/api/engine/current")
 	public ResponseEntity<?> current(@RequestParam(required = false) String guestToken,
 			@RequestHeader(value = "Authorization", required = false) String auth) {

@@ -38,9 +38,27 @@ public class ResultDTO {
 	private String status;	// PLAYING, ENDED, ABANDONED
 	private Integer memorialPostId;	// 추모관에 올린 글 번호 (안 올렸으면 null, B01)
 	private int pointEarned;	// 이 인생으로 받은 포인트 (C12)
+	private Integer originClass;	// 태어난 집 형편 1~5 (ORIGIN_CLASS, 결과 화면 '태어난 집')
+	private Double krwPerUsd;	// 달러 → 한국 체감 원 배율 (세상을 떠난 해 · 나라 기준, 진행 화면과 같은 계산)
 	private List<YearLogDTO> years;	// 나이별 기록 (능력치 그래프)
 	private List<EventLogDTO> events;	// 인생 기록 (사건)
 	private List<QuestResultDTO> quests;	// 퀘스트 달성 여부
+
+	public Integer getOriginClass() {
+		return originClass;
+	}
+
+	public void setOriginClass(Integer originClass) {
+		this.originClass = originClass;
+	}
+
+	public Double getKrwPerUsd() {
+		return krwPerUsd;
+	}
+
+	public void setKrwPerUsd(Double krwPerUsd) {
+		this.krwPerUsd = krwPerUsd;
+	}
 
 	public int getLifeId() {
 		return lifeId;

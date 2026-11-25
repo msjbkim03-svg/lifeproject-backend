@@ -13,6 +13,7 @@ import com.example.demo.commons.JwtUtil;
 import com.example.demo.engine.EngineService;
 import com.example.demo.result.ResultDTO;
 import com.example.demo.result.ResultService;
+import com.example.demo.story.AiCaller;
 
 @RestController
 public class QaController {
@@ -85,10 +86,13 @@ public class QaController {
 
 		// 3. 답변 만들기
 		try {
-			return ResponseEntity.ok(qaService.ask(result, question));
+			return ResponseEntity.ok(qaService.ask(result, question, req.getSinceQaId()));
+		} catch (AiCaller.AiFail f) {
+			// 원인별 안내 (한도 초과 · 키 문제 · 시간 초과 …), 원인은 AiCaller 가 콘솔에 한 줄
+			return ResponseEntity.status(503).body(f.userMessage);
 		} catch (Exception e) {
-			e.printStackTrace(); // 콘솔에서 원인 확인용
-			return ResponseEntity.status(503).body("AI가 답하지 못했어요. 잠시 후 다시 물어봐 주세요.");
+			e.printStackTrace(); // DB 저장 등 AI 밖의 문제
+			return ResponseEntity.status(500).body("답을 저장하지 못했어요. 잠시 후 다시 물어봐 주세요.");
 		}
 	}
 }

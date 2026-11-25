@@ -5,6 +5,7 @@ public class YearLogDTO {
 	private int age;	// 나이
 	private int yearNo;	// 연도
 	private String countryCode;	// 그해 사는 나라
+	private String countryName;	// 그해 사는 나라 이름 (11/25: 세 번째 나라는 코드만 나오던 것)
 	private int health;	// 건강
 	private int happiness;	// 행복
 	private int knowledge;	// 지식
@@ -109,5 +110,13 @@ public class YearLogDTO {
 
 	public void setFocusCode(String focusCode) {
 		this.focusCode = focusCode;
+	}
+
+	public String getCountryName() {
+		return countryName;
+	}
+
+	public void setCountryName(String countryName) {
+		this.countryName = countryName;
 	}
 }

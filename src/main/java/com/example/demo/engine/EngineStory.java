@@ -249,14 +249,14 @@ final class EngineStory {
 			new Line("jobless_day", 16, 64, 2, l -> jobless(l) && poor(l) && !serving(l), "그날그날 일거리를 얻어 하루를 버텼다."),
 
 			// ── 경조사 (돈이 나감) ──
-			new Line("cer_wedding", 22, 45, 3, l -> hasMoney(l), "친구의 결혼식에 다녀왔다. 축의금을 냈다.", 0.008, 0),
-			new Line("cer_wedding2", 25, 65, 2, l -> hasMoney(l) && employee(l), "직장 동료의 결혼식에 다녀왔다.", 0.006, 0),
+			new Line("cer_wedding", 22, 45, 3, l -> hasMoney(l), "친구의 결혼식에 다녀왔다. 축의금을 냈다. | 오랜 친구가 결혼해 축의금을 들고 식장에 갔다. | 친구 결혼식에서 사회를 봐 달라는 부탁을 받았다.", 0.008, 0),
+			new Line("cer_wedding2", 25, 65, 2, l -> hasMoney(l) && employee(l), "직장 동료의 결혼식에 다녀왔다. | 직장 후배의 결혼식에 가서 축하 인사를 건넸다. | 회사 사람들과 함께 동료의 결혼식에 다녀왔다.", 0.006, 0),
 			new Line("cer_wedding0", 18, 45, 2, l -> !hasMoney(l), "친구의 결혼식에 가서 음식 준비를 거들었다."),
-			new Line("cer_funeral", 30, 90, 2, l -> hasMoney(l), "친척 장례에 다녀와 부조금을 냈다.", 0.006, 0),
-			new Line("cer_baby", 25, 45, 2, l -> hasMoney(l), "친구 아이의 돌잔치에 다녀왔다.", 0.004, 0),
-			new Line("cer_holiday", 25, 70, 2, l -> hasMoney(l) && parents(l) && !had(l.getLifeId(), "par_live"), "{명절}에 부모님 댁에 선물과 용돈을 챙겨 갔다.", 0.008, 0),
-			new Line("cer_reunion", 30, 80, 2, l -> hasMoney(l), "동창 모임에 나가 회비를 내고 옛이야기로 밤을 새웠다.", 0.003, 0),
-			new Line("cer_kidschool", 30, 55, 2, l -> l.getChildCount() > 0 && hasMoney(l), "아이 학원비와 책값이 꽤 들었다.", 0.02, 0),
+			new Line("cer_funeral", 30, 90, 2, l -> hasMoney(l), "친척 장례에 다녀와 부조금을 냈다. | 먼 친척 어른의 장례식에 가서 조의를 표했다. | 지인의 부모님 장례식에 다녀왔다. | 오래 알고 지낸 이웃의 장례식에 다녀왔다.", 0.006, 0),
+			new Line("cer_baby", 25, 45, 2, l -> hasMoney(l), "친구 아이의 돌잔치에 다녀왔다. | 친척 아이의 돌잔치에 가서 작은 선물을 건넸다.", 0.004, 0),
+			new Line("cer_holiday", 25, 70, 2, l -> hasMoney(l) && parents(l) && !had(l.getLifeId(), "par_live"), "{명절}에 부모님 댁에 선물과 용돈을 챙겨 갔다. | {명절}에 부모님께 드릴 선물을 사 들고 집에 갔다. | {명절}에 부모님 댁에 들러 용돈을 드리고 왔다.", 0.008, 0),
+			new Line("cer_reunion", 30, 80, 2, l -> hasMoney(l), "동창 모임에 나가 회비를 내고 옛이야기로 밤을 새웠다. | 오랜만에 열린 동창회에서 옛 친구들의 얼굴을 봤다. | 학창 시절 친구들과 모여 밥을 먹으며 서로 사는 이야기를 나눴다.", 0.003, 0),
+			new Line("cer_kidschool", 30, 55, 2, l -> l.getChildCount() > 0 && hasMoney(l), "아이 학원비와 책값이 꽤 들었다. | 새 학기라 아이 교복과 책을 사느라 돈이 들었다. | 아이 수업료를 내고 나니 살림이 빠듯했다.", 0.02, 0),
 			// 원작 살림 지출 (원작 500명 기록의 중간값을 그 나라 중위 소득 비율로 맞춤: 치과 −7만, 가전 −37만, 배관 −61만 원 …)
 			new Line("exp_dentist", 25, 80, 2, l -> hasMoney(l), "이가 아파 치과에 다녀왔다.", 0.01, 0),
 			new Line("exp_appliance", 25, 85, 2, l -> hasMoney(l) && owns(l, "TV"), "냉장고가 고장 나 고치는 데 돈이 들었다.", 0.05, 1965),
@@ -277,8 +277,8 @@ final class EngineStory {
 			new Line("fam_kid_laugh", 22, 55, 2, l -> l.getChildCount() > 0, "아이가 처음 해낸 일을 온 식구가 함께 기뻐했다."),
 			new Line("fam_focus", 16, 90, 3, l -> focus(l, "FAMILY"), "가족과 친구들 곁에서 보내는 시간을 늘렸다."),
 			new Line("fam_oldparents", 35, 65, 2, l -> parents(l), "부모님이 부쩍 늙으신 것 같아 마음이 쓰였다."),
-			new Line("fam_holiday", 13, 99, 3, ANY, "{명절}에 식구들이 모여 오랜만에 이야기꽃을 피웠다."),
-			new Line("fam_friend", 20, 99, 2, ANY, "한동안 연락이 뜸했던 오랜 친구와 다시 만나 서로 사는 이야기를 나눴다."),
+			new Line("fam_holiday", 13, 99, 3, ANY, "{명절}에 식구들이 모여 오랜만에 이야기꽃을 피웠다. | {명절}에 온 식구가 둘러앉아 명절 음식을 나눠 먹었다. | {명절}에 오랜만에 친척들이 한자리에 모였다. | {명절}에 집 안이 오랜만에 북적였다. | {명절}에 명절 음식 냄새가 온 집에 가득했다. | {명절}에 식구들과 조용히 쉬며 한 해를 돌아봤다."),
+			new Line("fam_friend", 20, 99, 2, ANY, "한동안 연락이 뜸했던 오랜 친구와 다시 만나 서로 사는 이야기를 나눴다. | 연락이 끊겼던 옛 친구에게서 반가운 소식이 왔다. | 오랜 친구와 함께 짧은 여행을 다녀왔다."),
 			new Line("fam_sibling", 20, 80, 2, ANY, "형제자매와 크게 다퉜다가 몇 달 만에 화해했다."),
 			new Line("fam_neighbor", 25, 95, 3, l -> l.getRelation() >= 45, "형편이 어려운 이웃에게 음식을 나눴다."),
 			new Line("fam_neighbor2", 25, 95, 2, l -> l.getRelation() >= 45, "혼자 사는 이웃 어르신을 자주 들여다보았다."),
@@ -372,6 +372,14 @@ final class EngineStory {
 		return list[rnd.nextInt(list.length)];
 	}
 
+	// 문장 틀 → 실제 문장. 틀에 ' | ' 로 여러 문장이 있으면 그 인생에서 쓴 횟수대로 돌려 씀 (같은 문장이 한 인생에 되풀이되지 않게, 11/25)
+	//   시작 문장은 인생 번호로 섞어서 사람마다 다르게
+	private static String textOf(Line line, LifeDTO life, int used, int age, Random rnd) {
+		String[] v = line.text.split(" \\| ");
+		String t = v[Math.floorMod(used + life.getLifeId(), v.length)];
+		return t.replace("{명절}", holiday(life.getCurrentCountry(), rnd)).replace("{나이}", String.valueOf(age));
+	}
+
 	// 인생마다 최근에 쓴 문장 (같은 문장이 해마다 반복되지 않게, 서버 메모리)
 	// 시대 물건(era_)은 평생 한 번만
 	private static final Map<Integer, Deque<String>> RECENT = new ConcurrentHashMap<>();
@@ -390,18 +398,18 @@ final class EngineStory {
 		if (line.id.startsWith("exp_")) {
 			return EXP_GAP;
 		}
-		if (line.text.contains("{명절}")) {
-			return 0;
+		if (line.id.equals("fam_holiday")) {
+			return 2; // 명절 줄은 2년마다까지 (11/25: 한 인생에 '이야기꽃' 10번)
 		}
 		return line.id.startsWith("cer_") ? 4 : 10;
 	}
 
 	// 한 인생에 같은 줄이 나오는 최대 횟수: 경조사 5번, 명절은 제한 없음, 나머지 3번 (감기·치과·옛 친구 재회 같은 줄)
 	private static int capOf(Line line) {
-		if (line.text.contains("{명절}")) {
-			return 99;
+		if (line.id.equals("fam_holiday")) {
+			return 8; // 문장 6가지를 돌려 씀
 		}
-		return line.id.startsWith("cer_") ? 5 : 3;
+		return line.id.startsWith("cer_") ? 4 : 3;
 	}
 	private static final Map<Integer, Map<String, Integer>> COUNT = new ConcurrentHashMap<>();
 
@@ -479,8 +487,7 @@ final class EngineStory {
 			String group = chosen.id.replaceAll("\\d+$", "");
 			pool.removeIf(l -> l.id.replaceAll("\\d+$", "").equals(group));
 
-			out.add(new Story(chosen.text.replace("{명절}", holiday(life.getCurrentCountry(), rnd))
-					.replace("{나이}", String.valueOf(age)), chosen.cost, chosen.id));
+			out.add(new Story(textOf(chosen, life, count.getOrDefault(chosen.id, 0), age, rnd), chosen.cost, chosen.id));
 			picked++;
 			if (chosen.id.startsWith("era_") || chosen.id.equals("exp_glasses") || chosen.id.equals("exp_cane")
 					|| chosen.id.equals("hl_eyes") || ONCE_IDS.contains(chosen.id)) {
@@ -519,7 +526,7 @@ final class EngineStory {
 				}
 			}
 			if (best != null) {
-				out.add(new Story(best.text.replace("{명절}", holiday(life.getCurrentCountry(), rnd)).replace("{나이}", String.valueOf(age)), 0, best.id));
+				out.add(new Story(textOf(best, life, count.getOrDefault(best.id, 0), age, rnd), 0, best.id));
 				last.put(best.id, age);
 				count.merge(best.id, 1, Integer::sum);
 			}

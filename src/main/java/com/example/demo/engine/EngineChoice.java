@@ -317,18 +317,17 @@ public class EngineChoice {
 				new Opt("위험하다고 말린다 (사이가 조금 서먹해짐)", 0, 0, -1, 0, 0, "한바탕 언쟁 끝에 주식 이야기는 없던 일이 되었다.")));
 		ALL.add(new Dec("WILL", MONEY, 50, 110, 1, 99, l -> true, "유언장을 쓸까?",
 				new String[] { "남길 것을 생각할 나이가 되었어요." },
-				new Opt("쓰지 않고 법에 맡긴다", 0, 0, 0, 0, 0, "유언장은 쓰지 않기로 했다. 남은 사람들이 법대로 나누면 된다고 생각했다.").act("WILL_LAW"),
-				new Opt("배우자에게 먼저 남긴다", 2, 0, 0, 0, 0, "유언장을 썼다. 배우자에게 먼저 남기기로 했다.").act("WILL_SPOUSE")
+				new Opt("쓰지 않고 법에 맡긴다 ({법})", 0, 0, 0, 0, 0, "유언장은 쓰지 않기로 했다. 남은 사람들이 법대로 나누면 된다고 생각했다.").act("WILL_LAW"),
+				new Opt("배우자에게 먼저 남긴다 ({유류분})", 2, 0, 0, 0, 0, "유언장을 썼다. 배우자에게 먼저 남기기로 했다.").act("WILL_SPOUSE")
 						.when(l -> "Y".equals(l.getMarriedYn()) && l.getChildCount() > 0),
 				new Opt("가족에게 똑같이 나눈다", 2, 0, 0, 0, 0, "유언장을 썼다. 가족이 똑같이 나누도록 했다.").act("WILL_FAM")
 						.when(l -> ("Y".equals(l.getMarriedYn()) ? 1 : 0) + l.getChildCount() >= 2),
 				// 원작: 집이 있고 자녀가 있으면 집을 한 자녀에게 ({첫째}는 EngineService.willWords 가 이름으로 바꿈)
 				new Opt("집은 {첫째}에게, 나머지는 법대로", 2, 0, 1, 0, 0, "유언장을 썼다. 집은 {첫째}에게 남기기로 했다.").act("WILL_HOME")
-						.when(l -> l.getOwns() != null && l.getOwns().contains("HOUSE") && l.getChildCount() > 0
-								&& ("Y".equals(l.getMarriedYn()) || l.getChildCount() >= 2)),
+						.when(l -> l.getOwns() != null && l.getOwns().contains("HOUSE") && l.getChildCount() >= 2), // 원작: 집이 있고 자녀가 둘 이상
 				new Opt("5분의 1을 구호 단체에 남긴다 (나머지는 가족에게)", 2, 0, 1, 0, 0, "유언장을 썼다. 재산의 5분의 1은 구호 단체에 남기기로 했다.").act("WILL_GIVE"),
-				new Opt("모두 구호 단체에 남긴다", 3, 0, 1, 0, 0, "유언장을 썼다. 남길 수 있는 만큼을 구호 단체에 남기기로 했다.").act("WILL_GIVEALL")
-						.when(l -> !"Y".equals(l.getMarriedYn()) && l.getChildCount() == 0)));
+				// 원작: 늘 나옴. 물려받을 가족이 없거나 자유 유언 나라면 '모두', 아니면 '법이 허락하는 만큼'(가족 몫 절반은 법이 지켜 줌) - {기부전부}는 EngineService.willWords
+				new Opt("{기부전부}", 3, 0, 1, 0, 0, "유언장을 썼다. 남길 수 있는 만큼을 구호 단체에 남기기로 했다.").act("WILL_GIVEALL")));
 
 		// ---------- 어른 (원작 SMALL) ----------
 		// 휴대폰이 있는 사람만 (돈 쓰기로 산 휴대폰, 또는 인생 기록에 '휴대전화·스마트폰이 생겼다'가 나온 사람)

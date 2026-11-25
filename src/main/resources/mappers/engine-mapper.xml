@@ -246,6 +246,7 @@
 		WHERE LIFE_ID = #{lifeId}
 	</update>
 
+	<!-- 그해 직업은 일하고 있을 때만 (11/25: 은퇴 · 실직한 뒤에도 마지막 직업이 남아 '봉제 공장 50~98세'처럼 보였음) -->
 	<insert id="insertYearLog" parameterType="com.example.demo.engine.LifeDTO">
 		INSERT INTO LIFE_YEAR_LOG (
 			LIFE_ID, AGE, YEAR_NO, COUNTRY_CODE,
@@ -255,7 +256,7 @@
 			#{lifeId}, #{currentAge}, #{birthYear} + #{currentAge}, #{currentCountry},
 			ROUND(#{health}), ROUND(#{happiness}), ROUND(#{knowledge}), ROUND(#{relation}),
 			#{focusCode, jdbcType=VARCHAR}, #{eduLevel, jdbcType=VARCHAR},
-			#{jobId, jdbcType=VARCHAR}, #{income}, #{assets}
+			CASE WHEN #{jobStatus, jdbcType=VARCHAR} = 'EMPLOYED' THEN #{jobId, jdbcType=VARCHAR} END, #{income}, #{assets}
 		)
 	</insert>
 
@@ -639,5 +640,103 @@
 			WHERE ROWNUM = 1
 		  )
 	</select>
+
+	<!-- ================= 실제 플레이어 데이터 (11/25 동현님) ================= -->
+
+	<!-- 메인 '방금 시작된 인생': 실제로 태어난 인생 최근 n개 (포기한 인생도 태어난 건 맞아서 포함) -->
+	<select id="selectLiveBorn" parameterType="int" resultType="com.example.demo.engine.LiveLifeDTO">
+		SELECT * FROM (
+			SELECT l.LIFE_ID       AS lifeId,
+			       l.NAME          AS name,
+			       l.GENDER        AS gender,
+			       l.BIRTH_COUNTRY AS countryCode,
+			       c.NAME_KO       AS countryName,
+			       l.BIRTH_YEAR    AS birthYear,
+			       NVL(l.ORIGIN_CLASS, l.WEALTH_CLASS) AS wealthClass,
+			       l.STATUS        AS status,
+			       ROUND((SYSDATE - l.CREATED_AT) * 86400) AS agoSec
+			FROM LIFE l
+			LEFT JOIN COUNTRY c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
+			ORDER BY l.CREATED_AT DESC
+		)
+		WHERE ROWNUM &lt;= #{n}
+	</select>
+
+	<!-- 메인 '방금 끝난 인생': 세상을 떠난 인생 최근 n개 -->
+	<select id="selectLiveDied" parameterType="int" resultType="com.example.demo.engine.LiveLifeDTO">
+		SELECT * FROM (
+			SELECT l.LIFE_ID       AS lifeId,
+			       l.NAME          AS name,
+			       l.GENDER        AS gender,
+			       l.BIRTH_COUNTRY AS countryCode,
+			       c.NAME_KO       AS countryName,
+			       l.BIRTH_YEAR    AS birthYear,
+			       l.STATUS        AS status,
+			       l.DEATH_AGE     AS deathAge,
+			       l.DEATH_CAUSE   AS deathCause,
+			       ROUND((SYSDATE - l.ENDED_AT) * 86400) AS agoSec
+			FROM LIFE l
+			LEFT JOIN COUNTRY c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
+			WHERE l.STATUS = 'ENDED'
+			  AND l.ENDED_AT IS NOT NULL
+			ORDER BY l.ENDED_AT DESC
+		)
+		WHERE ROWNUM &lt;= #{n}
+	</select>
+
+	<!-- 진행 화면 '같은 해에 태어난 사람들': 다른 플레이어의 인생 (내 다른 인생 · 포기한 인생은 뺌)
+	     같은 연대 안에서 태어난 해가 가까운 순 → 최근에 플레이한 순, 최대 4명
+	     내 나이였을 때의 기록(LIFE_YEAR_LOG)이 있으면 그해 직업 · 사는 나라 -->
+	<select id="selectRealPeers" parameterType="map" resultType="com.example.demo.engine.LiveLifeDTO">
+		SELECT * FROM (
+			SELECT l.LIFE_ID       AS lifeId,
+			       l.NAME          AS name,
+			       l.GENDER        AS gender,
+			       l.BIRTH_COUNTRY AS countryCode,
+			       c.NAME_KO       AS countryName,
+			       l.BIRTH_YEAR    AS birthYear,
+			       l.STATUS        AS status,
+			       l.CURRENT_AGE   AS currentAge,
+			       l.DEATH_AGE     AS deathAge,
+			       l.DEATH_CAUSE   AS deathCause,
+			       y.AGE           AS logAge,
+			       j.JOB_NAME      AS jobName,
+			       y.COUNTRY_CODE  AS yearCountry,
+			       yc.NAME_KO      AS yearCountryName
+			FROM LIFE l
+			LEFT JOIN COUNTRY c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
+			LEFT JOIN LIFE_YEAR_LOG y ON y.LIFE_ID = l.LIFE_ID AND y.AGE = #{age}
+			LEFT JOIN JOB j ON j.JOB_ID = y.JOB_ID
+			LEFT JOIN COUNTRY yc ON yc.COUNTRY_CODE = y.COUNTRY_CODE
+			WHERE l.LIFE_ID &lt;&gt; #{lifeId}
+			  AND l.STATUS IN ('PLAYING', 'ENDED')
+			  AND l.BIRTH_YEAR BETWEEN #{decade} AND #{decade} + 9
+			<if test="memberId != null">
+			  AND (l.MEMBER_ID IS NULL OR l.MEMBER_ID &lt;&gt; #{memberId})
+			</if>
+			<if test="guestToken != null">
+			  AND (l.GUEST_TOKEN IS NULL OR l.GUEST_TOKEN &lt;&gt; #{guestToken})
+			</if>
+			ORDER BY ABS(l.BIRTH_YEAR - #{birthYear}), NVL(l.LAST_PLAYED_AT, l.CREATED_AT) DESC
+		)
+		WHERE ROWNUM &lt;= 4
+	</select>
+
+	<!-- 삶을 마감: 인생에 딸린 기록부터 지우고 인생 지움 (한 번에, 하나라도 실패하면 전부 취소)
+	     포인트 내역은 지우지 않고 인생 번호만 비움 (회원 포인트 기록은 남김) -->
+	<delete id="deleteLife" parameterType="int">
+		BEGIN
+			DELETE FROM LIFE_COSTUME     WHERE LIFE_ID = #{lifeId};
+			DELETE FROM LIFE_QUEST       WHERE LIFE_ID = #{lifeId};
+			DELETE FROM LIFE_TRAIT       WHERE LIFE_ID = #{lifeId};
+			DELETE FROM LIFE_EXPERIENCE  WHERE LIFE_ID = #{lifeId};
+			DELETE FROM LIFE_EVENT_LOG   WHERE LIFE_ID = #{lifeId};
+			DELETE FROM LIFE_YEAR_LOG    WHERE LIFE_ID = #{lifeId};
+			DELETE FROM QA_LOG           WHERE LIFE_ID = #{lifeId};
+			DELETE FROM AI_STORY         WHERE LIFE_ID = #{lifeId};
+			UPDATE POINT_HISTORY SET LIFE_ID = NULL WHERE LIFE_ID = #{lifeId};
+			DELETE FROM LIFE             WHERE LIFE_ID = #{lifeId};
+		END;
+	</delete>
 
 </mapper>
