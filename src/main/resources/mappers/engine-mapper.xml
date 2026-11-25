@@ -246,6 +246,7 @@
 		WHERE LIFE_ID = #{lifeId}
 	</update>
 
+	<!-- 그해 직업은 일하고 있을 때만 (11/25: 은퇴 · 실직한 뒤에도 마지막 직업이 남아 '봉제 공장 50~98세'처럼 보였음) -->
 	<insert id="insertYearLog" parameterType="com.example.demo.engine.LifeDTO">
 		INSERT INTO LIFE_YEAR_LOG (
 			LIFE_ID, AGE, YEAR_NO, COUNTRY_CODE,
@@ -255,7 +256,7 @@
 			#{lifeId}, #{currentAge}, #{birthYear} + #{currentAge}, #{currentCountry},
 			ROUND(#{health}), ROUND(#{happiness}), ROUND(#{knowledge}), ROUND(#{relation}),
 			#{focusCode, jdbcType=VARCHAR}, #{eduLevel, jdbcType=VARCHAR},
-			#{jobId, jdbcType=VARCHAR}, #{income}, #{assets}
+			CASE WHEN #{jobStatus, jdbcType=VARCHAR} = 'EMPLOYED' THEN #{jobId, jdbcType=VARCHAR} END, #{income}, #{assets}
 		)
 	</insert>
 

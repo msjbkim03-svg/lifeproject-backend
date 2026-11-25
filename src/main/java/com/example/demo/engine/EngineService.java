@@ -2328,6 +2328,7 @@ public class EngineService {
 
 	// 몇 살 고비마다: 같은 해 같은 나라에서 태어난 또래 중 지금도 살아 있는 비율 (원작 생명표로 계산)
 	private static final java.util.Set<Integer> SURVIVAL_AGES = java.util.Set.of(1, 5, 15, 30, 45, 60, 75, 90);
+	private static final java.util.Map<Integer, Long> SURVIVAL_SHOWN = new java.util.concurrent.ConcurrentHashMap<>();
 
 	private String survivalLine(LifeDTO life, CountryStatDTO stat, int age) {
 		if (stat == null || !SURVIVAL_AGES.contains(age)) {
@@ -2339,10 +2340,27 @@ public class EngineService {
 					stat.getInfantMortality(), stat.getU5Mortality(), life.getGender(), a));
 		}
 		String country = stat.getNameKo() != null ? stat.getNameKo() : life.getCurrentCountry();
-		String kid = "M".equals(life.getGender()) ? "남자아이" : "여자아이";
+		// 어른이 되면 '남자아이'가 아니라 '남자' (11/25: 75세에 '같은 해 태어난 남자아이 가운데')
+		String kid = "M".equals(life.getGender()) ? (age < 15 ? "남자아이" : "남자") : (age < 15 ? "여자아이" : "여자");
 		long pct = Math.round(alive * 100);
-		String part = pct >= 100 ? "거의 모두가" : "약 " + pct + "%가";
-		return age + "세. 같은 해 " + country + "에서 태어난 " + kid + " 가운데 " + part + " 아직 살아 있다.";
+		// 그해 나라 통계로 다시 계산해서, 의료가 좋아진 나라는 '5세 79% → 15세 82%'처럼 거꾸로 늘어났음 (11/25)
+		//   → 앞서 보여 준 비율보다 크지 않게 (인생마다 마지막으로 보여 준 값)
+		Long prev = SURVIVAL_SHOWN.get(life.getLifeId());
+		if (prev != null && pct > prev) {
+			pct = prev;
+		}
+		SURVIVAL_SHOWN.put(life.getLifeId(), pct);
+		if (SURVIVAL_SHOWN.size() > 5000) {
+			SURVIVAL_SHOWN.clear(); // 서버 메모리 보호
+		}
+		if (pct >= 100) {
+			return age + "세. 같은 해 " + country + "에서 태어난 " + kid + "는 거의 모두 아직 살아 있다.";
+		}
+		// 같은 틀이 8번 되풀이되지 않게 두 가지로 번갈아
+		if (age >= 30 && age % 30 == 0) {
+			return age + "세. 같은 해 " + country + "에서 태어난 " + kid + " 100명 가운데 " + pct + "명쯤이 아직 살아 있다.";
+		}
+		return age + "세. 같은 해 " + country + "에서 태어난 " + kid + " 가운데 약 " + pct + "%가 아직 살아 있다.";
 	}
 
 	// C09 '가게를 차린다'(LE_INVEST_BUSINESS)가 성공하면 자영업 사장이 됨 (예전엔 일자리 상태가 그대로라 다음 해 직업 제안이 떴음)

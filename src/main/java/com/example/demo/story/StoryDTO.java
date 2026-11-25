@@ -9,6 +9,8 @@ public class StoryDTO {
 	private String sourceIds;	// 근거 출처 번호 목록 "3,7,12" (AI_STORY 저장용, 화면에는 sources 사용)
 	private String createdAt;	// 만든 날짜
 	private List<SourceDTO> sources;	// 근거 출처 목록 (이야기 속 [번호] 순서)
+	private boolean fallback;	// true = AI가 안 돼서 인생 기록 줄로 엮은 이야기 (저장 안 함)
+	private String notice;		// fallback 일 때 화면 안내 (AI가 안 된 까닭)
 
 	public int getLifeId() {
 		return lifeId;
@@ -48,5 +50,21 @@ public class StoryDTO {
 
 	public void setSources(List<SourceDTO> sources) {
 		this.sources = sources;
+	}
+
+	public boolean isFallback() {
+		return fallback;
+	}
+
+	public void setFallback(boolean fallback) {
+		this.fallback = fallback;
+	}
+
+	public String getNotice() {
+		return notice;
+	}
+
+	public void setNotice(String notice) {
+		this.notice = notice;
 	}
 }

@@ -61,9 +61,12 @@ public class StoryController {
 
 		try {
 			return ResponseEntity.ok(storyService.getOrCreateStory(result));
+		} catch (AiCaller.AiFail f) {
+			// AI가 안 되면 빈 화면 대신 인생 기록으로 엮은 이야기 + 까닭 안내 (원인은 AiCaller 가 콘솔에 한 줄)
+			return ResponseEntity.ok(storyService.recordStory(result, f.userMessage));
 		} catch (Exception e) {
-			e.printStackTrace(); // 콘솔에서 원인 확인용 (API 키, 모델 이름 등)
-			return ResponseEntity.status(503).body("AI 이야기를 만들지 못했어요. 잠시 후 다시 눌러 주세요.");
+			e.printStackTrace(); // DB 저장 등 AI 밖의 문제
+			return ResponseEntity.status(500).body("이야기를 불러오지 못했어요. 잠시 후 다시 눌러 주세요.");
 		}
 	}
 }

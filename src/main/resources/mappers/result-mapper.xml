@@ -69,6 +69,7 @@
 		SELECT y.AGE          AS age,
 		       y.YEAR_NO      AS yearNo,
 		       y.COUNTRY_CODE AS countryCode,
+		       yc.NAME_KO     AS countryName,
 		       y.HEALTH       AS health,
 		       y.HAPPINESS    AS happiness,
 		       y.KNOWLEDGE    AS knowledge,
@@ -80,6 +81,7 @@
 		       y.FOCUS_CODE   AS focusCode
 		FROM LIFE_YEAR_LOG y
 		LEFT JOIN JOB j ON j.JOB_ID = y.JOB_ID
+		LEFT JOIN COUNTRY yc ON yc.COUNTRY_CODE = y.COUNTRY_CODE
 		WHERE y.LIFE_ID = #{lifeId}
 		ORDER BY y.AGE
 	</select>
