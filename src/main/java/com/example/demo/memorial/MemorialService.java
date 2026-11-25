@@ -151,7 +151,17 @@ public class MemorialService {
 	private String makeSummary(int lifeId) {
 		MemorialJobDTO job = dao.selectMainJob(lifeId);
 		if (job == null) return null;
-		return job.getJobName() + "(으)로 " + job.getYears() + "년을 일한 삶";
+		return job.getJobName() + ro(job.getJobName()) + " " + job.getYears() + "년을 일한 삶";
+	}
+
+	// 마지막 글자 받침을 보고 '으로' / '로' 고르기 (받침 없음·ㄹ받침 → 로, 그 밖의 받침 → 으로)
+	// 예: 의사 → 의사로, 군인 → 군인으로, 공무원 → 공무원으로, 농부 → 농부로, 경찰 → 경찰로
+	private String ro(String word) {
+		if (word == null || word.isEmpty()) return "로";
+		char last = word.charAt(word.length() - 1);
+		if (last < '가' || last > '힣') return "로"; // 한글이 아니면 '로'
+		int jong = (last - '가') % 28; // 받침 번호 (0 = 받침 없음, 8 = ㄹ)
+		return (jong == 0 || jong == 8) ? "로" : "으로";
 	}
 
 	private List<String> makeLeftThings(MemorialRoomDTO room, int lifeId) {

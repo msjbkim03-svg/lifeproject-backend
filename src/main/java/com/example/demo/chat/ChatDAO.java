@@ -41,8 +41,4 @@ public class ChatDAO {
 	public int insertChat(ChatDTO dto) {
 		return mybatis.insert("chat.insertChat",dto);
 	}
-	
-	public List<ChatDTO> selectRecent(String countryCode) {
-		return mybatis.selectList("chat.selectRecent", countryCode);
-	}
 }

@@ -41,7 +41,7 @@ public class MemorialController {
 	public ResponseEntity<MemorialRoomDTO> room(@PathVariable int lifeId,
 			@RequestParam(defaultValue = "false") boolean view,
 			@RequestHeader(value = "Authorization", required = false) String auth) {
-		MemorialRoomDTO room = service.room(lifeId, readMemberId(auth), view);
+		MemorialRoomDTO room = service.room(lifeId, jwt.memberIdOfHeader(auth), view);
 		if (room == null) {
 			return ResponseEntity.notFound().build();
 		}
@@ -52,7 +52,7 @@ public class MemorialController {
 	@GetMapping("/{lifeId}/film")
 	public ResponseEntity<Map<String, Object>> film(@PathVariable int lifeId,
 			@RequestHeader(value = "Authorization", required = false) String auth) {
-		Map<String, Object> film = service.film(lifeId, readMemberId(auth));
+		Map<String, Object> film = service.film(lifeId, jwt.memberIdOfHeader(auth));
 		if (film == null) {
 			return ResponseEntity.notFound().build();
 		}
@@ -62,13 +62,9 @@ public class MemorialController {
 	@PostMapping("/{lifeId}/open")
 	public ResponseEntity<Map<String, Object>> open(@PathVariable int lifeId, @RequestAttribute("memberId") String memberId,
 			@RequestBody Map<String, String> body) {
-		try {
-			String error = service.open(lifeId, Integer.parseInt(memberId), body.get("message"));
-			if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
-		} catch (DuplicateKeyException e) {
-			// 거의 동시에 두 번 누름 → DB UNIQUE(LIFE_ID) 가 막아 줌
-			return ResponseEntity.badRequest().body(Map.of("message", "이미 열린 추모관이에요."));
-		}
+		// 거의 동시에 두 번 눌러도 서비스가 DB UNIQUE(LIFE_ID) 에러를 "이미 열린 추모관이에요." 로 바꿔 줌
+		String error = service.open(lifeId, Integer.parseInt(memberId), body.get("message"));
+		if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
 		return ResponseEntity.ok(Map.of("message", "추모관을 열었어요."));
 	}
 
@@ -98,14 +94,5 @@ public class MemorialController {
 			return ResponseEntity.badRequest().body(Map.of("message", "내가 쓴 방명록만 지울 수 있어요."));
 		}
 		return ResponseEntity.ok(Map.of("message", "방명록을 지웠어요."));
-	}
-
-	private Integer readMemberId(String auth) {
-		if (auth == null || !auth.startsWith("Bearer ")) return null;
-		try {
-			return Integer.parseInt(jwt.verifyToken(auth.substring(7)).getSubject());
-		} catch (Exception e) {
-			return null;
-		}
 	}
 }

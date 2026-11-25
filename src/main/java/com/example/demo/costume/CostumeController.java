@@ -31,7 +31,7 @@ public class CostumeController {
 	@GetMapping
 	public ResponseEntity<Map<String, Object>> list(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
 			@RequestHeader(value = "Authorization", required = false) String auth) {
-		CostumeLifeDTO life = service.myLife(lifeId, readMemberId(auth), guestToken);
+		CostumeLifeDTO life = service.myLife(lifeId, jwt.memberIdOfHeader(auth), guestToken);
 		if (life == null) return ResponseEntity.status(403).body(Map.of("message", "내 인생이 아니에요."));
 		return ResponseEntity.ok(service.list(life));
 	}
@@ -58,8 +58,10 @@ public class CostumeController {
 	private ResponseEntity<Map<String, Object>> change(int costumeId, Map<String, Object> body, String auth, String action) {
 		Integer lifeId = toInt(body.get("lifeId"));
 		if (lifeId == null) return ResponseEntity.badRequest().body(Map.of("message", "인생 번호가 없어요."));
-		String guestToken = (String) body.get("guestToken");
-		Integer memberId = readMemberId(auth);
+		// 글자가 아닌 값이 와도 500 에러가 나지 않게 (없으면 null)
+		Object guest = body.get("guestToken");
+		String guestToken = guest == null ? null : String.valueOf(guest);
+		Integer memberId = jwt.memberIdOfHeader(auth);
 		CostumeLifeDTO life = service.myLife(lifeId, memberId, guestToken);
 		if (life == null) return ResponseEntity.status(403).body(Map.of("message", "내 인생이 아니에요."));
 
@@ -93,15 +95,6 @@ public class CostumeController {
 		try {
 			return Integer.parseInt(String.valueOf(value));
 		} catch (NumberFormatException e) {
-			return null;
-		}
-	}
-
-	private Integer readMemberId(String auth) {
-		if (auth == null || !auth.startsWith("Bearer ")) return null;
-		try {
-			return Integer.parseInt(jwt.verifyToken(auth.substring(7)).getSubject());
-		} catch (Exception e) {
 			return null;
 		}
 	}

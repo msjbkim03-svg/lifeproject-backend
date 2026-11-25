@@ -14,7 +14,7 @@ import com.example.demo.commons.JwtUtil;
 @Service
 public class ChatService {
 	
-	private static final int MAX_TEXT = 100;
+	private static final int MAX_TEXT = 50; // 말풍선이라 짧게 (입력칸 maxLength 50 과 같게)
 	private static final long WAIT_MS = 3000;
 	
 	private ChatDAO dao;
@@ -28,9 +28,9 @@ public class ChatService {
 	}
 	
 	public String send(String sessionId, String countryCode,ChatDTO dto) {
-		Integer memberId = readMemberId(dto.getToken());
+		Integer memberId = jwt.memberIdOf(dto.getToken());
 		if(memberId == null) {
-			return "로그인한 회원만 말할 수 있어요";
+			return "로그인한 회원만 말할 수 있어요.";
 		}
 
 		// 이 나라 마을에 들어와 있는(join 할 때 DB로 나라를 확인한) 회원인지
@@ -46,22 +46,22 @@ public class ChatService {
 		
 		String nickname = dao.selectNickname(memberId);
 		if(nickname == null) {
-			return "로그인한 회원만 말할 수 있어요";
+			return "로그인한 회원만 말할 수 있어요.";
 		}
 		
 		String content = dto.getContent() == null ? "" : dto.getContent().trim();
 		if(content.isEmpty()) return "한마디를 적어 주세요.";
-		if(content.length() > MAX_TEXT) return "100자까지 쓸 수 있어요.";
+		if(content.length() > MAX_TEXT) return "50자까지 쓸 수 있어요.";
 		
 		long now = System.currentTimeMillis();
 		Long last = lastTime.get(memberId);
-		if(last != null && now - last < WAIT_MS) return "도배금지 3초 채금";
+		if(last != null && now - last < WAIT_MS) return "3초 뒤에 다시 말할 수 있어요.";
 		
 		// 금칙어: 띄어쓰기·대소문자를 빼고 비교 ("바 보", "AD" 도 걸림)
 		String plain = content.replaceAll("\\s", "").toLowerCase();
 		for(String word : dao.selectBannedWords()) {
 			String w = word.replaceAll("\\s", "").toLowerCase();
-			if (!w.isEmpty() && plain.contains(w)) return "계속해봐 영정 먹여줄게";
+			if (!w.isEmpty() && plain.contains(w)) return "쓸 수 없는 말이 들어 있어요.";
 		}
 		
 		lastTime.put(memberId, now);
@@ -84,7 +84,7 @@ public class ChatService {
 			return true;
 		}
 
-		Integer memberId = readMemberId(dto.getToken());
+		Integer memberId = jwt.memberIdOf(dto.getToken());
 		String nickname;
 		if(memberId != null) {
 			nickname = dao.selectNickname(memberId);
@@ -117,7 +117,7 @@ public class ChatService {
 
 	// 이 나라 채팅방을 들을 수 있는지 (지금 그 나라에서 살고 있는 회원·비회원만)
 	public boolean canListen(String countryCode, String token, String guestToken) {
-		Integer memberId = readMemberId(token);
+		Integer memberId = jwt.memberIdOf(token);
 		if (memberId != null) {
 			return dao.countMemberLife(memberId, countryCode) > 0;
 		}
@@ -160,12 +160,4 @@ public class ChatService {
 		return "F".equals(gender) ? "F" : "M";
 	}
 	
-	private Integer readMemberId(String token) {
-		if (token == null) return null;
-		try {
-			return Integer.parseInt(jwt.verifyToken(token).getSubject());
-		} catch (Exception e) {
-			return null;
-		}
-	}
 }

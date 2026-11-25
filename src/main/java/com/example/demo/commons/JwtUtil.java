@@ -52,4 +52,21 @@ public class JwtUtil {
 	public DecodedJWT verifyToken(String token) {
 		return jwt.verify(token);
 	}
+
+	// 토큰 → 회원 번호 (토큰이 없거나 가짜·만료면 null = 비회원으로 봄)
+	// 로그인이 선택인 곳(추모관 보기, 코스튬, 채팅)에서 같이 씀
+	public Integer memberIdOf(String token) {
+		if (token == null || token.isEmpty()) return null;
+		try {
+			return Integer.parseInt(verifyToken(token).getSubject());
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
+	// "Authorization: Bearer 토큰" 헤더 값 → 회원 번호 (없으면 null)
+	public Integer memberIdOfHeader(String auth) {
+		if (auth == null || !auth.startsWith("Bearer ")) return null;
+		return memberIdOf(auth.substring(7));
+	}
 }
