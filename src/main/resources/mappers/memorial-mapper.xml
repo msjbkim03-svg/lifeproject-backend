@@ -83,7 +83,7 @@
 		ORDER BY AGE
 	</select>
 
-	<!-- 강도가 큰 역사 사건 3개 -->
+	<!-- 이 삶이 만난 큰 사건 5개: 역사 사건(HIST)을 강도 순으로 먼저, 모자라면 인생 사건(LIFE)을 강도 순으로 채움 -->
 	<select id="selectHistEvents" parameterType="int" resultType="com.example.demo.memorial.MemorialEventDTO">
 		SELECT age, year, text
 		FROM (
@@ -91,10 +91,12 @@
 			FROM LIFE_EVENT_LOG e
 			JOIN GAME_EVENT g ON g.EVENT_ID = e.EVENT_ID
 			WHERE e.LIFE_ID = #{lifeId}
-			  AND g.EVENT_TYPE = 'HIST'
-			ORDER BY NVL(g.INTENSITY, 1) DESC, e.AGE
+			  AND e.LOG_TEXT IS NOT NULL
+			  AND g.EVENT_TYPE IN ('HIST', 'LIFE')
+			ORDER BY CASE WHEN g.EVENT_TYPE = 'HIST' THEN 0 ELSE 1 END,
+			         NVL(g.INTENSITY, 1) DESC, e.AGE
 		)
-		WHERE ROWNUM &lt;= 3
+		WHERE ROWNUM &lt;= 5
 		ORDER BY age
 	</select>
 
