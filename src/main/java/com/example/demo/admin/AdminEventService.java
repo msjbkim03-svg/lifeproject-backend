@@ -65,8 +65,8 @@ public class AdminEventService {
 		if (e.getEventId() == null || !e.getEventId().matches("[A-Z0-9_]{1,50}")) {
 			throw new IllegalArgumentException("이벤트 ID는 영문 대문자·숫자·_ 로 50자까지예요.");
 		}
-		if (!"LIFE".equals(e.getEventType()) && !"HIST".equals(e.getEventType())) {
-			throw new IllegalArgumentException("이벤트 유형은 LIFE 또는 HIST 예요.");
+		if (!"LIFE".equals(e.getEventType())) { // 역사 이벤트는 사건 자료(HISTORY_EVENT)와 함께 DB에서 등록
+			throw new IllegalArgumentException("관리자 화면에서는 인생 이벤트만 등록할 수 있어요.");
 		}
 		normalize(e);
 
