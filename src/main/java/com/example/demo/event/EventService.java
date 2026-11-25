@@ -64,10 +64,9 @@ public class EventService {
 
 	private static final int AVG_MARRY_AGE = 30; // 평균 결혼 나이 (설계값, 추후 시뮬레이션 결과로 조정)
 
-
 	// 나라별 인구 10만 명당 수감자 수 (원작 PRISON_RATE, World Prison Brief), 없는 나라는 140
-	private static final Map<String, Integer> PRISON_RATE = Map.of("THA", 400, "TUR", 380, "IRN", 230,
-			"CHN", 120, "KOR", 105, "BGD", 45, "IND", 40, "PAK", 40, "JPN", 35);
+	private static final Map<String, Integer> PRISON_RATE = Map.of("THA", 400, "TUR", 380, "IRN", 230, "CHN", 120,
+			"KOR", 105, "BGD", 45, "IND", 40, "PAK", 40, "JPN", 35);
 
 	// 나라 수감률 배율 = √(수감률 ÷ 140) (예: 한국 0.87, 일본 0.5, 태국 1.69)
 	private double prisonK(String countryCode) {
@@ -78,7 +77,7 @@ public class EventService {
 	private double caughtRate(String countryCode) {
 		return Math.min(Math.max(0.35 * prisonK(countryCode), 0.12), 0.7);
 	}
-	
+
 	// 템플릿 하나의 올해 발생 확률
 	public double calcProbability(EventTemplateDTO t, int age, Map<String, Object> stat, String countryCode,
 			String gender) {
@@ -189,12 +188,15 @@ public class EventService {
 	}
 
 	// 선택 이벤트를 다시 물을 수 있을 때까지의 최소 간격(년), 표에 없으면 DEFAULT_COOLDOWN
-	//   예: 3 → 40세에 물어봤으면 43세부터 다시 나옴
-	//   기본 5년: 귀향·이민(FAMILY·WORK)·큰 병·위험한 제안 (큰 결정이거나 5년 완치 기준)
+	// 예: 3 → 40세에 물어봤으면 43세부터 다시 나옴
+	// 기본 5년: 귀향·이민(FAMILY·WORK)·큰 병·위험한 제안 (큰 결정이거나 5년 완치 기준)
 	private static final int DEFAULT_COOLDOWN = 5;
 	private static final int MAX_COOLDOWN = 5; // 최근 경험을 조회할 범위 (가장 긴 간격)
-	private static final Map<String, Integer> COOLDOWN = Map.of(
-			"LE_LOVE_PROPOSAL", 2, "LE_LOVE_WEDTALK", 2, // 연애는 금방 다시 (새 사람·다시 이야기)
+	private static final int LOVE_REST = 3; // 이별·이혼·사별 뒤 새 만남까지 쉬는 햇수 (마음 정리 기간)
+	private static final Map<String, Integer> COOLDOWN = Map.of("LE_LOVE_PROPOSAL", 2, "LE_LOVE_WEDTALK", 2, // 연애는 금방
+																												// 다시 (새
+																												// 사람·다시
+																												// 이야기)
 			"LE_INVEST_BUSINESS", 3, "LE_INVEST_LAND", 3, "LE_INVEST_STOCK", 3, // 권유는 자주 오지만 연달아는 어색
 			"LE_MARRIAGE_CRISIS", 3, "LE_MIGRANT_DISCRIM", 3, "LE_CHILD_SICK", 3);
 
@@ -305,9 +307,13 @@ public class EventService {
 		}
 		if (!married) {
 			int dating = datingYears(life);
-			states.add(dating >= 0 ? "STATE_DATING" : "STATE_SINGLE"); // 만남 / 이별·청혼
-			if (dating >= 2) {
-				states.add("STATE_DATING_LONG"); // 사귄 지 2년 이상 → 결혼 이야기
+			if (dating >= 0) {
+				states.add("STATE_DATING"); // 사귀는 중 → 이별·청혼
+				if (dating >= 2) {
+					states.add("STATE_DATING_LONG"); // 사귄 지 2년 이상 → 결혼 이야기
+				}
+			} else if (restDone(life)) {
+				states.add("STATE_SINGLE"); // 혼자 + 마음 정리 끝 → 새 만남
 			}
 		}
 		if (life.getChildCount() > 0) {
@@ -389,6 +395,17 @@ public class EventService {
 		return Math.max(0, life.getCurrentAge() - meet);
 	}
 
+	// 마음 정리 끝: 관계가 끝난 적 없거나, 끝난 지 LOVE_REST 년이 지났으면 true
+	// END_AGE = 마지막 이별·청혼 거절·이혼·사별·결혼 위기 헤어짐 나이 (selectLoveAges)
+	private boolean restDone(LifeDTO life) {
+		Map<String, Object> ages = eDAO.selectLoveAges(life.getLifeId());
+		if (ages == null || ages.get("END_AGE") == null) {
+			return true; // 헤어진 적 없음 → 첫 만남은 바로 가능
+		}
+		int end = ((Number) ages.get("END_AGE")).intValue();
+		return life.getCurrentAge() - end >= LOVE_REST;
+	}
+
 	// ===== 엔진 연결: 1년치 이벤트 굴리기 (EngineService가 호출) =====
 	public List<EventResultDTO> rollYear(LifeDTO life) {
 		if ("PRISON".equals(life.getJobStatus())) {
@@ -407,7 +424,8 @@ public class EventService {
 		}
 		List<EventResultDTO> results = new ArrayList<>();
 		boolean hasChoice = false; // 한 해에 선택 이벤트는 1개만 (역사 + 인생 합쳐서)
-		List<Map<String, Object>> recentExps = eDAO.selectRecentExps(life.getLifeId(), age - MAX_COOLDOWN); // 최근 경험 + 나이
+		List<Map<String, Object>> recentExps = eDAO.selectRecentExps(life.getLifeId(), age - MAX_COOLDOWN); // 최근 경험 +
+																											// 나이
 
 		// 1. 역사 이벤트 (C10): 먼저 굴림
 		for (EventResultDTO h : rollHist(life.getCurrentCountry(), year, age, life.getGender(), life.getName(),
