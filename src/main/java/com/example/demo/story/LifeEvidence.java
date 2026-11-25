@@ -32,8 +32,26 @@ public class LifeEvidence {
 		public List<SourceDTO> sources = new ArrayList<>();
 	}
 
-	// [캐릭터 기록]
+	// [캐릭터 기록] (C20 묻기: 인생 기록을 나이순 한 목록으로)
 	public String character(ResultDTO r) {
+		StringBuilder sb = new StringBuilder(header(r));
+		sb.append("인생 기록 (나이순):\n");
+		for (EventLogDTO e : pickLogs(r.getEvents(), new java.util.HashSet<>())) {
+			sb.append(logLine(e, ""));
+		}
+		return sb.toString();
+	}
+
+	private String logLine(EventLogDTO e, String mark) {
+		StringBuilder sb = new StringBuilder("- ").append(mark).append(e.getAge()).append("세(").append(e.getYearNo()).append("): ").append(noMoney(e.getLogText()));
+		if (e.getChoiceText() != null) {
+			sb.append(" → 선택: ").append(e.getChoiceText());
+		}
+		return sb.append("\n").toString();
+	}
+
+	// [캐릭터 기록] 머리 (인생 기록 줄은 빼고)
+	private String header(ResultDTO r) {
 		StringBuilder sb = new StringBuilder("[캐릭터 기록] (아래 목록은 모두 이 사람에게 실제로 있었던 일)\n");
 		sb.append("이름: ").append(r.getName()).append(" (").append("M".equals(r.getGender()) ? "남" : "여").append(")\n");
 		sb.append("태어남: ").append(r.getBirthYear()).append("년, ").append(r.getCountryName());
@@ -58,15 +76,155 @@ public class LifeEvidence {
 			sb.append(peaks).append("\n");
 		}
 		sb.append("세상을 떠남: ").append(r.getDeathYear()).append("년, ").append(r.getDeathAge()).append("세, 원인 ").append(causeText(r.getDeathCause())).append("\n");
-		sb.append("인생 기록 (나이순):\n");
-		for (EventLogDTO e : pickLogs(r.getEvents())) {
-			sb.append("- ").append(e.getAge()).append("세(").append(e.getYearNo()).append("): ").append(noMoney(e.getLogText()));
-			if (e.getChoiceText() != null) {
-				sb.append(" → 선택: ").append(e.getChoiceText());
+		return sb.toString();
+	}
+
+	// ================= C19 이야기: 장별 기록 + 사진 장면 (11/25) =================
+	// 예전엔 인생 기록을 한 목록으로 넘겨서, AI가 18세에 시작한 일을 청년기 장에 쓰는 등 장마다 붙는 사진(그 나이의 큰 장면)과 글이 어긋났음
+	//  → 기록을 장마다 나눠 넘기고, 그 장에 붙는 사진 장면 줄에 ★ 를 붙여 '그 장 글에 꼭 쓰기'
+
+	// 화면 장면 이름 → 말 (프론트 ResultPage SCENE_LABEL 과 같은 이름)
+	private static final Map<String, String> SCENE_WORD = Map.ofEntries(
+			Map.entry("school", "학교 입학"), Map.entry("grad", "졸업"), Map.entry("date", "만남·청혼"), Map.entry("wedding", "결혼식"),
+			Map.entry("newborn", "아이가 태어남"), Map.entry("hosp", "병원"), Map.entry("loss", "가족을 떠나보냄"), Map.entry("fly", "이민"),
+			Map.entry("flee", "피란"), Map.entry("rain", "시련"), Map.entry("news", "역사 사건"), Map.entry("home", "내 집 마련"),
+			Map.entry("award", "경사"), Map.entry("party", "은퇴"), Map.entry("prison", "수감"), Map.entry("work", "일을 시작함"),
+			Map.entry("village", "그해의 일"));
+
+	// 그 장면에 맞는 기록 줄을 찾는 말 (맞는 줄이 없으면 그 나이의 기록 전부에 ★)
+	private static final Map<String, String> SCENE_RE = Map.ofEntries(
+			Map.entry("school", "입학"), Map.entry("grad", "졸업"), Map.entry("date", "청혼|만났|마음이 통하|사귀|연애"), Map.entry("wedding", "결혼식"),
+			Map.entry("newborn", "태어났|아이가 생겼|출산"), Map.entry("hosp", "병원|입원|수술|다쳤|아팠|병"), Map.entry("loss", "세상을 떠|떠나보|돌아가셨|사별|잃었"),
+			Map.entry("fly", "이민|이주|건너"), Map.entry("flee", "피란|피난|떠났"), Map.entry("rain", "이혼|잃|실패|해고|문을 닫|빚|그만두|쫓겨"),
+			Map.entry("home", "집"), Map.entry("award", "당첨|상을|행운"), Map.entry("party", "은퇴|정년"), Map.entry("prison", "수감|체포|감옥|교도소"),
+			Map.entry("work", "일을 시작|취업|일하기 시작"));
+
+	// 프론트가 보낸 '16:grad,18:work,23:loss' → {16=grad, 18=work, 23=loss} (모르는 이름은 village, 이상한 글자는 버림)
+	public static Map<Integer, String> parseScenes(String s) {
+		Map<Integer, String> out = new java.util.TreeMap<>();
+		if (s == null) {
+			return out;
+		}
+		java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{1,3}):([a-z]{1,10})").matcher(s);
+		while (m.find() && out.size() < 12) {
+			String k = SCENE_WORD.containsKey(m.group(2)) ? m.group(2) : "village";
+			out.put(Integer.parseInt(m.group(1)), k);
+		}
+		return out;
+	}
+
+	public static String sceneWord(String kind) {
+		return SCENE_WORD.getOrDefault(kind, "그해의 일");
+	}
+
+	private static boolean isSceneLine(EventLogDTO e, String kind) {
+		String t = e.getLogText() == null ? "" : e.getLogText();
+		String re = SCENE_RE.get(kind);
+		return re != null && java.util.regex.Pattern.compile(re).matcher(t).find();
+	}
+
+	// 나이 → 장 번호 (CH_AGE 칸)
+	public static int chapterOf(int age) {
+		for (int i = CH_AGE.length - 1; i >= 0; i--) {
+			if (age >= CH_AGE[i][0]) {
+				return i;
 			}
-			sb.append("\n");
+		}
+		return 0;
+	}
+
+	public static int[] chapterRange(int i, int deathAge) {
+		return new int[] { CH_AGE[i][0], Math.min(CH_AGE[i][1], deathAge) };
+	}
+
+	public static String chapterName(int i) {
+		return CH_NAME[i];
+	}
+
+	// 살았던 나이까지의 장 수
+	public static int chapterCount(int deathAge) {
+		int n = 0;
+		while (n < CH_AGE.length && CH_AGE[n][0] <= deathAge) {
+			n++;
+		}
+		return n;
+	}
+
+	// [캐릭터 기록] + [장별 기록]: 장마다 그 나이의 기록, 사진 장면 줄은 ★
+	public String storyRecord(ResultDTO r, Map<Integer, String> scenes) {
+		int deathAge = r.getDeathAge() == null ? 0 : r.getDeathAge();
+		StringBuilder sb = new StringBuilder(header(r));
+		List<EventLogDTO> logs = pickLogs(r.getEvents(), scenes.keySet());
+		sb.append("\n[장별 기록] (각 장 글에는 그 장 아래 적힌 일만 써. ★ 줄은 그 장에 사진으로 붙는 장면이라 그 장 글에 꼭 써)\n");
+		for (int i = 0; i < chapterCount(deathAge); i++) {
+			int[] ch = chapterRange(i, deathAge);
+			sb.append(chapterTitle(i, deathAge)).append("\n");
+			List<String> pics = new ArrayList<>();
+			for (Map.Entry<Integer, String> s : scenes.entrySet()) {
+				if (s.getKey() >= ch[0] && s.getKey() <= ch[1]) {
+					pics.add(s.getKey() + "세 " + sceneWord(s.getValue()));
+				}
+			}
+			if (!pics.isEmpty()) {
+				sb.append("사진 장면: ").append(String.join(", ", pics)).append("\n");
+			}
+			int n = 0;
+			for (EventLogDTO e : logs) {
+				if (e.getAge() < ch[0] || e.getAge() > ch[1]) {
+					continue;
+				}
+				sb.append(logLine(e, starOf(e, scenes, logs) ? "★ " : ""));
+				n++;
+			}
+			if (n == 0) {
+				sb.append("- (이 나이대 기록 없음: 사건을 지어내지 말고 짧게)\n");
+			}
 		}
 		return sb.toString();
+	}
+
+	// ★: 사진 장면 나이의 줄 가운데 그 장면에 맞는 줄 (맞는 줄이 하나도 없으면 그 나이 줄 전부)
+	private boolean starOf(EventLogDTO e, Map<Integer, String> scenes, List<EventLogDTO> logs) {
+		String kind = scenes.get(e.getAge());
+		if (kind == null) {
+			return false;
+		}
+		if (isSceneLine(e, kind)) {
+			return true;
+		}
+		for (EventLogDTO o : logs) {
+			if (o.getAge() == e.getAge() && isSceneLine(o, kind)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// 사진 장면이 그 장 글에 나왔는지 볼 말 (StoryService 점검용, null 이면 점검 안 함)
+	public static String sceneCheck(String kind, ResultDTO r, int age) {
+		String job = null;
+		if ("work".equals(kind) && r.getYears() != null) {
+			for (YearLogDTO y : r.getYears()) {
+				if (y.getAge() >= age && y.getJobName() != null) {
+					job = y.getJobName().replaceAll("\\s*\\(.*$", "").trim(); // '소농 (자급 농사)' → '소농'
+					break;
+				}
+			}
+		}
+		return switch (kind) {
+			case "work" -> "일을|일하|일터|직장|취업" + (job != null && !job.isEmpty() ? "|" + java.util.regex.Pattern.quote(job) : "");
+			case "wedding" -> "결혼|혼례|식을 올|아내|남편|부부";
+			case "grad" -> "졸업";
+			case "school" -> "입학|학교";
+			case "loss" -> "떠나|세상을|잃|장례|여의|돌아가|빈자리|사별";
+			case "newborn" -> "태어|아이|아들|딸|출산|자녀";
+			case "fly" -> "이민|이주|건너|옮겨";
+			case "flee" -> "피란|피난|도망|떠나";
+			case "party" -> "은퇴|정년|일을 마치|손을 놓|내려놓";
+			case "prison" -> "수감|감옥|교도소|체포|갇";
+			case "date" -> "만나|만남|청혼|사랑|설렘";
+			default -> null;
+		};
 	}
 
 	// 기록 줄의 돈 표시 '(−4,228만 원)' · '(+12만 원)' 빼기 (AI가 '775만 원을 정리해야 했다'처럼 금액을 읽어 말해서, 11/25)
@@ -225,18 +383,18 @@ public class LifeEvidence {
 
 	// 인생 기록 고르기: 앞에서부터 자르면 어린 시절만 들어가서, 온 생애에 고르게
 	//   사건(EVENT_ID 있는 줄)과 고른 것이 있는 줄은 모두, 그 밖의 줄은 나이마다 첫 줄만 → 그래도 많으면 고르게 건너뜀
-	private List<EventLogDTO> pickLogs(List<EventLogDTO> events) {
+	//   mustAges: 이 나이의 줄은 모두 넣고 건너뛰지도 않음 (C19 사진 장면 나이, 11/25)
+	private List<EventLogDTO> pickLogs(List<EventLogDTO> events, java.util.Set<Integer> mustAges) {
 		List<EventLogDTO> out = new ArrayList<>();
 		if (events == null) {
 			return out;
 		}
 		int lastAge = -1;
 		for (EventLogDTO e : events) {
-			String t = e.getLogText() == null ? "" : e.getLogText();
-			if (t.startsWith("세계 인구가") || t.matches("^\\d+세\\. 같은 해 .*") || t.endsWith("?")) {
+			if (!isOwnLine(e)) {
 				continue; // 세계 소식 · 또래 생존율 · 고르기 전 질문 줄은 이 사람의 일이 아니라서 뺌 (AI가 '14살에 세계 인구가 80억'을 씀)
 			}
-			boolean big = e.getEventId() != null || e.getChoiceText() != null;
+			boolean big = e.getEventId() != null || e.getChoiceText() != null || mustAges.contains(e.getAge());
 			if (big || e.getAge() != lastAge) {
 				out.add(e);
 			}
@@ -245,11 +403,23 @@ public class LifeEvidence {
 		if (out.size() <= MAX_LOGS) {
 			return out;
 		}
-		List<EventLogDTO> even = new ArrayList<>();
+		java.util.Set<EventLogDTO> keep = new java.util.LinkedHashSet<>();
 		for (int i = 0; i < MAX_LOGS; i++) {
-			even.add(out.get((int) ((long) i * out.size() / MAX_LOGS)));
+			keep.add(out.get((int) ((long) i * out.size() / MAX_LOGS)));
+		}
+		List<EventLogDTO> even = new ArrayList<>();
+		for (EventLogDTO e : out) {
+			if (keep.contains(e) || mustAges.contains(e.getAge())) {
+				even.add(e);
+			}
 		}
 		return even;
+	}
+
+	// 이 사람의 일인 기록 줄인지 (세계 소식 · 또래 생존율 · 고르기 전 질문 줄은 아님)
+	private static boolean isOwnLine(EventLogDTO e) {
+		String t = e.getLogText() == null ? "" : e.getLogText();
+		return !t.isBlank() && !t.startsWith("세계 인구가") && !t.matches("^\\d+세\\. 같은 해 .*") && !t.endsWith("?");
 	}
 
 	// 결혼 이력 (이혼·사별하면 마지막엔 미혼이라 '안 함'으로 나오던 것)
@@ -288,30 +458,46 @@ public class LifeEvidence {
 	}
 
 	// C19 AI가 안 될 때 대신 보여 줄 이야기: 장마다 그 나이대의 큰 사건 줄을 이어 붙임 (AI 없이, 지어낸 말 없이)
-	//   사건(EVENT_ID 있는 줄) 먼저, 모자라면 나이마다 첫 줄로 채움. 질문으로 끝나는 줄('어떻게 할까?')은 뺌
-	public String recordStory(ResultDTO r) {
+	//   그 장 사진 장면 줄(★) 먼저, 다음 사건(EVENT_ID 있는 줄), 모자라면 나이마다 첫 줄 → 나이순으로 이어 붙임
+	public String recordStory(ResultDTO r, Map<Integer, String> scenes) {
 		int deathAge = r.getDeathAge() == null ? 0 : r.getDeathAge();
-		List<EventLogDTO> events = r.getEvents() == null ? new ArrayList<>() : r.getEvents();
+		List<EventLogDTO> events = new ArrayList<>();
+		for (EventLogDTO e : r.getEvents() == null ? new ArrayList<EventLogDTO>() : r.getEvents()) {
+			if (isOwnLine(e) && !noMoney(e.getLogText()).isEmpty()) {
+				events.add(e);
+			}
+		}
 		StringBuilder sb = new StringBuilder();
-		for (int i = 0; i < CH_AGE.length && CH_AGE[i][0] <= deathAge; i++) {
-			List<String> lines = new ArrayList<>();
-			for (int pass = 0; pass < 2 && lines.size() < 4; pass++) {
+		for (int i = 0; i < chapterCount(deathAge); i++) {
+			int[] ch = chapterRange(i, deathAge);
+			java.util.TreeSet<Integer> picked = new java.util.TreeSet<>(); // events 안 번호 (나이순)
+			List<String> texts = new ArrayList<>();
+			for (int pass = 0; pass < 3; pass++) {
 				int lastAge = -1;
-				for (EventLogDTO e : events) {
-					if (e.getAge() < CH_AGE[i][0] || e.getAge() > CH_AGE[i][1] || lines.size() >= 4) {
+				for (int k = 0; k < events.size(); k++) {
+					EventLogDTO e = events.get(k);
+					if (e.getAge() < ch[0] || e.getAge() > ch[1]) {
 						continue;
 					}
 					String t = noMoney(e.getLogText());
-					boolean ok = !t.isEmpty() && !t.endsWith("?") && !t.startsWith("세계 인구가") && !t.matches("^\\d+세\\. 같은 해 .*") && !lines.contains(t)
-							&& (pass == 0 ? e.getEventId() != null : e.getAge() != lastAge);
-					if (ok) {
-						lines.add(t);
-					}
+					boolean ok = switch (pass) {
+						case 0 -> starOf(e, scenes, events);
+						case 1 -> e.getEventId() != null;
+						default -> e.getAge() != lastAge;
+					};
 					lastAge = e.getAge();
+					if (ok && !texts.contains(t) && (pass == 0 || picked.size() < 4)) {
+						picked.add(k);
+						texts.add(t);
+					}
 				}
 			}
-			if (lines.isEmpty()) {
+			if (picked.isEmpty()) {
 				continue;
+			}
+			List<String> lines = new ArrayList<>();
+			for (int k : picked) {
+				lines.add(noMoney(events.get(k).getLogText()));
 			}
 			sb.append(chapterTitle(i, deathAge)).append("\n").append(String.join(" ", lines)).append("\n");
 		}
