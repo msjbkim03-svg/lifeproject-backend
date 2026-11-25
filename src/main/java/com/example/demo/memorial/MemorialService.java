@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.example.demo.costume.CostumeLifeDTO;
 import com.example.demo.costume.CostumeService;
 import com.example.demo.engine.EngineService;
+import com.example.demo.engine.LifeDTO;
 import com.example.demo.result.ResultService;
 
 @Service
@@ -86,6 +87,12 @@ public class MemorialService {
 		int ownerId = room.getOwnerId();
 		Map<String, Object> film = engineService.filmData(lifeId, ownerId, null);
 		if (film == null || film.isEmpty()) return null;
+		// 비회원도 보는 주소라서 주인을 알아낼 수 있는 값(회원 번호·비회원 토큰)은 지우고 내보냄
+		// (방 정보 MemorialRoomDTO 가 ownerId 를 숨기는 것과 같은 이유, 영상·사진 그림에는 필요 없는 값)
+		if (film.get("life") instanceof LifeDTO l) {
+			l.setMemberId(null);
+			l.setGuestToken(null);
+		}
 
 		CostumeLifeDTO life = costumeService.myLife(lifeId, ownerId, null);
 		Map<String, Object> out = new HashMap<>();
