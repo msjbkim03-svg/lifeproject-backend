@@ -17,6 +17,8 @@
 				       c.NAME_KO                        AS birthCountryName,
 				       p.MESSAGE                        AS message,
 				       NVL(p.TRIBUTE_COUNT, 0) AS tributeCount,
+				       NVL(p.VIEW_COUNT, 0)    AS viewCount,
+				       NVL(mb.NICKNAME, '알 수 없음') AS nickname,
 				       l.GENDER                         AS gender,
 				       (SELECT MAX(cs.IMAGE_PATH) FROM LIFE_COSTUME lc JOIN COSTUME cs ON cs.COSTUME_ID = lc.COSTUME_ID
 				         WHERE lc.LIFE_ID = l.LIFE_ID AND lc.IS_EQUIPPED = 'Y' AND cs.PART = 'HAIR')    AS hair,
@@ -27,6 +29,7 @@
 				FROM MEMORIAL_POST p
 				JOIN LIFE l ON l.LIFE_ID = p.LIFE_ID
 				JOIN COUNTRY c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
+				LEFT JOIN MEMBER mb ON mb.MEMBER_ID = p.MEMBER_ID
 				ORDER BY p.POST_ID DESC
 			) a
 			WHERE ROWNUM &lt;= #{end}

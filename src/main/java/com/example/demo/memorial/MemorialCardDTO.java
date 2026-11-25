@@ -10,6 +10,8 @@ public class MemorialCardDTO {
 	private String birthCountryName;
 	private String message;
 	private int tributeCount;
+	private int viewCount;    // 조회수
+	private String nickname;  // 추모관을 연 사람(그 인생의 주인) 닉네임
 	private String gender; // 초상 그림용 (M, F)
 	private String hair;   // 그 생에 입은 코스튬 코드 (없으면 null) → 초상
 	private String top;
@@ -39,6 +41,12 @@ public class MemorialCardDTO {
 
 	public int getTributeCount() { return tributeCount; }
 	public void setTributeCount(int tributeCount) { this.tributeCount = tributeCount; }
+
+	public int getViewCount() { return viewCount; }
+	public void setViewCount(int viewCount) { this.viewCount = viewCount; }
+
+	public String getNickname() { return nickname; }
+	public void setNickname(String nickname) { this.nickname = nickname; }
 
 	public String getGender() { return gender; }
 	public void setGender(String gender) { this.gender = gender; }
