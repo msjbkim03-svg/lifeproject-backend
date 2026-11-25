@@ -11,11 +11,10 @@
 		= 'ACTIVE'
 	</select>
 
-	<!-- 오늘 시작된 인생 수 -->
+	<!-- 오늘 시작된 인생 수 (한국 날짜 기준: DB 시각은 UTC라 +9시간 해서 날짜를 자름, 11/25 - 예전엔 오전 9시에 바뀜) -->
 	<select id="countTodayPlays" resultType="int">
-		SELECT (SELECT COUNT(*) FROM LIFE WHERE CREATED_AT &gt;= TRUNC(SYSDATE))
-		+ (SELECT COUNT(*) FROM GUEST_LIFE_STAT WHERE STARTED_AT &gt;=
-		TRUNC(SYSDATE))
+		SELECT (SELECT COUNT(*) FROM LIFE WHERE CREATED_AT + 9/24 &gt;= TRUNC(SYSDATE + 9/24))
+		     + (SELECT COUNT(*) FROM GUEST_LIFE_STAT WHERE STARTED_AT + 9/24 &gt;= TRUNC(SYSDATE + 9/24))
 		FROM dual
 	</select>
 
@@ -104,6 +103,81 @@
 		WHERE c.IS_ACTIVE = 'Y'
 		GROUP BY c.COUNTRY_CODE, c.NAME_KO
 		ORDER BY lives DESC, c.COUNTRY_CODE
+	</select>
+
+	<!-- ================= A04 추가 (11/25): 날짜별 추이 · 사망 원인 · 수명 분포 · 최근 끝난 인생 ================= -->
+
+	<!-- 최근 14일 하루 플레이 수 (한국 날짜, 오늘 포함, 플레이 없는 날도 0으로 나옴)
+	     지워진 비회원 인생(GUEST_LIFE_STAT)도 합침 -->
+	<select id="selectDailyPlays" resultType="com.example.demo.admin.DailyPlayDTO">
+		WITH days AS (
+			SELECT TRUNC(SYSDATE + 9/24) - LEVEL + 1 AS d FROM dual CONNECT BY LEVEL &lt;= 14
+		),
+		starts AS (
+			SELECT TRUNC(CREATED_AT + 9/24) AS d, START_TYPE AS t FROM LIFE
+			WHERE CREATED_AT + 9/24 &gt;= TRUNC(SYSDATE + 9/24) - 13
+			UNION ALL
+			SELECT TRUNC(STARTED_AT + 9/24), 'GUEST' FROM GUEST_LIFE_STAT
+			WHERE STARTED_AT + 9/24 &gt;= TRUNC(SYSDATE + 9/24) - 13
+		),
+		ends AS (
+			SELECT TRUNC(ENDED_AT + 9/24) AS d, STATUS AS s FROM LIFE
+			WHERE ENDED_AT IS NOT NULL AND ENDED_AT + 9/24 &gt;= TRUNC(SYSDATE + 9/24) - 13
+			UNION ALL
+			SELECT TRUNC(ENDED_AT + 9/24), STATUS FROM GUEST_LIFE_STAT
+			WHERE ENDED_AT IS NOT NULL AND ENDED_AT + 9/24 &gt;= TRUNC(SYSDATE + 9/24) - 13
+		)
+		SELECT TO_CHAR(days.d, 'YYYY-MM-DD') AS day,
+		       (SELECT COUNT(*) FROM starts s WHERE s.d = days.d AND s.t = 'MEMBER') AS memberStarts,
+		       (SELECT COUNT(*) FROM starts s WHERE s.d = days.d AND s.t = 'GUEST') AS guestStarts,
+		       (SELECT COUNT(*) FROM ends e WHERE e.d = days.d AND e.s = 'ENDED') AS ended,
+		       (SELECT COUNT(*) FROM ends e WHERE e.d = days.d AND e.s = 'ABANDONED') AS abandoned
+		FROM days
+		ORDER BY days.d
+	</select>
+
+	<!-- 사망 원인 분포 (끝까지 산 인생, 원인이 남아 있는 LIFE 만) -->
+	<select id="selectDeathCauses" resultType="com.example.demo.admin.DeathCauseDTO">
+		SELECT NVL(DEATH_CAUSE, '기록 없음') AS cause,
+		       COUNT(*) AS lives,
+		       ROUND(AVG(DEATH_AGE), 1) AS avgAge
+		FROM LIFE
+		WHERE STATUS = 'ENDED' AND DEATH_AGE IS NOT NULL
+		GROUP BY NVL(DEATH_CAUSE, '기록 없음')
+		ORDER BY lives DESC
+	</select>
+
+	<!-- 수명 분포 10년 단위 (0~9세, 10~19세 … 100세 이상은 100에 모음), 지워진 비회원 포함 -->
+	<select id="selectAgeBuckets" resultType="com.example.demo.admin.AgeBucketDTO">
+		SELECT LEAST(FLOOR(DEATH_AGE / 10) * 10, 100) AS fromAge,
+		       COUNT(*) AS lives
+		FROM (
+			SELECT DEATH_AGE FROM LIFE WHERE STATUS = 'ENDED' AND DEATH_AGE IS NOT NULL
+			UNION ALL
+			SELECT DEATH_AGE FROM GUEST_LIFE_STAT WHERE STATUS = 'ENDED' AND DEATH_AGE IS NOT NULL
+		)
+		GROUP BY LEAST(FLOOR(DEATH_AGE / 10) * 10, 100)
+		ORDER BY fromAge
+	</select>
+
+	<!-- 최근 끝난 인생 n개 (게임 속 가상 인물 이름 · 나라 · 수명 · 원인만, 회원 정보는 안 꺼냄) -->
+	<select id="selectRecentEnded" parameterType="int" resultType="com.example.demo.admin.RecentLifeDTO">
+		SELECT * FROM (
+			SELECT l.LIFE_ID       AS lifeId,
+			       l.NAME          AS name,
+			       l.BIRTH_COUNTRY AS countryCode,
+			       c.NAME_KO       AS countryName,
+			       l.BIRTH_YEAR    AS birthYear,
+			       l.DEATH_AGE     AS deathAge,
+			       l.DEATH_CAUSE   AS deathCause,
+			       l.START_TYPE    AS startType,
+			       TO_CHAR(l.ENDED_AT + 9/24, 'MM-DD HH24:MI') AS endedAt
+			FROM LIFE l
+			LEFT JOIN COUNTRY c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
+			WHERE l.STATUS = 'ENDED' AND l.ENDED_AT IS NOT NULL
+			ORDER BY l.ENDED_AT DESC
+		)
+		WHERE ROWNUM &lt;= #{n}
 	</select>
 
 </mapper>
