@@ -39,6 +39,11 @@ public class ChatService {
 			return "지금 살고 있는 나라 마을에서만 말할 수 있어요.";
 		}
 
+		// 집 안에서는 다른 사람이 안 보여서 말풍선도 못 봄 → 저장도 안 함
+		if ("home".equals(me.getPlace())) {
+			return "집 안에서는 말할 수 없어요. 밖으로 나가 주세요.";
+		}
+
 		// 인생이 끝났으면(엔딩 장면 등) 더 말할 수 없음
 		if (dao.countMemberLife(memberId, countryCode) == 0) {
 			return "지금 살고 있는 인생에서만 말할 수 있어요.";
