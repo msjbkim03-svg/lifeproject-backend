@@ -17,7 +17,7 @@ import com.example.demo.result.ResultDTO;
 public class LifeEvidence {
 
 	private static final int MAX_HISTORY = 8;	// 역사 사건 최대 개수 (겪은 사건 먼저)
-	private static final int MAX_LOGS = 40;		// 인생 기록 최대 줄 수
+	private static final int MAX_LOGS = 140;	// 인생 기록 최대 줄 수 (11/25: 40줄이면 어린 시절에서 끝나서 고름)
 
 	private final StoryDao storyDao;
 
@@ -47,17 +47,71 @@ public class LifeEvidence {
 		sb.append("학력: ").append(nvl(r.getEduLevel())).append(" (").append(nvl(r.getSchoolStatus())).append(")\n");
 		sb.append("마지막 직업: ").append(nvl(r.getJobName())).append("\n");
 		sb.append("평균 소득: 연 ").append(r.getAvgIncome()).append("달러, 아시아 소득 상위 ").append(r.getIncomeTopPct()).append("%\n");
-		sb.append("결혼: ").append("Y".equals(r.getMarriedYn()) ? "함" : "안 함").append(", 자녀 ").append(r.getChildCount()).append("명\n");
+		sb.append("결혼: ").append(marriage(r)).append(", 자녀 ").append(r.getChildCount()).append("명\n");
 		sb.append("인생 기록:\n");
-		List<EventLogDTO> events = r.getEvents();
-		int n = Math.min(events.size(), MAX_LOGS);
-		for (int i = 0; i < n; i++) {
-			EventLogDTO e = events.get(i);
+		for (EventLogDTO e : pickLogs(r.getEvents())) {
 			sb.append("- ").append(e.getAge()).append("세(").append(e.getYearNo()).append("): ").append(e.getLogText());
 			if (e.getChoiceText() != null) {
 				sb.append(" → 선택: ").append(e.getChoiceText());
 			}
 			sb.append("\n");
+		}
+		return sb.toString();
+	}
+
+	// 인생 기록 고르기: 앞에서부터 자르면 어린 시절만 들어가서, 온 생애에 고르게
+	//   사건(EVENT_ID 있는 줄)과 고른 것이 있는 줄은 모두, 그 밖의 줄은 나이마다 첫 줄만 → 그래도 많으면 고르게 건너뜀
+	private List<EventLogDTO> pickLogs(List<EventLogDTO> events) {
+		List<EventLogDTO> out = new ArrayList<>();
+		if (events == null) {
+			return out;
+		}
+		int lastAge = -1;
+		for (EventLogDTO e : events) {
+			boolean big = e.getEventId() != null || e.getChoiceText() != null;
+			if (big || e.getAge() != lastAge) {
+				out.add(e);
+			}
+			lastAge = e.getAge();
+		}
+		if (out.size() <= MAX_LOGS) {
+			return out;
+		}
+		List<EventLogDTO> even = new ArrayList<>();
+		for (int i = 0; i < MAX_LOGS; i++) {
+			even.add(out.get((int) ((long) i * out.size() / MAX_LOGS)));
+		}
+		return even;
+	}
+
+	// 결혼 이력 (이혼·사별하면 마지막엔 미혼이라 '안 함'으로 나오던 것)
+	private String marriage(ResultDTO r) {
+		int w = r.getWeddingCount() == null ? 0 : r.getWeddingCount();
+		int d = r.getDivorceCount() == null ? 0 : r.getDivorceCount();
+		int x = r.getWidowCount() == null ? 0 : r.getWidowCount();
+		if (w == 0 && !"Y".equals(r.getMarriedYn())) {
+			return "안 함";
+		}
+		String s = "함" + (w > 1 ? "(" + w + "번)" : "");
+		if (d > 0) {
+			s += ", 이혼 " + d + "번";
+		}
+		if (x > 0) {
+			s += ", 배우자와 사별 " + x + "번";
+		}
+		return s;
+	}
+
+	// C19 [나눌 장]: 이야기를 나이대별로 나눌 이름 (프론트는 장 제목의 나이 범위로 큰 장면 사진을 붙임)
+	public String chapters(int deathAge) {
+		int[][] r = { { 0, 12 }, { 13, 19 }, { 20, 34 }, { 35, 59 }, { 60, 200 } };
+		String[] name = { "어린 시절", "10대", "청년기", "중년기", "노년기" };
+		StringBuilder sb = new StringBuilder("[나눌 장]\n");
+		for (int i = 0; i < r.length; i++) {
+			if (r[i][0] > deathAge) {
+				break;
+			}
+			sb.append("## ").append(name[i]).append(" (").append(r[i][0]).append("~").append(Math.min(r[i][1], deathAge)).append("세)\n");
 		}
 		return sb.toString();
 	}

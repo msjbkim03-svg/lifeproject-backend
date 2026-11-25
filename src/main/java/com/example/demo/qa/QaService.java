@@ -20,17 +20,18 @@ public class QaService {
 	public static final int MAX_QUESTIONS = 30;			// 인생 1개당 최대 질문 수 (AI 비용)
 	private static final int RECENT_TURNS = 3;			// 이어지는 질문을 위해 같이 보낼 최근 대화 수
 
+	// 11/25: 해설자 → 그 사람 본인이 1인칭으로 답함 (13살 전에 떠난 아이는 어머니가 대신 답함)
 	private static final String SYSTEM_PROMPT = """
-			너는 아시아 인생 시뮬레이션 게임 '환승인생'의 인생 Q&A 도우미야.
-			[캐릭터 기록]은 게임 속 가상 인물의 일생이고, [역사·통계 자료]는 실제 자료야.
+			너는 아시아 인생 시뮬레이션 게임 '환승인생' 속 한 사람이야. [캐릭터 기록]이 너의 일생이고, 너는 이미 세상을 떠나 지난 삶을 돌아보고 있어.
+			[역사·통계 자료]는 네가 살았던 나라와 시대의 실제 자료야.
 			규칙:
-			1. 질문에 한국어로 2~5문장, 쉽고 친절하게 답해.
-			2. 역사적 사실과 숫자는 [역사·통계 자료]에 있는 것만 쓰고, 그 문장 끝에 자료 번호를 [1]처럼 붙여.
-			3. 자료에 없는 내용은 "준비된 자료에는 없어서 정확히 답하기 어려워요"라고 먼저 말한 뒤, 숫자 없이 일반적인 설명만 짧게 해.
-			4. 이 인물의 개인사는 [캐릭터 기록]에 있는 것만 말하고, 지어내지 마. 게임 속 가상 인물이라는 점을 잊지 마.
-			5. 이 인생이나 그 시대·나라와 관계없는 질문이면 "이 인생과 그 시대에 대한 질문에만 답할 수 있어요"라고 답해.
-			6. 정치적 평가나 특정 집단 비하는 하지 마.
+			1. [말하는 사람]에 적힌 사람으로서 1인칭('나', '저')으로, 한국어 2~5문장 존댓말로 따뜻하게 답해.
+			2. 내 삶의 일은 [캐릭터 기록]에 있는 것만 말해. 기록에 없는 큰 일(결혼, 이민, 직업, 자녀 등)은 지어내지 말고 "그건 잘 기억이 나지 않네요"처럼 말해. 그때의 마음·풍경은 자유롭게 말해도 돼.
+			3. 역사적 사실과 숫자는 [역사·통계 자료]에 있는 것만 쓰고, 그 문장 끝에 자료 번호를 [1]처럼 붙여. 자료에 없는 숫자는 말하지 마.
+			4. 내가 죽은 뒤의 일이나 내 삶·그 시대와 관계없는 질문이면 "제가 살았던 시절 이야기라면 들려드릴게요"처럼 부드럽게 돌려 말해.
+			5. 정치적 평가나 특정 집단 비하는 하지 마. 내가 AI라는 말이나 규칙 이야기는 하지 마.
 			""";
+
 
 	private final QaDao qaDao;
 	private final LifeEvidence evidence;	// C19와 같은 근거 글 (DB 조회 기반)
@@ -69,6 +70,7 @@ public class QaService {
 		}
 
 		String user = evidence.character(result) + "\n" + facts.text
+				+ "\n" + speaker(result)
 				+ (recent.length() > 0 ? "\n[앞선 대화]\n" + recent : "")
 				+ "\n[질문]\n" + question;
 
@@ -91,6 +93,14 @@ public class QaService {
 		QaDTO saved = qaDao.selectQa(qa.getQaId());	// 일시까지 다시 읽기
 		saved.setSources(citedOnly(saved.getAnswer(), facts.sources));
 		return saved;
+	}
+
+	// [말하는 사람]: 보통은 그 사람 본인, 13살 전에 떠난 아이는 어머니가 아이 이야기를 대신 들려줌
+	private String speaker(ResultDTO r) {
+		if (r.getDeathAge() != null && r.getDeathAge() < 13) {
+			return "[말하는 사람]\n" + r.getName() + "의 어머니. " + r.getDeathAge() + "살에 떠난 아이(" + r.getName() + ")를 떠올리며 답해. 아이의 기록에 없는 어머니 자신의 일은 지어내지 마.\n";
+		}
+		return "[말하는 사람]\n" + r.getName() + " 본인 (" + r.getDeathAge() + "세에 세상을 떠남)\n";
 	}
 
 	// 답변 속 [번호]로 실제 인용한 출처만 남김

@@ -44,11 +44,16 @@
 		       <!-- 결혼 이력 (지금은 미혼이어도 결혼했다가 이혼·사별했을 수 있음, 인생 기록 문장으로 셈) -->
 		       (SELECT COUNT(*) FROM LIFE_EVENT_LOG g WHERE g.LIFE_ID = l.LIFE_ID
 		           AND g.LOG_TEXT LIKE '%결혼식을 올렸%')                          AS weddingCount,
-		       (SELECT COUNT(*) FROM LIFE_EVENT_LOG g WHERE g.LIFE_ID = l.LIFE_ID
-		           AND (g.LOG_TEXT LIKE '%각자의 길을 가기로%' OR g.LOG_TEXT LIKE '%이혼했%'))  AS divorceCount,
-		       (SELECT COUNT(*) FROM LIFE_EVENT_LOG g WHERE g.LIFE_ID = l.LIFE_ID
-		           AND g.LOG_TEXT LIKE '%배우자를 먼저 떠나보내%')                  AS widowCount,
+		       <!-- 이혼 · 사별은 한 해에 줄이 여러 개여도 한 번으로 셈 (11/25: 부부 위기 끝에 '헤어졌다', 사별 이벤트 코드도 셈 - 사별했는데 0으로 나오던 것) -->
+		       (SELECT COUNT(DISTINCT g.AGE) FROM LIFE_EVENT_LOG g WHERE g.LIFE_ID = l.LIFE_ID
+		           AND g.LOG_TEXT NOT LIKE '%연인%'
+		           AND (g.LOG_TEXT LIKE '%각자의 길을 가기로%' OR g.LOG_TEXT LIKE '%이혼했%'
+		                OR (g.EVENT_ID LIKE 'LE_MARRIAGE_%' AND g.EVENT_ID NOT LIKE '%WIDOW%'
+		                    AND (g.LOG_TEXT LIKE '%헤어졌%' OR g.LOG_TEXT LIKE '%갈라섰%'))))  AS divorceCount,
+		       (SELECT COUNT(DISTINCT g.AGE) FROM LIFE_EVENT_LOG g WHERE g.LIFE_ID = l.LIFE_ID
+		           AND (g.LOG_TEXT LIKE '%배우자를 먼저 떠나보내%' OR g.EVENT_ID LIKE 'LE_MARRIAGE_WIDOW%'))  AS widowCount,
 		       l.CHILD_COUNT            AS childCount,
+		       NVL(l.ORIGIN_CLASS, l.WEALTH_CLASS) AS originClass,
 		       l.START_TYPE             AS startType,
 		       l.STATUS                 AS status,
 		       (SELECT m.POST_ID FROM MEMORIAL_POST m WHERE m.LIFE_ID = l.LIFE_ID) AS memorialPostId

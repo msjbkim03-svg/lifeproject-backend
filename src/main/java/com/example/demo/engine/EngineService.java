@@ -538,6 +538,16 @@ public class EngineService {
 	//   그 나라 물가 수준은 1인당 GDP로 계산 (toPpp(GDP) ÷ GDP) → 같은 달러라도 물가 싼 나라에선 더 큰돈
 	private static final double KRW = 850;
 
+	// C18 결과 화면: 세상을 떠난 해 · 사는 나라 기준 '한국 체감 원' 배율 (진행 화면과 같은 계산)
+	public double krwPerUsdOf(String countryCode, int birthYear, int age) {
+		LifeDTO g = new LifeDTO();
+		g.setBirthCountry(countryCode);
+		g.setCurrentCountry(countryCode);
+		g.setBirthYear(birthYear);
+		g.setCurrentAge(age);
+		return krwPerUsd(yearStat(g));
+	}
+
 	private double krwPerUsd(CountryStatDTO stat) {
 		double gdp = gdpOf(stat);
 		return toPpp(gdp) / gdp * KRW;
@@ -1027,7 +1037,8 @@ public class EngineService {
 			int k = wordI.merge(w, 1, Integer::sum);
 			sib.add((wordN.get(w) > 1 ? sibOrd(w, k) : w) + " " + x[1] + "세");
 		}
-		String sibText = sib.isEmpty() ? "없음" : sib.size() <= 7 ? String.join(" · ", sib) : sib.size() + "명";
+		// 8명 이상이면 손위부터 6명 + '외 n명' (예전엔 '8명'만 떠서 엔딩 크레딧이 형제자매를 못 그렸음, 11/25 점검)
+		String sibText = sib.isEmpty() ? "없음" : sib.size() <= 7 ? String.join(" · ", sib) : String.join(" · ", sib.subList(0, 6)) + " 외 " + (sib.size() - 6) + "명";
 		if (left > 0) {
 			sibText = sibText + " · " + (left == sib.size() ? "모두 집을 떠남" : left + "명은 집을 떠남");
 		}
