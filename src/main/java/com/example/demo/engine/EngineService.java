@@ -4686,7 +4686,7 @@ public class EngineService {
 				}
 				life.setPendingEvent(e);
 				life.setChoiceCosts(cs);
-				saveEventLog(life, life.getCurrentAge(), e.getEventId(), null, e.getLogText());
+				saveEventLog(life, life.getCurrentAge(), e.getEventId(), null, e.getLogText(), e.isAi());
 				continue;
 			}
 			applyEvent(life, e, life.getCurrentAge(), null);
@@ -5290,7 +5290,7 @@ public class EngineService {
 		engineDao.insertExperience(exp);
 
 		// 6. 인생 기록 문장 저장 (C03 기록 화면, C11 AI 서술 대상 표시)
-		saveEventLog(life, age, e.getEventId(), choiceId, e.getLogText());
+		saveEventLog(life, age, e.getEventId(), choiceId, e.getLogText(), e.isAi());
 	}
 
 	private static final java.util.regex.Pattern SERIOUS_W = java.util.regex.Pattern.compile("암|심장|뇌졸중|수술|중상|크게 다쳤|치매|큰 병");
@@ -5330,17 +5330,21 @@ public class EngineService {
 	}
 
 	// LIFE_EVENT_LOG 한 줄 저장
-	private void saveEventLog(LifeDTO life, int age, String eventId, Integer choiceId, String text) {
-		EventLogDTO log = new EventLogDTO();
-		log.setLifeId(life.getLifeId());
-		log.setAge(age);
-		log.setYearNo(life.getBirthYear() + age);
-		log.setEventId(eventId);
-		log.setChoiceId(choiceId);
-		log.setLogText(text);
-		engineDao.insertEventLog(log);
-	}
+		private void saveEventLog(LifeDTO life, int age, String eventId, Integer choiceId, String text) {
+			saveEventLog(life, age, eventId, choiceId, text, false);
+		}
 
+		private void saveEventLog(LifeDTO life, int age, String eventId, Integer choiceId, String text, boolean ai) {
+			EventLogDTO log = new EventLogDTO();
+			log.setLifeId(life.getLifeId());
+			log.setAge(age);
+			log.setYearNo(life.getBirthYear() + age);
+			log.setEventId(eventId);
+			log.setChoiceId(choiceId);
+			log.setLogText(text);
+			log.setIsAi(ai ? "Y" : "N");
+			engineDao.insertEventLog(log);
+		}
 	// ================= C09 선택 이벤트: 선택지 고르기 =================
 	// 선택 이벤트는 작년(나이+1 하기 전)에 일어났으므로 그 나이로 기록
 	@Transactional
