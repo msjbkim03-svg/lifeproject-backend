@@ -21,6 +21,8 @@ import com.example.demo.quest.QuestJudgeService;
 @Service
 public class EngineService {
 
+	private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(EngineService.class);
+
 	private final EngineDao engineDao;
 	private final EventService eventService; // C09·C10 이벤트 (장윤아님)
 	private final EventDAO eventDao; // 선택지 다시 불러오기용 (장윤아님, 읽기만)
@@ -385,9 +387,13 @@ public class EngineService {
 		}
 
 		// 0. 오래된 비회원 인생 정리 (C03): 종료 후 1일 또는 7일 미접속
-		//    1) 통계용 숫자만 옮기고 → 2) 삭제 (1이 실패하면 에러로 멈춰서 2는 실행 안 됨)
-		engineDao.moveOldGuestStats();
-		engineDao.deleteOldGuestLives();
+		//    통계용 숫자 옮기기 + 삭제를 한 블록에서 (실패하면 블록 전체가 취소됨)
+		//    정리는 덤이라서, 실패해도 출생은 막지 않음 (11/26 최종 점검: 예전엔 정리가 실패하면 새로 태어나기까지 실패했음)
+		try {
+			engineDao.cleanOldGuestLives();
+		} catch (RuntimeException e) {
+			log.warn("[C03] 오래된 비회원 인생 정리 실패 (출생은 계속): {}", e.getMessage());
+		}
 
 		// ① 출생 연도: 고른 연대 안에서 랜덤 (1940년대 ~ 현재, 현재 연도 이후 X)
 		int minYear = decade;
@@ -664,6 +670,7 @@ public class EngineService {
 	// 진행 화면에 함께 보내는 값 (fillRegion 끝에서)
 	private void fillView(LifeDTO life, CountryStatDTO stat) {
 		life.setKrwPerUsd(krwPerUsd(stat));
+		life.setSurvival(cohortSurvival(life)); // 생존 곡선 · 또래 생존율 (기록 줄과 같은 값)
 		// 직업 이름: DB(LIFE)에는 JOB_ID 만 있어서, 다시 읽은 인생(1년 진행·이어하기)에는 이름이 비어 화면에 '일하는 중'만 떴음 → 직업 목록에서 채움
 		if (life.getJobId() != null && life.getJobName() == null) {
 			for (JobDTO j : jobs()) {
@@ -1127,8 +1134,8 @@ public class EngineService {
 				String sx = fr.nextDouble() < 0.75 ? life.getGender() : ("M".equals(life.getGender()) ? "F" : "M");
 				String nm = pickName(life.getBirthCountry(), sx, fr);
 				int dieAt = (int) Math.round(clamp(78 + fr.nextGaussian() * 9, 55, 102));
-				if (nm == null) {
-					continue;
+				if (nm == null || nm.equals(life.getName())) {
+					continue; // 내 이름과 같은 친구는 빼기 (11/26 점검: 친구 칸에 내 이름이 나왔음)
 				}
 				// 성이 없는 나라는 첫 낱말(이름)만, 그런데 그게 한 글자이거나 이미 있는 이름이면 전체 이름
 				//   (11/23 동현님: 미얀마 같은 나라에서 '예, 예, 예'처럼 첫 낱말만 겹쳐 나왔음)
@@ -1388,7 +1395,12 @@ public class EngineService {
 			cond.put("age", age);
 			cond.put("memberId", life.getMemberId());
 			cond.put("guestToken", life.getMemberId() == null ? life.getGuestToken() : null);
+			java.util.Set<String> seen = new java.util.HashSet<>();
 			for (LiveLifeDTO r : engineDao.selectRealPeers(cond)) {
+				// 이름 · 나라 · 태어난 해가 같은 사람이 둘 나오지 않게 (11/26 점검: 이름 목록이 짧은 나라에서 같은 사람이 두 번 보였음)
+				if (out.size() >= 4 || !seen.add(r.getName() + "|" + r.getCountryCode() + "|" + r.getBirthYear())) {
+					continue;
+				}
 				PeerDTO d = new PeerDTO();
 				d.setReal(true);
 				d.setName(r.getName());
@@ -2328,31 +2340,55 @@ public class EngineService {
 
 	// 몇 살 고비마다: 같은 해 같은 나라에서 태어난 또래 중 지금도 살아 있는 비율 (원작 생명표로 계산)
 	private static final java.util.Set<Integer> SURVIVAL_AGES = java.util.Set.of(1, 5, 15, 30, 45, 60, 75, 90);
-	private static final java.util.Map<Integer, Long> SURVIVAL_SHOWN = new java.util.concurrent.ConcurrentHashMap<>();
+
+	// 같은 해 태어난 나라에서 태어난 또래의 생존율 s[나이] (s[0] = 1) - 0~110세 (11/26 점검)
+	//   나이마다 '그해' 그 나라 통계의 생명표로 한 해씩 곱함 (실제 한 세대가 겪는 대로, 의료가 좋아지면 뒤로 갈수록 덜 줄어듦)
+	//   진행 화면 생존 곡선 · 머리줄 '또래 약 n%' · 기록 줄 '15세. … 약 n%'가 모두 이 값을 써서 서로 어긋나지 않음
+	//   (예전엔 화면 곡선은 태어난 해 통계 근사, 기록 줄은 그해 통계라 '15세 88% → 25세 89%'처럼 어긋났음)
+	private final Map<String, double[]> survivalCache = new ConcurrentHashMap<>();
+
+	private double[] cohortSurvival(LifeDTO life) {
+		String key = life.getBirthCountry() + "_" + life.getGender() + "_" + life.getBirthYear();
+		double[] cached = survivalCache.get(key);
+		if (cached != null) {
+			return cached;
+		}
+		LifeDTO g = new LifeDTO();
+		g.setBirthCountry(life.getBirthCountry());
+		g.setCurrentCountry(life.getBirthCountry());
+		g.setBirthYear(life.getBirthYear());
+		double[] s = new double[112];
+		s[0] = 1;
+		for (int a = 0; a <= 110; a++) {
+			g.setCurrentAge(a);
+			CountryStatDTO st = yearStat(g);
+			double q = st == null ? baseDeathProb(life.getBirthCountry(), null, null, null, life.getGender(), a)
+					: baseDeathProb(life.getBirthCountry(), st.getLifeExpectancy(), st.getInfantMortality(), st.getU5Mortality(), life.getGender(), a);
+			s[a + 1] = Math.round(s[a] * (1 - q) * 1e6) / 1e6;
+		}
+		if (survivalCache.size() > 2000) {
+			survivalCache.clear(); // 서버 메모리 보호
+		}
+		survivalCache.put(key, s);
+		return s;
+	}
 
 	private String survivalLine(LifeDTO life, CountryStatDTO stat, int age) {
-		if (stat == null || !SURVIVAL_AGES.contains(age)) {
+		if (!SURVIVAL_AGES.contains(age)) {
 			return null;
 		}
-		double alive = 1;
-		for (int a = 0; a < age; a++) {
-			alive = alive * (1 - baseDeathProb(life.getCurrentCountry(), stat.getLifeExpectancy(),
-					stat.getInfantMortality(), stat.getU5Mortality(), life.getGender(), a));
+		double alive = cohortSurvival(life)[age];
+		CountryStatDTO born = null;
+		for (CountryStatDTO c : birthList(life.getBirthYear() / 10 * 10)) {
+			if (c.getCountryCode().equals(life.getBirthCountry())) {
+				born = c;
+			}
 		}
-		String country = stat.getNameKo() != null ? stat.getNameKo() : life.getCurrentCountry();
+		String country = born != null && born.getNameKo() != null ? born.getNameKo()
+				: stat != null && stat.getNameKo() != null && life.getBirthCountry().equals(life.getCurrentCountry()) ? stat.getNameKo() : life.getBirthCountry();
 		// 어른이 되면 '남자아이'가 아니라 '남자' (11/25: 75세에 '같은 해 태어난 남자아이 가운데')
 		String kid = "M".equals(life.getGender()) ? (age < 15 ? "남자아이" : "남자") : (age < 15 ? "여자아이" : "여자");
 		long pct = Math.round(alive * 100);
-		// 그해 나라 통계로 다시 계산해서, 의료가 좋아진 나라는 '5세 79% → 15세 82%'처럼 거꾸로 늘어났음 (11/25)
-		//   → 앞서 보여 준 비율보다 크지 않게 (인생마다 마지막으로 보여 준 값)
-		Long prev = SURVIVAL_SHOWN.get(life.getLifeId());
-		if (prev != null && pct > prev) {
-			pct = prev;
-		}
-		SURVIVAL_SHOWN.put(life.getLifeId(), pct);
-		if (SURVIVAL_SHOWN.size() > 5000) {
-			SURVIVAL_SHOWN.clear(); // 서버 메모리 보호
-		}
 		if (pct >= 100) {
 			return age + "세. 같은 해 " + country + "에서 태어난 " + kid + "는 거의 모두 아직 살아 있다.";
 		}
@@ -3012,6 +3048,8 @@ public class EngineService {
 			life.setFocusOptions(focusOptions(newStage, life));
 		}
 		engineDao.updateLifeYear(life);
+		// 올해 연도 기록(이미 저장된 이 나이 줄)에도 직업을 적음 (11/26 점검: 18세에 일을 시작했는데 결과 화면엔 '미용사 20~46세'로 나왔음)
+		engineDao.updateYearLogJob(life);
 		life.setJobName(job.getJobName());
 		// 인생 기록: 고른 직업 (선택 이벤트처럼 방금 지나간 해에 기록)
 		String note = job.getJobName() + " 일을 시작했다.";
@@ -6981,7 +7019,7 @@ public class EngineService {
 		e.setEventType("SMALL");
 		e.setTitle(d.title);
 		e.setChoice(true);
-		e.setLogText(d.bodies[random.nextInt(d.bodies.length)]);
+		e.setLogText(EngineStory.parentWord(life, d.bodies[random.nextInt(d.bodies.length)]));
 		if (d.key.startsWith("SVC_")) {
 			e.setLogText(svcBody(life, d.key));
 		}
@@ -7027,7 +7065,7 @@ public class EngineService {
 			c.setChoiceId(EngineChoice.choiceId(decIdx, i));
 			c.setEventId(e.getEventId());
 			c.setChoiceOrder(cs.size() + 1);
-			c.setChoiceText(pays && o.cost > 0 ? costLabel(o.label, won(life, optPay(life, o.cost))) : o.label);
+			c.setChoiceText(EngineStory.parentWord(life, pays && o.cost > 0 ? costLabel(o.label, won(life, optPay(life, o.cost))) : o.label));
 			c.setEffHealth(o.hl);
 			c.setEffHappiness(o.h);
 			c.setEffKnowledge(o.kn);
@@ -7466,6 +7504,7 @@ public class EngineService {
 				life.setJobYears(0);
 				life.setJobName(j.getJobName());
 				addExperience(life, j.getJobId());
+				engineDao.updateYearLogJob(life); // 이미 저장된 올해 연도 기록에도 새 일 (11/26 최종 점검: 41세에 옮겼는데 요약엔 43세부터)
 				text = text + " " + j.getJobName() + " 일을 시작했다.";
 			}
 		} else if ("JOBCHANGE_SAME".equals(o.act) && life.getIncomeRate() != null) {
@@ -7701,6 +7740,7 @@ public class EngineService {
 		}
 		markEngineDone(s, d, age);
 		fixStats(life);
+		text = EngineStory.parentWord(life, text); // 한 분만 계시면 '부모님' → '어머니'·'아버지'
 		if (!logged) {
 			saveEventLog(life, age, null, null, text + paidNote);
 		}

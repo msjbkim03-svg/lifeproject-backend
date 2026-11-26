@@ -377,7 +377,26 @@ final class EngineStory {
 	private static String textOf(Line line, LifeDTO life, int used, int age, Random rnd) {
 		String[] v = line.text.split(" \\| ");
 		String t = v[Math.floorMod(used + life.getLifeId(), v.length)];
-		return t.replace("{명절}", holiday(life.getCurrentCountry(), rnd)).replace("{나이}", String.valueOf(age));
+		return parentWord(life, t.replace("{명절}", holiday(life.getCurrentCountry(), rnd)).replace("{나이}", String.valueOf(age)));
+	}
+
+	// 한 분만 살아 계시면 '부모님' → '어머니'·'아버지' (11/26 최종 점검: 아버지가 떠나신 뒤에도 '월급날 부모님께 용돈을 드렸다')
+	//   두 분 다 계시거나 다 떠나셨으면 그대로, 남의 부모님('지인의 부모님')은 바꾸지 않음
+	static String parentWord(LifeDTO l, String s) {
+		if (s == null || !s.contains("부모님") || l.getOwns() == null) {
+			return s;
+		}
+		boolean mGone = l.getOwns().contains("PAR-M-");
+		boolean fGone = l.getOwns().contains("PAR-F-");
+		if (mGone == fGone) {
+			return s;
+		}
+		String who = mGone ? "아버지" : "어머니";
+		String keep = "@@KEEP@@";
+		return s.replace("지인의 부모님", keep)
+				.replace("부모님이 ", who + "가 ").replace("부모님은 ", who + "는 ").replace("부모님을 ", who + "를 ")
+				.replace("부모님과 ", who + "와 ").replace("부모님께서 ", who + "께서 ").replace("부모님", who)
+				.replace(keep, "지인의 부모님");
 	}
 
 	// 인생마다 최근에 쓴 문장 (같은 문장이 해마다 반복되지 않게, 서버 메모리)

@@ -69,7 +69,6 @@ public class EngineController {
 		return ResponseEntity.ok(life);
 	}
 
-	// C03 이어하기: 진행 중인 인생 불러오기  GET /api/engine/current?guestToken=...
 	// 메인 실시간 목록 (실제 플레이어)  GET /api/engine/live
 	//   { born: [방금 시작된 인생 10개], died: [방금 끝난 인생 10개] } - 로그인 없이, 게임 속 인물 정보만
 	@GetMapping("/api/engine/live")
@@ -89,6 +88,7 @@ public class EngineController {
 		return ResponseEntity.ok("삶을 마감했어요.");
 	}
 
+	// C03 이어하기: 진행 중인 인생 불러오기  GET /api/engine/current?guestToken=...
 	@GetMapping("/api/engine/current")
 	public ResponseEntity<?> current(@RequestParam(required = false) String guestToken,
 			@RequestHeader(value = "Authorization", required = false) String auth) {

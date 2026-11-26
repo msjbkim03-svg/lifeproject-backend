@@ -17,8 +17,7 @@ public interface EngineDao {
 	int selectNextLifeId();
 	int abandonGuestLife(String guestToken);
 	int abandonMemberLife(int memberId);
-	int moveOldGuestStats();
-	int deleteOldGuestLives();
+	int cleanOldGuestLives(); // 오래된 비회원 인생: 통계 옮기기 + 딸린 기록·인생 삭제 (한 블록)
 	int insertLife(LifeDTO life);
 
 	// C03 1년 진행
@@ -26,6 +25,7 @@ public interface EngineDao {
 	LifeDTO selectPlayingLife(LifeDTO cond);
 	int updateLifeYear(LifeDTO life);
 	int insertYearLog(LifeDTO life);
+	int updateYearLogJob(LifeDTO life); // 직업을 고른 해: 이미 저장된 그 나이 연도 기록에 직업 적기
 
 	// C07 사망 판정
 	CountryStatDTO selectYearStat(LifeDTO life);
