@@ -35,6 +35,7 @@ public class WebConfig implements WebMvcConfigurer {
 				// 로그인 없이 써야 하는 주소는 빼기
 				.excludePathPatterns("/api/members", // 회원가입
 						"/api/members/login", // 로그인
+						"/api/members/google/**", // 구글 소셜 로그인·가입
 						"/api/members/check*", // 아이디·닉네임·이메일 중복 확인
 						"/api/members/find/**"); // 아이디·비번 찾기
 
@@ -45,6 +46,7 @@ public class WebConfig implements WebMvcConfigurer {
 				// → 탈퇴한 토큰이 브라우저에 남아 있어도 다시 로그인·가입할 수 있게
 				.excludePathPatterns("/api/members", // 회원가입
 						"/api/members/login", // 로그인
+						"/api/members/google/**", // 구글 소셜 로그인·가입
 						"/api/members/check*", // 중복 확인
 						"/api/members/find/**"); // 아이디·비번 찾기
 

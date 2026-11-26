@@ -94,6 +94,83 @@ public class MemberController {
 				"guestPending", guestPending));
 	}
 
+	// 구글 소셜 로그인 1단계: 구글 토큰으로 기존 회원 확인 (M02)  POST /api/members/google/login
+	// - 이미 가입된 이메일이면 바로 JWT 토큰 발급 (needJoin: false)
+	// - 처음 온 구글 계정이면 추가 정보(닉네임·전화번호·약관동의) 입력 요청 (needJoin: true)
+	@PostMapping("/google/login")
+	public ResponseEntity<Map<String, Object>> googleLogin(@RequestBody Map<String, String> body) {
+		String credential = body.get("credential");
+		String guestToken = body.get("guestToken");
+
+		Map<String, Object> gInfo = service.verifyGoogleToken(credential);
+		if (gInfo == null) {
+			return ResponseEntity.status(401)
+					.body(Map.of("message", "구글 인증에 실패했어요. 다시 시도해 주세요."));
+		}
+
+		String email = (String) gInfo.get("email");
+		MemberDTO member = service.findActiveByEmail(email);
+
+		// 아직 가입되지 않은 구글 이메일 → 추가 정보(닉네임·전화번호·동의) 입력 화면으로
+		if (member == null) {
+			if (!service.isEmailAvailable(email)) {
+				return ResponseEntity.status(409)
+						.body(Map.of("message", "사용할 수 없는 이메일이에요."));
+			}
+			return ResponseEntity.ok(Map.of(
+					"needJoin", true,
+					"email", email,
+					"suggestedNickname", gInfo.getOrDefault("suggestedNickname", "")));
+		}
+
+		// 이미 가입된 회원 → 일반 로그인과 동일하게 비회원 인생 전환 + JWT 발급
+		boolean converted = service.convertGuestLife(member.getMemberId(), guestToken);
+		String token = jwtUtil.createToken(String.valueOf(member.getMemberId()), member.getMemberRole(),
+				JwtUtil.passwordVersion(member.getPassword()));
+		boolean guestPending = !converted && service.hasGuestLife(guestToken);
+
+		return ResponseEntity.ok(Map.of(
+				"needJoin", false,
+				"token", token,
+				"nickname", member.getNickname(),
+				"memberRole", member.getMemberRole(),
+				"guestConverted", converted,
+				"guestPending", guestPending));
+	}
+
+	// 구글 소셜 로그인 2단계: 신규 구글 회원 추가 정보(닉네임·전화번호·동의) 입력 후 가입 + 즉시 로그인
+	// POST /api/members/google/join
+	@PostMapping("/google/join")
+	public ResponseEntity<Map<String, Object>> googleJoin(@RequestBody Map<String, String> body) {
+		try {
+			String credential = body.get("credential");
+			String nickname = body.get("nickname");
+			String phone = body.get("phone");
+			String privacyAgreed = body.get("privacyAgreed");
+			String guestToken = body.get("guestToken");
+
+			Map<String, Object> result = service.googleJoin(credential, nickname, phone, privacyAgreed);
+			if (result.containsKey("error")) {
+				return ResponseEntity.badRequest().body(Map.of("message", result.get("error")));
+			}
+
+			MemberDTO member = (MemberDTO) result.get("member");
+			boolean converted = service.convertGuestLife(member.getMemberId(), guestToken);
+			String token = jwtUtil.createToken(String.valueOf(member.getMemberId()), member.getMemberRole(),
+					JwtUtil.passwordVersion(member.getPassword()));
+			boolean guestPending = !converted && service.hasGuestLife(guestToken);
+
+			return ResponseEntity.ok(Map.of(
+					"token", token,
+					"nickname", member.getNickname(),
+					"memberRole", member.getMemberRole(),
+					"guestConverted", converted,
+					"guestPending", guestPending));
+		} catch (DuplicateKeyException e) {
+			return ResponseEntity.status(409).body(Map.of("message", "이미 사용 중인 닉네임 또는 이메일이에요."));
+		}
+	}
+
 	// 로그인 뒤 "비회원 인생 이어가기" (M02)  POST /api/members/me/takeGuestLife  { guestToken }
 	// 회원이 하던 인생은 포기하고 비회원 인생을 회원 인생으로 옮김
 	@PostMapping("/me/takeGuestLife")

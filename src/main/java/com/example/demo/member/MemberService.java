@@ -37,7 +37,11 @@ public class MemberService {
 	@Value("${recaptcha.secret:}")
 	private String recaptchaSecret;
 
-	private RestClient restClient = RestClient.create(); // 구글(reCAPTCHA)에 요청 보내는 도구
+	// 구글 OAuth 클라이언트 ID
+	@Value("${google.client.id:1060054612101-00gbenedhdoubrsnk69e4guoblbpdovc.apps.googleusercontent.com}")
+	private String googleClientId;
+
+	private RestClient restClient = RestClient.create(); // 구글(reCAPTCHA·OAuth)에 요청 보내는 도구
 
 	public MemberService(MemberDAO dao, ChatDAO chatDAO, JavaMailSender mailSender,
 			@Value("${spring.mail.username}") String mailFrom) {
@@ -187,6 +191,113 @@ public class MemberService {
 		return member;
 	}
 
+	// ===== 구글 소셜 로그인 · 가입 (M01, M02) =====
+
+	// 이메일로 활성 회원 찾기 (구글 로그인 시 기존 회원 여부 확인)
+	public MemberDTO findActiveByEmail(String email) {
+		if (email == null || email.isBlank()) return null;
+		return dao.selectActiveByEmail(cleanEmail(email));
+	}
+
+	// 구글 ID 토큰(credential)을 구글 서버에 보내서 진짜인지 검증하고 이메일·고유번호·추천 닉네임 꺼내기
+	public Map<String, Object> verifyGoogleToken(String credential) {
+		if (credential == null || credential.isBlank()) return null;
+		try {
+			Map<?, ?> res = restClient.get()
+					.uri("https://oauth2.googleapis.com/tokeninfo?id_token={token}", credential)
+					.retrieve()
+					.body(Map.class);
+			if (res == null) return null;
+
+			// 우리 프로젝트의 클라이언트 ID로 발급된 토큰인지 확인
+			String aud = String.valueOf(res.get("aud"));
+			if (!googleClientId.equals(aud)) return null;
+
+			// 이메일 인증이 완료된 구글 계정인지 확인
+			String emailVerified = String.valueOf(res.get("email_verified"));
+			if (!"true".equalsIgnoreCase(emailVerified)) return null;
+
+			String email = cleanEmail((String) res.get("email"));
+			String sub = String.valueOf(res.get("sub"));
+			String name = res.get("name") != null ? String.valueOf(res.get("name")).replaceAll("\\s+", "") : "";
+			if (name.length() > 10) {
+				name = name.substring(0, 10);
+			}
+			// 추천 닉네임에 금칙어가 들어있거나 2자 미만이면 빈칸으로
+			if (name.length() < 2 || hasBannedWord(name)) {
+				name = "";
+			}
+
+			return Map.of(
+					"email", email,
+					"sub", sub,
+					"suggestedNickname", name);
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
+	// 구글 신규 회원 추가 정보(닉네임·전화번호·개인정보 동의) 검증 후 회원 등록
+	@Transactional
+	public Map<String, Object> googleJoin(String credential, String nickname, String phoneInput, String privacyAgreed) {
+		Map<String, Object> gInfo = verifyGoogleToken(credential);
+		if (gInfo == null) {
+			return Map.of("error", "구글 인증이 만료되었거나 올바르지 않아요. 다시 시도해 주세요.");
+		}
+
+		String email = (String) gInfo.get("email");
+		String sub = (String) gInfo.get("sub");
+		String cleanNick = nickname == null ? "" : nickname.trim();
+
+		// 1. 닉네임·전화번호·약관동의 검사 (일반 회원가입과 동일한 기준)
+		if (cleanNick.length() < 2 || cleanNick.length() > 10) {
+			return Map.of("error", "닉네임은 2~10자로 입력해 주세요.");
+		}
+		if (hasBannedWord(cleanNick)) {
+			return Map.of("error", "닉네임에 쓸 수 없는 말이 들어 있어요.");
+		}
+		if (!isNicknameAvailable(cleanNick)) {
+			return Map.of("error", "이미 사용 중인 닉네임이에요.");
+		}
+		String phone = phoneInput == null ? "" : phoneInput.replaceAll("[^0-9]", "");
+		if (!phone.matches("^01[0-9]{8,9}$")) {
+			return Map.of("error", "전화번호를 올바르게 입력해 주세요. (예: 010-1234-5678)");
+		}
+		if (!"Y".equals(privacyAgreed)) {
+			return Map.of("error", "개인정보 수집·이용에 동의해 주세요.");
+		}
+		if (!isEmailAvailable(email)) {
+			return Map.of("error", "이미 가입된 이메일이에요.");
+		}
+
+		// 2. 구글 고유 ID(sub)로 중복 없는 로그인 아이디 생성 (g_ + 최대 18자리)
+		String baseSub = sub.replaceAll("[^0-9a-zA-Z]", "");
+		if (baseSub.length() > 18) baseSub = baseSub.substring(0, 18);
+		String loginId = "g_" + baseSub;
+		int suffix = 1;
+		while (!isLoginIdAvailable(loginId)) {
+			loginId = "g_" + baseSub.substring(0, Math.min(15, baseSub.length())) + "_" + suffix++;
+		}
+
+		// 3. 비밀번호는 랜덤 암호화 값으로 설정 (일반 아이디/비밀번호 로그인 차단)
+		String randomPw = encoder.encode(java.util.UUID.randomUUID().toString());
+
+		MemberDTO dto = new MemberDTO();
+		dto.setLoginId(loginId);
+		dto.setPassword(randomPw);
+		dto.setNickname(cleanNick);
+		dto.setEmail(email);
+		dto.setPhone(phone);
+		dto.setPrivacyAgreed("Y");
+
+		// 4. 회원 저장 + 기본 특성 4종(Lv.1) 저장
+		dao.insertMember(dto);
+		dao.insertDefaultTraits(dto.getMemberId());
+
+		MemberDTO created = dao.selectByLoginId(loginId);
+		return Map.of("member", created);
+	}
+
 	// ===== 비회원 인생 → 회원 인생 전환 (M02) =====
 	// 전환했으면 true, 안 했으면 false
 	public boolean convertGuestLife(int memberId, String guestToken) {
@@ -235,9 +346,17 @@ public class MemberService {
 		MemberDTO me = dao.selectById(memberId);
 		if (me == null || "WITHDRAWN".equals(me.getStatus())) return "회원 정보를 찾을 수 없어요.";
 
-		// 2. 현재 비밀번호 확인 (BCrypt 비교)
-		if (dto.getCurrentPassword() == null || !encoder.matches(dto.getCurrentPassword(), me.getPassword())) {
-			return "현재 비밀번호가 맞지 않아요.";
+		boolean isGoogle = me.getLoginId() != null && me.getLoginId().startsWith("g_");
+
+		// 2. 현재 비밀번호 확인 (구글 소셜 로그인 계정은 비밀번호가 없으므로 건너뜀)
+		if (!isGoogle) {
+			if (dto.getCurrentPassword() == null || !encoder.matches(dto.getCurrentPassword(), me.getPassword())) {
+				return "현재 비밀번호가 맞지 않아요.";
+			}
+		} else {
+			// 구글 연동 계정은 구글 이메일을 그대로 유지하고 비밀번호 변경은 하지 않음
+			dto.setEmail(cleanEmail(me.getEmail()));
+			dto.setNewPassword(null);
 		}
 
 		// 3. 닉네임·이메일 형식 검사 (회원가입과 같은 규칙)
@@ -295,7 +414,8 @@ public class MemberService {
 	public boolean withdraw(int memberId, String password) {
 		MemberDTO me = dao.selectById(memberId);
 		if (me == null || "WITHDRAWN".equals(me.getStatus())) return false;
-		if (password == null || !encoder.matches(password, me.getPassword())) return false;
+		boolean isGoogle = me.getLoginId() != null && me.getLoginId().startsWith("g_");
+		if (!isGoogle && (password == null || !encoder.matches(password, me.getPassword()))) return false;
 
 		if (dao.updateWithdrawn(memberId) == 0) return false;
 		// 하던 인생이 '진행 중'으로 영원히 남지 않게 포기 처리 (끝난 인생 · 추모관은 그대로)
