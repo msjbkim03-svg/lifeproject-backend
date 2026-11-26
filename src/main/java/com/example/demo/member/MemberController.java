@@ -52,8 +52,13 @@ public class MemberController {
 
 	// 닉네임 중복 확인  GET /api/members/checkNickname?nickname=홍길동
 	@GetMapping("/checkNickname")
-	public Map<String, Boolean> checkNickname(@RequestParam String nickname) {
-		return Map.of("available", service.isNicknameAvailable(nickname));
+	public Map<String, Object> checkNickname(@RequestParam String nickname) {
+		if (service.isNicknameBanned(nickname)) {
+			return Map.of("available", false, "message", "닉네임에 쓸 수 없는 말이 들어 있어요.");
+		}
+		boolean ok = service.isNicknameAvailable(nickname);
+		return ok ? Map.of("available", true)
+				: Map.of("available", false, "message", "이미 사용 중인 닉네임이에요.");
 	}
 
 	// 이메일 중복 확인  GET /api/members/checkEmail?email=a@b.com

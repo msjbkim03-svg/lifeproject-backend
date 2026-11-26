@@ -36,7 +36,7 @@ public class CostumeService {
 
 	private long priceOf(CostumeLifeDTO life, CostumeDTO c) {
 		double gdp = life.getGdpPerCapita() == null ? DEFAULT_GDP : life.getGdpPerCapita();
-		return Math.round(gdp * c.getPriceRate() / 100);
+		return Math.max(1L, Math.round(gdp * c.getPriceRate() / 100));
 	}
 
 	// 목록 { assets, wear: {hair, top, hat}, items }  (wear 는 Village costume 에 그대로 넘기면 됨)

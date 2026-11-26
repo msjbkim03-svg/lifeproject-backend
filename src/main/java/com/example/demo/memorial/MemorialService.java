@@ -41,10 +41,11 @@ public class MemorialService {
 		this.chatDAO = chatDAO;
 	}
 
-	public Map<String, Object> list(int page) {
+	public Map<String, Object> list(int page, String sort) {
 		if (page < 1) page = 1;
+		if (!"tribute".equals(sort)) sort = "recent";
 		int start = (page - 1) * PAGE_SIZE;
-		List<MemorialCardDTO> list = dao.selectCards(start, start + PAGE_SIZE);
+		List<MemorialCardDTO> list = dao.selectCards(start, start + PAGE_SIZE, sort);
 		return Map.of("total", dao.countCards(), "size", PAGE_SIZE, "list", list);
 	}
 
@@ -68,7 +69,10 @@ public class MemorialService {
 
 		List<MemorialCommentDTO> comments = new ArrayList<>();
 		if (opened) {
-			if (view) dao.plusViewCount(room.getPostId());
+			if (view) {
+				dao.plusViewCount(room.getPostId());
+				room.setViewCount(room.getViewCount() + 1);
+			}
 			comments = dao.selectComments(room.getPostId());
 			for (MemorialCommentDTO c : comments) {
 				c.setMine(memberId != null && memberId == c.getMemberId());
@@ -140,7 +144,24 @@ public class MemorialService {
 	}
 
 	public int tributeCount(int lifeId) {
-		return dao.selectRoom(lifeId).getTributeCount();
+		MemorialRoomDTO room = dao.selectRoom(lifeId);
+		return room == null ? 0 : room.getTributeCount();
+	}
+
+	// 본인 추모관 글 삭제 (달린 방명록 댓글·촛불 기록도 함께 삭제)
+	@Transactional
+	public String closeRoom(int lifeId, int memberId) {
+		MemorialRoomDTO room = dao.selectRoom(lifeId);
+		if (room == null || room.getOwnerId() == null || room.getOwnerId() != memberId) {
+			return "내가 연 추모관만 닫을 수 있어요.";
+		}
+		if (room.getPostId() == null) {
+			return "열려 있는 추모관이 아니에요.";
+		}
+		dao.deleteCommentsByPost(room.getPostId());
+		dao.deleteTributesByPost(room.getPostId());
+		dao.deletePost(room.getPostId(), memberId);
+		return null;
 	}
 
 	public String comment(int lifeId, int memberId, String content) {
