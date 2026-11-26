@@ -11,6 +11,8 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.messaging.simp.annotation.SendToUser;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
@@ -63,6 +65,24 @@ public class ChatController {
 		ChatPlayerDTO me = service.move(sessionId, countryCode, dto);
 		if (me != null) {
 			template.convertAndSend("/topic/chat/" + countryCode + "/move", me);
+		}
+	}
+
+	// 인게임 나가기·화면 이동·로그아웃·브라우저 종료 시 캐릭터 즉시 접속 해제 (STOMP)
+	@MessageMapping("/chat/{countryCode}/leave")
+	public void leaveRoom(@Header("simpSessionId") String sessionId) {
+		String countryCode = service.leave(sessionId);
+		if (countryCode != null) {
+			sendPlayers(countryCode);
+		}
+	}
+
+	// 브라우저 닫기·새로고침·로그아웃 시 sendBeacon 으로 캐릭터 즉시 접속 해제 (HTTP)
+	@PostMapping("/{countryCode}/leave")
+	public void leaveBeacon(@PathVariable String countryCode, @RequestBody(required = false) ChatPlayerDTO dto) {
+		if (dto == null || dto.getClientId() == null || dto.getClientId().isEmpty()) return;
+		for (String code : service.leaveByClientId(dto.getClientId())) {
+			sendPlayers(code);
 		}
 	}
 

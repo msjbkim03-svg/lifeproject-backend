@@ -20,12 +20,10 @@ import com.example.demo.member.MemberDTO;
 public class ChatService {
 	
 	private static final int MAX_TEXT = 50; // 말풍선이라 짧게 (입력칸 maxLength 50 과 같게)
-	private static final long WAIT_MS = 3000;
 	
 	private ChatDAO dao;
 	private JwtUtil jwt;
 	private MemberDAO memberDAO;
-	private Map<Integer,Long> lastTime = new ConcurrentHashMap<>();
 	private Map<String, ChatPlayerDTO> players = new ConcurrentHashMap<>();
 	
 	public ChatService(ChatDAO dao,JwtUtil jwt, MemberDAO memberDAO) {
@@ -88,18 +86,12 @@ public class ChatService {
 		if(content.isEmpty()) return "한마디를 적어 주세요.";
 		if(content.length() > MAX_TEXT) return "50자까지 쓸 수 있어요.";
 		
-		long now = System.currentTimeMillis();
-		Long last = lastTime.get(memberId);
-		if(last != null && now - last < WAIT_MS) return "3초 뒤에 다시 말할 수 있어요.";
-		
 		// 금칙어: 띄어쓰기·대소문자를 빼고 비교 ("바 보", "AD" 도 걸림)
 		String plain = content.replaceAll("\\s", "").toLowerCase();
 		for(String word : dao.selectBannedWords()) {
 			String w = word.replaceAll("\\s", "").toLowerCase();
 			if (!w.isEmpty() && plain.contains(w)) return "쓸 수 없는 말이 들어 있어요.";
 		}
-		
-		lastTime.put(memberId, now);
 		
 		dto.setCountryCode(countryCode);
 		dto.setMemberId(memberId);
@@ -123,6 +115,8 @@ public class ChatService {
 		if (samePerson && countryCode.equals(old.getCountryCode())) {
 			old.setAge(fixAge(dto.getAge()));
 			old.setGender(fixGender(dto.getGender()));
+			old.setCostume(dto.getCostume());
+			if (dto.getClientId() != null) old.setClientId(dto.getClientId());
 			setPosition(old, dto);
 			return Set.of(countryCode);
 		}
@@ -196,8 +190,8 @@ public class ChatService {
 	// 이 나라 채팅방을 들을 수 있는지 (지금 그 나라에서 살고 있는 회원·비회원만)
 	public boolean canListen(String countryCode, String token, String guestToken) {
 		Integer memberId = activeMemberId(token);
-		if (memberId != null) {
-			return dao.countMemberLife(memberId, countryCode) > 0;
+		if (memberId != null && dao.countMemberLife(memberId, countryCode) > 0) {
+			return true;
 		}
 		return guestToken != null && dao.countGuestLife(guestToken, countryCode) > 0;
 	}
@@ -212,6 +206,21 @@ public class ChatService {
 	public String leave(String sessionId) {
 		ChatPlayerDTO old = players.remove(sessionId);
 		return old == null ? null : old.getCountryCode();
+	}
+
+	// 브라우저 종료·로그아웃 beacon 요청 시 해당 연결(clientId)만 정확히 접속 해제
+	public Set<String> leaveByClientId(String clientId) {
+		Set<String> countries = new HashSet<>();
+		players.entrySet().removeIf(e -> {
+			if (clientId.equals(e.getValue().getClientId())) {
+				if (e.getValue().getCountryCode() != null) {
+					countries.add(e.getValue().getCountryCode());
+				}
+				return true;
+			}
+			return false;
+		});
+		return countries;
 	}
 
 	public List<ChatPlayerDTO> players(String countryCode) {

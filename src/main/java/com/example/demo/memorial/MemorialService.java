@@ -9,6 +9,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.demo.chat.ChatDAO;
 import com.example.demo.costume.CostumeLifeDTO;
 import com.example.demo.costume.CostumeService;
 import com.example.demo.engine.EngineService;
@@ -29,13 +30,15 @@ public class MemorialService {
 	private EngineService engineService;   // 엔딩 영상 재료 (C22, 동현님 것을 불러 쓰기만)
 	private ResultService resultService;   // 인생 결과 (C18, 신영님 것을 불러 쓰기만)
 	private CostumeService costumeService; // 그 생에 입은 옷 (C21)
+	private ChatDAO chatDAO;               // 금칙어 목록 (BANNED_WORD, 채팅과 추모관 방명록이 같이 씀)
 
 	public MemorialService(MemorialDAO dao, EngineService engineService, ResultService resultService,
-			CostumeService costumeService) {
+			CostumeService costumeService, ChatDAO chatDAO) {
 		this.dao = dao;
 		this.engineService = engineService;
 		this.resultService = resultService;
 		this.costumeService = costumeService;
+		this.chatDAO = chatDAO;
 	}
 
 	public Map<String, Object> list(int page) {
@@ -158,6 +161,12 @@ public class MemorialService {
 	private String checkText(String text) {
 		if (text == null || text.trim().isEmpty()) return "한마디를 적어 주세요.";
 		if (text.trim().length() > MAX_TEXT) return "100자까지 쓸 수 있어요.";
+		// 금칙어 검사: 띄어쓰기·대소문자를 빼고 비교 (마을 채팅과 같은 기준)
+		String plain = text.replaceAll("\\s", "").toLowerCase();
+		for (String word : chatDAO.selectBannedWords()) {
+			String w = word.replaceAll("\\s", "").toLowerCase();
+			if (!w.isEmpty() && plain.contains(w)) return "쓸 수 없는 말이 들어 있어요.";
+		}
 		return null;
 	}
 
