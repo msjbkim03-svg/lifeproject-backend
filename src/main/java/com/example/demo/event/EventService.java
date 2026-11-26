@@ -455,10 +455,8 @@ public class EventService {
 			results.add(buildResult(t, e, life.getName(), age, year, life.getCurrentCountry()));
 		}
 
-		// 3. AI 서술 (C11): AI 서술 대상만, 실패하면 기본 문구 그대로
-		for (EventResultDTO r : results) {
-			narrateService.narrate(life, r, age, year);
-		}
+		// 3. AI 서술 (C11): AI 서술 대상만 동시에 요청, 실패하면 기본 문구 그대로
+		narrateService.narrateAll(life, results, age, year);
 
 		return results;
 	}

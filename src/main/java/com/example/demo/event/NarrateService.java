@@ -3,6 +3,8 @@ package com.example.demo.event;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -15,6 +17,8 @@ import org.springframework.stereotype.Service;
 import com.example.demo.engine.LifeDTO;
 import com.example.demo.event.dto.EventResultDTO;
 
+import jakarta.annotation.PreDestroy;
+
 // C11 이벤트 AI 서술: AI 서술 대상 이벤트의 기본 문구를 Gemini가 그해 상황에 맞게 다시 씀
 // 근거 자료(역사 사건 설명)는 이벤트 ID로 서버가 직접 조회해서 전달 (Tool Calling 없이 1번 호출)
 @Service
@@ -24,6 +28,7 @@ public class NarrateService {
 
 	private static final int TIMEOUT_SEC = 4; // 평균 응답 2초 안팎 + 여유, 넘으면 기본 문구
 	private static final int MAX_LEN = 200; // LOG_TEXT 1000바이트 (한글 약 330자) 안에 여유 있게
+	private static final int POOL_SIZE = 8; // Gemini 동시 호출 일꾼 수 (발표 때 여러 명 동시 플레이 기준)
 
 	// AI 역할과 규칙 (사용자는 못 봄)
 	private static final String SYSTEM_PROMPT = """
@@ -48,36 +53,79 @@ public class NarrateService {
 	@Value("${narrate.enabled:true}") // 시뮬레이션처럼 많이 돌릴 때는 false로 끔
 	private boolean enabled;
 
+	// AI 서술 전용 일꾼 (자바 공용 풀과 섞이지 않게). 데몬 스레드라 서버 종료를 막지 않음
+	private final ExecutorService pool = Executors.newFixedThreadPool(POOL_SIZE, task -> {
+		Thread t = new Thread(task, "narrate");
+		t.setDaemon(true);
+		return t;
+	});
+
 	NarrateService(ChatClient.Builder builder, EventDAO eDAO) {
 		this.gemini = builder.build();
 		this.eDAO = eDAO;
 	}
 
-	// 이벤트 하나 서술: 성공하면 문장 교체 + ai = true, 실패하면 기본 문구 그대로
+	// 서버가 꺼질 때 일꾼 정리
+	@PreDestroy
+	void close() {
+		pool.shutdownNow();
+	}
+
+	// 이벤트 하나 서술 (부모님 별세처럼 한 건만 있을 때)
 	public void narrate(LifeDTO life, EventResultDTO r, int age, int year) {
-		if (!enabled || !r.isAiNarrate() || r.isChoice())
+		narrateAll(life, List.of(r), age, year);
+	}
+
+	// 올해 이벤트 여러 개 서술: 대상만 골라 동시에 요청하고, 모두 합쳐 TIMEOUT_SEC 안에 온 것만 교체
+	// 성공하면 문장 교체 + ai = true, 실패하면 기본 문구 그대로
+	public void narrateAll(LifeDTO life, List<EventResultDTO> results, int age, int year) {
+		if (!enabled || results == null || results.isEmpty())
 			return;
+
+		// 1. 대상 고르기 + 요청 보내기 (보내기만 하고 기다리지 않음)
+		List<EventResultDTO> targets = new ArrayList<>();
+		List<CompletableFuture<String>> futures = new ArrayList<>();
+		for (EventResultDTO r : results) {
+			if (!r.isAiNarrate() || r.isChoice())
+				continue;
+			targets.add(r);
+			futures.add(request(life, r, age, year));
+		}
+
+		// 2. 결과 받기: 마감 시각을 하나로 정해서 전체가 TIMEOUT_SEC 를 넘지 않게
+		long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TIMEOUT_SEC);
+		for (int i = 0; i < targets.size(); i++) {
+			EventResultDTO r = targets.get(i);
+			CompletableFuture<String> f = futures.get(i);
+			try {
+				long left = Math.max(0, deadline - System.nanoTime()); // 마감까지 남은 시간
+				String text = clean(f.get(left, TimeUnit.NANOSECONDS));
+				if (text != null) {
+					r.setLogText(text);
+					r.setAi(true);
+				}
+			} catch (Exception ex) {
+				// 시간 초과·호출 실패 → 기본 문구 사용 (C11 요구사항 3), 원인은 경고 로그로 한 줄만 남김
+				f.cancel(true); // 아직 안 끝났으면 더 기다리지 않음
+				Throwable root = ex;
+				while (root.getCause() != null) {
+					root = root.getCause(); // 감싼 예외를 벗겨서 진짜 원인 찾기
+				}
+				log.warn("C11 AI 서술 실패, 기본 문구 사용 ({}): {}", r.getEventId(), root.toString());
+			}
+		}
+	}
+
+	// Gemini 요청 하나: 근거 정보(DB 조회)는 지금 스레드에서 만들고, 호출만 전용 일꾼에게 맡김
+	private CompletableFuture<String> request(LifeDTO life, EventResultDTO r, int age, int year) {
 		try {
 			String userPrompt = buildInfo(life, r, age, year);
-
-			// Gemini 호출을 다른 스레드에서 실행하고 TIMEOUT_SEC까지만 기다림
-			String text = CompletableFuture.supplyAsync(() -> {
+			return CompletableFuture.supplyAsync(() -> {
 				ChatResponse resp = gemini.prompt().system(SYSTEM_PROMPT).user(userPrompt).call().chatResponse();
 				return resp.getResult().getOutput().getText();
-			}).get(TIMEOUT_SEC, TimeUnit.SECONDS);
-
-			text = clean(text);
-			if (text != null) {
-				r.setLogText(text);
-				r.setAi(true);
-			}
+			}, pool);
 		} catch (Exception ex) {
-			// 시간 초과·호출 실패 → 기본 문구 사용 (C11 요구사항 3), 원인은 경고 로그로 한 줄만 남김
-			Throwable root = ex;
-			while (root.getCause() != null) {
-				root = root.getCause(); // 감싼 예외를 벗겨서 진짜 원인 찾기
-			}
-			log.warn("C11 AI 서술 실패, 기본 문구 사용 ({}): {}", r.getEventId(), root.toString());
+			return CompletableFuture.failedFuture(ex); // 근거 조회가 실패해도 위에서 똑같이 기본 문구 처리
 		}
 	}
 
