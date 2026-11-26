@@ -55,6 +55,7 @@ public class LifeDTO {
 	private Double lifeExpectancy;	// [화면용] 기대수명
 	private Double infantMortality;	// [화면용] 영아사망률
 	private Double u5Mortality;	// [화면용] 5세 미만 사망률(‰) - 잠시 멈춤 5세 문장 (원작 reflect)
+	private double[] survival;	// [화면용] 같은 해 같은 나라에서 태어난 또래 생존율 0~110세 (생존 곡선 · 또래 생존 줄이 같은 값, 11/26)
 	private Double gdpPerCapita;	// [화면용] 1인당 GDP
 	private List<EventResultDTO> events;	// [화면용] 올해 일어난 일 (C09)
 	private String pendingEventId;	// 고르기를 기다리는 선택 이벤트 (C09, PENDING_EVENT_ID)
@@ -465,6 +466,14 @@ public class LifeDTO {
 
 	public void setInfantMortality(Double infantMortality) {
 		this.infantMortality = infantMortality;
+	}
+
+	public double[] getSurvival() {
+		return survival;
+	}
+
+	public void setSurvival(double[] survival) {
+		this.survival = survival;
 	}
 
 	public Double getU5Mortality() {

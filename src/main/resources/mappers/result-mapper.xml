@@ -16,7 +16,7 @@
 		          FROM COUNTRY_NAME_HIST h
 		         WHERE h.COUNTRY_CODE = l.BIRTH_COUNTRY
 		           AND h.START_YEAR &lt;= l.BIRTH_YEAR
-		           AND (h.END_YEAR IS NULL OR h.END_YEAR &gt;= l.BIRTH_YEAR)
+		           AND h.END_YEAR IS NOT NULL AND h.END_YEAR &gt;= l.BIRTH_YEAR  /* 지금도 쓰는 이름은 '당시'가 아님 (11/26) */
 		           AND ROWNUM = 1)      AS histName,
 		       l.CURRENT_COUNTRY        AS currentCountry,
 		       cc.NAME_KO               AS currentCountryName,

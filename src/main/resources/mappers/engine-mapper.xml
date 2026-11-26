@@ -51,14 +51,14 @@
 		ORDER BY PERSON_NAME
 	</select>
 
-	<!-- C02: 당시 국가명 -->
+	<!-- C02: 당시 국가명 (지금도 쓰는 이름(END_YEAR 없음)은 '당시'가 아니라서 뺌 - 11/26 최종 점검: '중국 (당시 중화인민공화국)') -->
 	<select id="selectHistName" parameterType="com.example.demo.engine.LifeDTO"
 		resultType="string">
 		SELECT HIST_NAME
 		FROM COUNTRY_NAME_HIST
 		WHERE COUNTRY_CODE = #{birthCountry}
 		  AND START_YEAR &lt;= #{birthYear}
-		  AND (END_YEAR IS NULL OR END_YEAR &gt;= #{birthYear})
+		  AND END_YEAR IS NOT NULL AND END_YEAR &gt;= #{birthYear}
 		  AND ROWNUM = 1
 	</select>
 
@@ -83,21 +83,41 @@
 		  AND STATUS = 'PLAYING'
 	</update>
 
-	<!-- C03: 오래된 비회원 인생 정리 1) 통계용 숫자만 GUEST_LIFE_STAT에 옮겨 두기 -->
-	<insert id="moveOldGuestStats">
-		INSERT INTO GUEST_LIFE_STAT (STAT_ID, BIRTH_COUNTRY, BIRTH_YEAR, GENDER, STATUS, DEATH_AGE, STARTED_AT, ENDED_AT)
-		SELECT SEQ_GUEST_LIFE_STAT.NEXTVAL, BIRTH_COUNTRY, BIRTH_YEAR, GENDER, STATUS, DEATH_AGE, CREATED_AT, ENDED_AT
-		FROM LIFE
-		WHERE MEMBER_ID IS NULL
-		  AND (LAST_PLAYED_AT &lt; SYSDATE - 7 OR (STATUS &lt;&gt; 'PLAYING' AND LAST_PLAYED_AT &lt; SYSDATE - 1))
-	</insert>
+	<!-- C03: 오래된 비회원 인생 정리 (종료 후 1일 또는 7일 미접속)
+	     1) 지울 인생 번호를 한 번만 골라 두고 (그 사이 다시 열린 인생·지금 진행 중인 인생은 건드리지 않게 FOR UPDATE SKIP LOCKED)
+	     2) 통계용 숫자만 GUEST_LIFE_STAT에 옮기고 (7일 동안 안 열린 진행 중 인생은 '중간에 나감', 끝난 시각은 마지막으로 연 시각)
+	     3) 딸린 기록(코스튬·묻기·AI 이야기·퀘스트·특성·경험·인생 기록·연도 기록)을 지운 뒤 인생을 지움
+	     (11/26 최종 점검: 예전엔 문장마다 SYSDATE·조건을 따로 써서, 그 사이 조건이 바뀐 인생은 기록만 지워지거나 통계가 두 번 남을 수 있었음
+	      → 같은 번호 목록으로 한 블록에서 처리, 하나라도 실패하면 이 블록 전체가 취소됨) -->
+	<update id="cleanOldGuestLives">
+		DECLARE
+			TYPE t_ids IS TABLE OF LIFE.LIFE_ID%TYPE;
+			ids t_ids;
+		BEGIN
+			SELECT LIFE_ID BULK COLLECT INTO ids
+			FROM LIFE
+			WHERE MEMBER_ID IS NULL
+			  AND (LAST_PLAYED_AT &lt; SYSDATE - 7 OR (STATUS &lt;&gt; 'PLAYING' AND LAST_PLAYED_AT &lt; SYSDATE - 1))
+			FOR UPDATE SKIP LOCKED;
 
-	<!-- C03: 오래된 비회원 인생 정리 2) 삭제 (기록·경험은 CASCADE로 같이 삭제) -->
-	<delete id="deleteOldGuestLives">
-		DELETE FROM LIFE
-		WHERE MEMBER_ID IS NULL
-		  AND (LAST_PLAYED_AT &lt; SYSDATE - 7 OR (STATUS &lt;&gt; 'PLAYING' AND LAST_PLAYED_AT &lt; SYSDATE - 1))
-	</delete>
+			IF ids.COUNT &gt; 0 THEN
+				FORALL i IN 1 .. ids.COUNT
+					INSERT INTO GUEST_LIFE_STAT (STAT_ID, BIRTH_COUNTRY, BIRTH_YEAR, GENDER, STATUS, DEATH_AGE, STARTED_AT, ENDED_AT)
+					SELECT SEQ_GUEST_LIFE_STAT.NEXTVAL, BIRTH_COUNTRY, BIRTH_YEAR, GENDER,
+					       DECODE(STATUS, 'PLAYING', 'ABANDONED', STATUS), DEATH_AGE, CREATED_AT, NVL(ENDED_AT, LAST_PLAYED_AT)
+					FROM LIFE WHERE LIFE_ID = ids(i);
+				FORALL i IN 1 .. ids.COUNT DELETE FROM LIFE_COSTUME    WHERE LIFE_ID = ids(i);
+				FORALL i IN 1 .. ids.COUNT DELETE FROM QA_LOG          WHERE LIFE_ID = ids(i);
+				FORALL i IN 1 .. ids.COUNT DELETE FROM AI_STORY        WHERE LIFE_ID = ids(i);
+				FORALL i IN 1 .. ids.COUNT DELETE FROM LIFE_QUEST      WHERE LIFE_ID = ids(i);
+				FORALL i IN 1 .. ids.COUNT DELETE FROM LIFE_TRAIT      WHERE LIFE_ID = ids(i);
+				FORALL i IN 1 .. ids.COUNT DELETE FROM LIFE_EXPERIENCE WHERE LIFE_ID = ids(i);
+				FORALL i IN 1 .. ids.COUNT DELETE FROM LIFE_EVENT_LOG  WHERE LIFE_ID = ids(i);
+				FORALL i IN 1 .. ids.COUNT DELETE FROM LIFE_YEAR_LOG   WHERE LIFE_ID = ids(i);
+				FORALL i IN 1 .. ids.COUNT DELETE FROM LIFE            WHERE LIFE_ID = ids(i);
+			END IF;
+		END;
+	</update>
 
 	<!-- C02: 인생 저장 (나머지 컬럼은 DEFAULT 값) -->
 	<insert id="insertLife" parameterType="com.example.demo.engine.LifeDTO">
@@ -259,6 +279,16 @@
 			CASE WHEN #{jobStatus, jdbcType=VARCHAR} = 'EMPLOYED' THEN #{jobId, jdbcType=VARCHAR} END, #{income}, #{assets}
 		)
 	</insert>
+
+	<!-- 직업을 고른 해: 그 나이 연도 기록은 직업 제안 전에 저장돼서 비어 있음 → 고른 직업을 적음 (11/26)
+	     인생 기록 줄('○○ 일을 시작했다')은 방금 지난 해(나이 - 1)에 남으므로, 그 해 기록에 일이 없었으면 그 해부터 적음
+	     (11/26 최종 점검: 기록 줄은 23세인데 삶의 요약은 '24~25세'로 한 해씩 늦었음 / 같은 해 다른 일을 하다 바꾼 경우는 그 해를 덮어쓰지 않음) -->
+	<update id="updateYearLogJob" parameterType="com.example.demo.engine.LifeDTO">
+		UPDATE LIFE_YEAR_LOG
+		SET JOB_ID = #{jobId, jdbcType=VARCHAR}
+		WHERE LIFE_ID = #{lifeId}
+		  AND (AGE = #{currentAge} OR (AGE = #{currentAge} - 1 AND JOB_ID IS NULL))
+	</update>
 
 	<!-- ================= C07 사망 판정 ================= -->
 
@@ -654,6 +684,8 @@
 			       l.BIRTH_YEAR    AS birthYear,
 			       NVL(l.ORIGIN_CLASS, l.WEALTH_CLASS) AS wealthClass,
 			       l.STATUS        AS status,
+			       l.CURRENT_AGE   AS currentAge,
+			       l.DEATH_AGE     AS deathAge,
 			       ROUND((SYSDATE - l.CREATED_AT) * 86400) AS agoSec
 			FROM LIFE l
 			LEFT JOIN COUNTRY c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
@@ -685,7 +717,7 @@
 	</select>
 
 	<!-- 진행 화면 '같은 해에 태어난 사람들': 다른 플레이어의 인생 (내 다른 인생 · 포기한 인생은 뺌)
-	     같은 연대 안에서 태어난 해가 가까운 순 → 최근에 플레이한 순, 최대 4명
+	     같은 연대 안에서 태어난 해가 가까운 순 → 최근에 플레이한 순, 8명까지 읽어 이름이 겹치는 사람을 빼고 4명 (EngineService.realPeers)
 	     내 나이였을 때의 기록(LIFE_YEAR_LOG)이 있으면 그해 직업 · 사는 나라 -->
 	<select id="selectRealPeers" parameterType="map" resultType="com.example.demo.engine.LiveLifeDTO">
 		SELECT * FROM (
@@ -719,7 +751,7 @@
 			</if>
 			ORDER BY ABS(l.BIRTH_YEAR - #{birthYear}), NVL(l.LAST_PLAYED_AT, l.CREATED_AT) DESC
 		)
-		WHERE ROWNUM &lt;= 4
+		WHERE ROWNUM &lt;= 8
 	</select>
 
 	<!-- 삶을 마감: 인생에 딸린 기록부터 지우고 인생 지움 (한 번에, 하나라도 실패하면 전부 취소)
