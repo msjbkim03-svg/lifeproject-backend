@@ -199,19 +199,38 @@ public class MemberService {
 		return dao.selectActiveByEmail(cleanEmail(email));
 	}
 
-	// 구글 ID 토큰(credential)을 구글 서버에 보내서 진짜인지 검증하고 이메일·고유번호·추천 닉네임 꺼내기
+	// 구글 토큰(ID 토큰 또는 Access 토큰)을 구글 서버에 보내서 진짜인지 검증하고 이메일·고유번호·추천 닉네임 꺼내기
 	public Map<String, Object> verifyGoogleToken(String credential) {
 		if (credential == null || credential.isBlank()) return null;
 		try {
-			Map<?, ?> res = restClient.get()
-					.uri("https://oauth2.googleapis.com/tokeninfo?id_token={token}", credential)
-					.retrieve()
-					.body(Map.class);
-			if (res == null) return null;
+			Map<?, ?> res;
+			// 1) 점(.) 2개가 있는 JWT 형태면 id_token 검증
+			if (credential.split("\\.").length == 3) {
+				res = restClient.get()
+						.uri("https://oauth2.googleapis.com/tokeninfo?id_token={token}", credential)
+						.retrieve()
+						.body(Map.class);
+				if (res == null) return null;
+				String aud = String.valueOf(res.get("aud"));
+				if (!googleClientId.equals(aud)) return null;
+			} else {
+				// 2) Access Token 형태면 tokeninfo로 우리 클라이언트 ID 확인 후 userinfo에서 프로필 조회
+				Map<?, ?> tokenInfo = restClient.get()
+						.uri("https://oauth2.googleapis.com/tokeninfo?access_token={token}", credential)
+						.retrieve()
+						.body(Map.class);
+				if (tokenInfo == null) return null;
+				String aud = String.valueOf(tokenInfo.get("aud"));
+				String azp = String.valueOf(tokenInfo.get("azp"));
+				if (!googleClientId.equals(aud) && !googleClientId.equals(azp)) return null;
 
-			// 우리 프로젝트의 클라이언트 ID로 발급된 토큰인지 확인
-			String aud = String.valueOf(res.get("aud"));
-			if (!googleClientId.equals(aud)) return null;
+				res = restClient.get()
+						.uri("https://www.googleapis.com/oauth2/v3/userinfo")
+						.header("Authorization", "Bearer " + credential)
+						.retrieve()
+						.body(Map.class);
+				if (res == null) return null;
+			}
 
 			// 이메일 인증이 완료된 구글 계정인지 확인
 			String emailVerified = String.valueOf(res.get("email_verified"));
