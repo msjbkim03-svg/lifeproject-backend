@@ -16,7 +16,12 @@ public class CostumeService {
 	private static final double DEFAULT_GDP = 10000;
 
 	// DB 부위 → 마을 그림(Village costume)의 이름
-	private static final Map<String, String> WEAR_KEY = Map.of("HAIR", "hair", "CLOTHES", "top", "HAT", "hat");
+	private static final Map<String, String> WEAR_KEY = Map.of(
+			"HAIR", "hair", "CLOTHES", "top", "HAT", "hat", "RIDE", "ride");
+
+	// 탈것 나이 제한 (화면 CostumeSheet 잠금 표시와 같은 기준)
+	private static final Map<String, Integer> MIN_AGE = Map.of(
+			"RIDE_01", 7, "RIDE_03", 15, "RIDE_02", 18, "RIDE_04", 19, "RIDE_05", 20);
 
 	private CostumeDAO dao;
 
@@ -60,6 +65,8 @@ public class CostumeService {
 		if (!"PLAYING".equals(life.getStatus())) return "진행 중인 인생에서만 살 수 있어요.";
 		CostumeDTO c = dao.selectCostume(costumeId);
 		if (c == null) return "없는 물건이에요.";
+		int minAge = MIN_AGE.getOrDefault(c.getLook(), 0);
+		if (life.getCurrentAge() < minAge) return minAge + "세부터 이용할 수 있어요.";
 		if (dao.countOwned(life.getLifeId(), costumeId) > 0) return "이미 가진 물건이에요.";
 
 		long price = priceOf(life, c);
@@ -77,6 +84,8 @@ public class CostumeService {
 		if (!"PLAYING".equals(life.getStatus())) return "진행 중인 인생에서만 갈아입을 수 있어요.";
 		CostumeDTO c = dao.selectCostume(costumeId);
 		if (c == null || dao.countOwned(life.getLifeId(), costumeId) == 0) return "가진 것만 착용할 수 있어요.";
+		int minAge = MIN_AGE.getOrDefault(c.getLook(), 0);
+		if (life.getCurrentAge() < minAge) return minAge + "세부터 이용할 수 있어요.";
 		dao.unequipPart(life.getLifeId(), c.getPart());
 		dao.setEquipped(life.getLifeId(), costumeId, "Y");
 		return null;

@@ -16,6 +16,7 @@ public class MemorialCardDTO {
 	private String hair;   // 그 생에 입은 코스튬 코드 (없으면 null) → 초상
 	private String top;
 	private String hat;
+	private String ride;
 	
 
 	public int getLifeId() { return lifeId; }
@@ -59,4 +60,7 @@ public class MemorialCardDTO {
 
 	public String getHat() { return hat; }
 	public void setHat(String hat) { this.hat = hat; }
+
+	public String getRide() { return ride; }
+	public void setRide(String ride) { this.ride = ride; }
 }

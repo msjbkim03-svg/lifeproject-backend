@@ -25,6 +25,7 @@ public class MyPageDTO {
 	private String hair;        // 착용 머리 코드
 	private String top;         // 착용 옷 코드
 	private String hat;         // 착용 모자 코드
+	private String ride;        // 착용 탈것 코드
 
 	public String getLoginId() { return loginId; }
 	public void setLoginId(String loginId) { this.loginId = loginId; }
@@ -73,4 +74,7 @@ public class MyPageDTO {
 
 	public String getHat() { return hat; }
 	public void setHat(String hat) { this.hat = hat; }
+
+	public String getRide() { return ride; }
+	public void setRide(String ride) { this.ride = ride; }
 }
