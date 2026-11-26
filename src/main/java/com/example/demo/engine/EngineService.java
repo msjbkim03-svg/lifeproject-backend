@@ -2785,11 +2785,23 @@ public class EngineService {
 		// 돈 쓰기 (한 해 한 번)
 		addDo(items, did, age, cash, "DO_TRIP", "국내 여행", "행복 +4 · 관계 +1", med * 0.04, age >= 15);
 		addDo(items, did, age, cash, "DO_ABROAD", "해외 여행", "행복 +7 · 지식 +1", med * 0.2, age >= 18 && year >= 1989);
-		addDo(items, did, age, cash, "DO_PARENTS", "부모님 용돈·병원비", "관계 +5 · 행복 +2", med * 0.06,
+		addDo(items, did, age, cash, "DO_PARENTS", EngineStory.parentWord(life, "부모님 용돈·병원비"), "관계 +5 · 행복 +2", med * 0.06,
 				age >= 20 && !"N".equals(life.getParentAlive()));
 		addDo(items, did, age, cash, "DO_PARTY", "친구들에게 한턱내기", "관계 +3 · 행복 +1", med * 0.015, age >= 15);
-		addDo(items, did, age, cash, "DO_KIDS", "자녀 학원·과외", "아이 공부에 보태요 · 관계 +2", med * 0.1,
-				life.getChildCount() > 0 && age >= 28);
+		// 자녀 학원·과외: 학교 다닐 나이(6~18세) 아이가 있을 때만 (11/26 최종 점검: 첫째가 태어난 해에 '아이를 학원에 보냈다'가 나왔음)
+		boolean schoolKid = false;
+		if (life.getChildCount() > 0) {
+			List<Integer> births = engineDao.selectChildBirthAges(life.getLifeId());
+			for (Integer b : births) {
+				if (b != null && age - b >= 6 && age - b <= 18) {
+					schoolKid = true;
+				}
+			}
+			if (births.isEmpty()) {
+				schoolKid = age >= 34; // 예전 인생처럼 출산 기록이 없으면 나이로 어림
+			}
+		}
+		addDo(items, did, age, cash, "DO_KIDS", "자녀 학원·과외", "아이 공부에 보태요 · 관계 +2", med * 0.1, schoolKid);
 		addDo(items, did, age, cash, "DO_CHECKUP", "건강검진", "건강 +3", med * 0.02, age >= 30);
 		addDo(items, did, age, cash, "DO_COURSE", "강좌·학원 등록", "지식 +4", med * 0.05, age >= 15);
 		addDo(items, did, age, cash, "DO_REMODEL", "집 수리·인테리어", "행복 +5", med * 0.25, owns.contains("HOUSE"));
@@ -2920,7 +2932,7 @@ public class EngineService {
 			case "DO_PARENTS":
 				life.setRelation(life.getRelation() + 5);
 				life.setHappiness(life.getHappiness() + 2);
-				text = "부모님께 용돈과 병원비를 드렸다.";
+				text = EngineStory.parentWord(life, "부모님께 용돈과 병원비를 드렸다."); // 한 분만 계시면 '어머니께'·'아버지께'
 				break;
 			case "DO_PARTY":
 				life.setRelation(life.getRelation() + 3);
@@ -4417,6 +4429,9 @@ public class EngineService {
 		for (JobDTO job : jobs()) {
 			if (levelIndex(job.getRequiredEdu()) > finished) {
 				continue; // 학력 부족
+			}
+			if ("JOB_OWNER".equals(job.getJobId())) {
+				continue; // 가게 사장은 제안받는 일이 아니라 '가게를 차린다'(C09)로만 (11/26 최종 점검, 이직 제안과 같게)
 			}
 			double w = service;
 			if (job.getIndustry().equals("AGRI")) {
@@ -7509,11 +7524,13 @@ public class EngineService {
 			}
 		} else if ("JOBCHANGE_SAME".equals(o.act) && life.getIncomeRate() != null) {
 			// 같은 일·다른 직장 (원작): 벌이만 오르고 경력은 그대로
-			life.setIncomeRate(life.getIncomeRate() * (s.jcSame > 1 ? s.jcSame : 1.1));
+			double up = s.jcSame > 1 ? s.jcSame : 1.1;
+			life.setIncomeRate(life.getIncomeRate() * up);
 			JobDTO cur = life.getJobId() == null ? null : findJob(life.getJobId());
-			if (cur != null) {
-				text = text + " 하는 일은 " + cur.getJobName() + " 그대로다.";
-			}
+			// 11/26 최종 점검: '직장을 옮겼다. 하는 일은 ○○ 그대로다'가 이직을 안 한 것처럼 읽혀서, 옮긴 것·같은 일·오른 벌이를 함께
+			text = "더 좋은 조건을 내건 다른 곳으로 직장을 옮겼다."
+					+ (cur != null ? " " + cur.getJobName() + " 일은 그대로 이어 가고," : "")
+					+ " 벌이는 " + Math.round((up - 1) * 100) + "%쯤 늘었다.";
 		} else if ("JOBCHANGE_STAY".equals(o.act) && life.getIncomeRate() != null) {
 			life.setIncomeRate(life.getIncomeRate() * 1.01); // 원작: 남으면 직급 조금 (pct +0.01)
 		} else if ("QUIT_JOB".equals(o.act) && "EMPLOYED".equals(life.getJobStatus())) {
