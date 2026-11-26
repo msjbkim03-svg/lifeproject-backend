@@ -108,30 +108,26 @@
 	<!-- ================= A04 추가 (11/25): 날짜별 추이 · 사망 원인 · 수명 분포 · 최근 끝난 인생 ================= -->
 
 	<!-- 최근 14일 하루 플레이 수 (한국 날짜, 오늘 포함, 플레이 없는 날도 0으로 나옴)
+	     그날 '시작한' 인생을 지금 상태별로 셈 → 시작 = 끝까지 삶 + 중간에 나감 + 진행 중 (합이 맞음, 11/26)
+	     (예전엔 끝난 수를 '끝난 날' 기준으로 세서, 시작 수와 더해도 안 맞아 헷갈렸음)
 	     지워진 비회원 인생(GUEST_LIFE_STAT)도 합침 -->
 	<select id="selectDailyPlays" resultType="com.example.demo.admin.DailyPlayDTO">
 		WITH days AS (
 			SELECT TRUNC(SYSDATE + 9/24) - LEVEL + 1 AS d FROM dual CONNECT BY LEVEL &lt;= 14
 		),
-		starts AS (
-			SELECT TRUNC(CREATED_AT + 9/24) AS d, START_TYPE AS t FROM LIFE
+		lives AS (
+			SELECT TRUNC(CREATED_AT + 9/24) AS d, START_TYPE AS t, STATUS AS s FROM LIFE
 			WHERE CREATED_AT + 9/24 &gt;= TRUNC(SYSDATE + 9/24) - 13
 			UNION ALL
-			SELECT TRUNC(STARTED_AT + 9/24), 'GUEST' FROM GUEST_LIFE_STAT
+			SELECT TRUNC(STARTED_AT + 9/24), 'GUEST', STATUS FROM GUEST_LIFE_STAT
 			WHERE STARTED_AT + 9/24 &gt;= TRUNC(SYSDATE + 9/24) - 13
-		),
-		ends AS (
-			SELECT TRUNC(ENDED_AT + 9/24) AS d, STATUS AS s FROM LIFE
-			WHERE ENDED_AT IS NOT NULL AND ENDED_AT + 9/24 &gt;= TRUNC(SYSDATE + 9/24) - 13
-			UNION ALL
-			SELECT TRUNC(ENDED_AT + 9/24), STATUS FROM GUEST_LIFE_STAT
-			WHERE ENDED_AT IS NOT NULL AND ENDED_AT + 9/24 &gt;= TRUNC(SYSDATE + 9/24) - 13
 		)
 		SELECT TO_CHAR(days.d, 'YYYY-MM-DD') AS day,
-		       (SELECT COUNT(*) FROM starts s WHERE s.d = days.d AND s.t = 'MEMBER') AS memberStarts,
-		       (SELECT COUNT(*) FROM starts s WHERE s.d = days.d AND s.t = 'GUEST') AS guestStarts,
-		       (SELECT COUNT(*) FROM ends e WHERE e.d = days.d AND e.s = 'ENDED') AS ended,
-		       (SELECT COUNT(*) FROM ends e WHERE e.d = days.d AND e.s = 'ABANDONED') AS abandoned
+		       (SELECT COUNT(*) FROM lives l WHERE l.d = days.d AND l.t = 'MEMBER') AS memberStarts,
+		       (SELECT COUNT(*) FROM lives l WHERE l.d = days.d AND l.t = 'GUEST') AS guestStarts,
+		       (SELECT COUNT(*) FROM lives l WHERE l.d = days.d AND l.s = 'ENDED') AS ended,
+		       (SELECT COUNT(*) FROM lives l WHERE l.d = days.d AND l.s = 'ABANDONED') AS abandoned,
+		       (SELECT COUNT(*) FROM lives l WHERE l.d = days.d AND l.s NOT IN ('ENDED', 'ABANDONED')) AS playing
 		FROM days
 		ORDER BY days.d
 	</select>
