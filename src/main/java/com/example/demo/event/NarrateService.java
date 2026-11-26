@@ -39,7 +39,8 @@ public class NarrateService {
 			- 정보에 없는 일(실직, 부상, 이사, 병명, 장소 등)은 지어내지 마.
 			- 상황(직장인, 학생, 직업 없음 등)은 문장에 쓰지 마. 지어내지 않게 하기 위한 참고용이야.
 			- 가족 관계(혼자인지, 배우자, 자녀)는 가족 정보에 있는 대로만 써.
-			- 게임 효과를 보고 이 사건이 이 사람에게 어떤 의미였는지 감정이나 장면으로 써. 효과 이름을 그대로 나열하지 마.
+			- 삶의 변화는 무엇이 좋아지고(↑) 나빠졌는지(↓) 방향만 알려 주는 참고야. 거기 적힌 말을 문장에 쓰지 마.
+			- 건강, 행복, 지식, 관계, 재산 같은 능력치 이름도 쓰지 마. 마음고생, 기쁨 같은 뭉뚱그린 말 대신 그 사건에 어울리는 구체적인 행동이나 장면으로 보여 줘.
 			- 역사 설명이 있으면 그중 구체적인 사실 하나를 시대 배경으로 써.
 			- 나이가 0~5세면 아기·어린아이가 직접 겪은 일로 쓰지 마. 학교·일·시위·전투처럼 아이가 할 수 없는 일은 빼고, 집안 분위기나 부모님의 걱정·생활 변화로 써. (예: 1966년, 바깥이 어수선해지자 부모님은 아기 이름의 손을 꼭 잡고 집 밖에 잘 나가지 않았다.)
 			- 나이가 6~12세면 아이가 겪을 수 있는 일(가족, 동네, 학교)로만 써.
@@ -157,15 +158,15 @@ public class NarrateService {
 		// 이 사건의 큰 효과만 (작은 값은 AI가 부풀리지 않게 빼고 전달)
 		List<String> big = new ArrayList<>();
 		if (Math.abs(r.getEffHealth()) >= 5)
-			big.add(r.getEffHealth() > 0 ? "건강 좋아짐" : "건강 나빠짐");
+			big.add(r.getEffHealth() > 0 ? "몸 ↑" : "몸 ↓");
 		if (Math.abs(r.getEffHappiness()) >= 5)
-			big.add(r.getEffHappiness() > 0 ? "행복 커짐" : "행복 줄어듦");
+			big.add(r.getEffHappiness() > 0 ? "마음 ↑" : "마음 ↓");
 		if (Math.abs(r.getEffKnowledge()) >= 5)
-			big.add(r.getEffKnowledge() > 0 ? "지식 늘어남" : "지식 줄어듦");
+			big.add(r.getEffKnowledge() > 0 ? "배움 ↑" : "배움 ↓");
 		if (Math.abs(r.getEffRelation()) >= 5)
-			big.add(r.getEffRelation() > 0 ? "인간관계 가까워짐" : "인간관계 멀어짐");
+			big.add(r.getEffRelation() > 0 ? "사람 사이 ↑" : "사람 사이 ↓");
 		if (Math.abs(r.getEffWealthRate()) >= 0.10)
-			big.add(r.getEffWealthRate() > 0 ? "재산 늘어남" : "재산 줄어듦");
+			big.add(r.getEffWealthRate() > 0 ? "형편 ↑" : "형편 ↓");
 		String effects = big.isEmpty() ? "큰 변화 없음" : String.join(", ", big);
 
 		return """
@@ -178,7 +179,7 @@ public class NarrateService {
 				가족: %s
 				사건: %s
 				기본 문구: %s
-				게임 효과: %s
+				삶의 변화: %s
 				역사 설명: %s
 				""".formatted(life.getName(), "M".equals(life.getGender()) ? "남성" : "여성", age, year,
 				country == null ? life.getCurrentCountry() : country, status, family, r.getTitle(), r.getLogText(),

@@ -452,7 +452,11 @@ public class EventService {
 			if ("LE_LOVE_WEDTALK".equals(e.getEventId())) {
 				e.setVarValue(String.valueOf(datingYears(life))); // 결혼 이야기: 사귄 햇수 → 문장의 {변수}
 			}
-			results.add(buildResult(t, e, life.getName(), age, year, life.getCurrentCountry()));
+			EventResultDTO r = buildResult(t, e, life.getName(), age, year, life.getCurrentCountry());
+			if ("LE_LOVE_MEET".equals(e.getEventId()) && expIds.contains("LE_LOVE_MEET")) {
+				r.setLogText(year + "년, 다시 마음이 가는 사람이 생겼다."); // 두 번째 만남부터는 다른 문장
+			}
+			results.add(r);
 		}
 
 		// 3. AI 서술 (C11): AI 서술 대상만 동시에 요청, 실패하면 기본 문구 그대로
