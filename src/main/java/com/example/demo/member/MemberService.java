@@ -17,6 +17,8 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
+import com.example.demo.chat.ChatDAO;
+
 import jakarta.mail.internet.MimeMessage;
 
 @Service
@@ -26,6 +28,7 @@ public class MemberService {
 	private static final ExecutorService MAIL_WORKERS = Executors.newFixedThreadPool(2);
 
 	private MemberDAO dao;
+	private ChatDAO chatDAO;           // 금칙어 목록 (BANNED_WORD, 닉네임에도 금칙어 막기)
 	private JavaMailSender mailSender; // 메일 보내는 도구 (M09)
 	private String mailFrom;           // 보내는 사람 = Gmail 주소 (spring.mail.username)
 	private BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
@@ -36,11 +39,27 @@ public class MemberService {
 
 	private RestClient restClient = RestClient.create(); // 구글(reCAPTCHA)에 요청 보내는 도구
 
-	public MemberService(MemberDAO dao, JavaMailSender mailSender,
+	public MemberService(MemberDAO dao, ChatDAO chatDAO, JavaMailSender mailSender,
 			@Value("${spring.mail.username}") String mailFrom) {
 		this.dao = dao;
+		this.chatDAO = chatDAO;
 		this.mailSender = mailSender;
 		this.mailFrom = mailFrom;
+	}
+
+	// 금칙어 포함 여부 (띄어쓰기·대소문자 무시)
+	public boolean isNicknameBanned(String text) {
+		return hasBannedWord(text);
+	}
+
+	private boolean hasBannedWord(String text) {
+		if (text == null) return false;
+		String plain = text.replaceAll("\\s", "").toLowerCase();
+		for (String word : chatDAO.selectBannedWords()) {
+			String w = word.replaceAll("\\s", "").toLowerCase();
+			if (!w.isEmpty() && plain.contains(w)) return true;
+		}
+		return false;
 	}
 
 	// ===== 중복 확인 (true = 사용 가능) =====
@@ -49,7 +68,9 @@ public class MemberService {
 	}
 
 	public boolean isNicknameAvailable(String nickname) {
-		return dao.countByNickname(nickname == null ? null : nickname.trim()) == 0;
+		String clean = nickname == null ? null : nickname.trim();
+		if (clean == null || hasBannedWord(clean)) return false;
+		return dao.countByNickname(clean) == 0;
 	}
 
 	public boolean isEmailAvailable(String email) {
@@ -82,6 +103,9 @@ public class MemberService {
 		}
 		if (dto.getNickname() == null || dto.getNickname().length() < 2 || dto.getNickname().length() > 10) {
 			return "닉네임은 2~10자로 입력해 주세요.";
+		}
+		if (hasBannedWord(dto.getNickname())) {
+			return "닉네임에 쓸 수 없는 말이 들어 있어요.";
 		}
 		if (dto.getEmail() == null || !dto.getEmail().matches("^[\\w.+-]+@[\\w-]+\\.[\\w.]+$")) {
 			return "이메일 형식이 맞지 않아요.";
@@ -219,6 +243,9 @@ public class MemberService {
 		// 3. 닉네임·이메일 형식 검사 (회원가입과 같은 규칙)
 		if (dto.getNickname() == null || dto.getNickname().length() < 2 || dto.getNickname().length() > 10) {
 			return "닉네임은 2~10자로 입력해 주세요.";
+		}
+		if (hasBannedWord(dto.getNickname())) {
+			return "닉네임에 쓸 수 없는 말이 들어 있어요.";
 		}
 		if (dto.getEmail() == null || !dto.getEmail().matches("^[\\w.+-]+@[\\w-]+\\.[\\w.]+$")) {
 			return "이메일 형식이 맞지 않아요.";

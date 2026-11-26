@@ -15,8 +15,8 @@ public class MemorialDAO {
 		this.mybatis = mybatis;
 	}
 
-	public List<MemorialCardDTO> selectCards(int start, int end) {
-		return mybatis.selectList("memorial.selectCards", Map.of("start", start, "end", end));
+	public List<MemorialCardDTO> selectCards(int start, int end, String sort) {
+		return mybatis.selectList("memorial.selectCards", Map.of("start", start, "end", end, "sort", sort));
 	}
 
 	public int countCards() {
@@ -81,5 +81,17 @@ public class MemorialDAO {
 
 	public int deleteComment(int commentId, int memberId) {
 		return mybatis.delete("memorial.deleteComment", Map.of("commentId", commentId, "memberId", memberId));
+	}
+
+	public int deleteCommentsByPost(int postId) {
+		return mybatis.delete("memorial.deleteCommentsByPost", postId);
+	}
+
+	public int deleteTributesByPost(int postId) {
+		return mybatis.delete("memorial.deleteTributesByPost", postId);
+	}
+
+	public int deletePost(int postId, int memberId) {
+		return mybatis.delete("memorial.deletePost", Map.of("postId", postId, "memberId", memberId));
 	}
 }

@@ -21,6 +21,10 @@ public class MyPageDTO {
 	private String lifeName;    // 캐릭터 이름
 	private String currentCountryName; // 지금 사는 나라
 	private Integer currentAge; // 지금 나이
+	private String gender;      // 캐릭터 성별
+	private String hair;        // 착용 머리 코드
+	private String top;         // 착용 옷 코드
+	private String hat;         // 착용 모자 코드
 
 	public String getLoginId() { return loginId; }
 	public void setLoginId(String loginId) { this.loginId = loginId; }
@@ -57,4 +61,16 @@ public class MyPageDTO {
 
 	public Integer getCurrentAge() { return currentAge; }
 	public void setCurrentAge(Integer currentAge) { this.currentAge = currentAge; }
+
+	public String getGender() { return gender; }
+	public void setGender(String gender) { this.gender = gender; }
+
+	public String getHair() { return hair; }
+	public void setHair(String hair) { this.hair = hair; }
+
+	public String getTop() { return top; }
+	public void setTop(String top) { this.top = top; }
+
+	public String getHat() { return hat; }
+	public void setHat(String hat) { this.hat = hat; }
 }

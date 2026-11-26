@@ -31,8 +31,9 @@ public class MemorialController {
 	}
 
 	@GetMapping
-	public Map<String, Object> list(@RequestParam(defaultValue = "1") int page) {
-		return service.list(page);
+	public Map<String, Object> list(@RequestParam(defaultValue = "1") int page,
+			@RequestParam(defaultValue = "recent") String sort) {
+		return service.list(page, sort);
 	}
 
 	// 로그인은 선택: 토큰이 있으면 내 촛불·내 방명록 표시
@@ -66,6 +67,14 @@ public class MemorialController {
 		String error = service.open(lifeId, Integer.parseInt(memberId), body.get("message"));
 		if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
 		return ResponseEntity.ok(Map.of("message", "추모관을 열었어요."));
+	}
+
+	// 본인 추모관 글 닫기(삭제) — 달린 방명록·촛불 기록도 함께 삭제
+	@DeleteMapping("/{lifeId}/open")
+	public ResponseEntity<Map<String, Object>> closeRoom(@PathVariable int lifeId, @RequestAttribute("memberId") String memberId) {
+		String error = service.closeRoom(lifeId, Integer.parseInt(memberId));
+		if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
+		return ResponseEntity.ok(Map.of("message", "추모관을 닫았어요."));
 	}
 
 	@PostMapping("/{lifeId}/candle")

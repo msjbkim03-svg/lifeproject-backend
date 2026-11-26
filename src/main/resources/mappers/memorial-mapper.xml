@@ -30,7 +30,10 @@
 				JOIN LIFE l ON l.LIFE_ID = p.LIFE_ID
 				JOIN COUNTRY c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
 				LEFT JOIN MEMBER mb ON mb.MEMBER_ID = p.MEMBER_ID
-				ORDER BY p.POST_ID DESC
+				<choose>
+					<when test="sort == 'tribute'">ORDER BY NVL(p.TRIBUTE_COUNT, 0) DESC, p.POST_ID DESC</when>
+					<otherwise>ORDER BY p.POST_ID DESC</otherwise>
+				</choose>
 			) a
 			WHERE ROWNUM &lt;= #{end}
 		)
@@ -56,7 +59,8 @@
 		       l.IS_MARRIED                     AS isMarried,
 		       l.OWNS                           AS owns,
 		       p.MESSAGE                        AS message,
-		       NVL(p.TRIBUTE_COUNT, 0) AS tributeCount
+		       NVL(p.TRIBUTE_COUNT, 0)          AS tributeCount,
+		       NVL(p.VIEW_COUNT, 0)             AS viewCount
 		FROM LIFE l
 		JOIN COUNTRY bc ON bc.COUNTRY_CODE = l.BIRTH_COUNTRY
 		JOIN COUNTRY cc ON cc.COUNTRY_CODE = l.CURRENT_COUNTRY
@@ -160,6 +164,18 @@
 
 	<delete id="deleteComment" parameterType="map">
 		DELETE FROM MEMORIAL_COMMENT WHERE COMMENT_ID = #{commentId} AND MEMBER_ID = #{memberId}
+	</delete>
+
+	<delete id="deleteCommentsByPost" parameterType="int">
+		DELETE FROM MEMORIAL_COMMENT WHERE POST_ID = #{postId}
+	</delete>
+
+	<delete id="deleteTributesByPost" parameterType="int">
+		DELETE FROM MEMORIAL_TRIBUTE WHERE POST_ID = #{postId}
+	</delete>
+
+	<delete id="deletePost" parameterType="map">
+		DELETE FROM MEMORIAL_POST WHERE POST_ID = #{postId} AND MEMBER_ID = #{memberId}
 	</delete>
 
 </mapper>

@@ -23,6 +23,7 @@ public class MemorialRoomDTO {
 	private String summary;
 	private String message;
 	private int tributeCount;
+	private int viewCount;
 	private boolean opened;
 	private boolean mine;
 	private boolean myCandle;
@@ -86,6 +87,9 @@ public class MemorialRoomDTO {
 
 	public int getTributeCount() { return tributeCount; }
 	public void setTributeCount(int tributeCount) { this.tributeCount = tributeCount; }
+
+	public int getViewCount() { return viewCount; }
+	public void setViewCount(int viewCount) { this.viewCount = viewCount; }
 
 	public boolean isOpened() { return opened; }
 	public void setOpened(boolean opened) { this.opened = opened; }
