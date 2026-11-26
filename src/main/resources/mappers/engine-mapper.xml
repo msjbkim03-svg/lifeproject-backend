@@ -654,6 +654,8 @@
 			       l.BIRTH_YEAR    AS birthYear,
 			       NVL(l.ORIGIN_CLASS, l.WEALTH_CLASS) AS wealthClass,
 			       l.STATUS        AS status,
+			       l.CURRENT_AGE   AS currentAge,
+			       l.DEATH_AGE     AS deathAge,
 			       ROUND((SYSDATE - l.CREATED_AT) * 86400) AS agoSec
 			FROM LIFE l
 			LEFT JOIN COUNTRY c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
