@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+	"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- A02 관리자 채팅·방명록·금칙어 관리 (김민승) -->
+<mapper namespace="adminChat">
+
+	<!-- ================= 1. 금칙어 (BANNED_WORD) ================= -->
+	<select id="selectWords" resultType="string">
+		SELECT WORD FROM BANNED_WORD ORDER BY WORD
+	</select>
+
+	<select id="countWord" parameterType="string" resultType="int">
+		SELECT COUNT(*) FROM BANNED_WORD WHERE LOWER(WORD) = LOWER(#{word})
+	</select>
+
+	<insert id="insertWord" parameterType="string">
+		INSERT INTO BANNED_WORD (WORD) VALUES (#{word})
+	</insert>
+
+	<delete id="deleteWord" parameterType="string">
+		DELETE FROM BANNED_WORD WHERE WORD = #{word}
+	</delete>
+
+	<!-- ================= 2. 마을 채팅 (CHAT_MESSAGE) ================= -->
+	<sql id="chatWhere">
+		<where>
+			<if test="keyword != null">
+				(cm.CONTENT LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR m.NICKNAME LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR m.LOGIN_ID LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR c.NAME_KO LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR cm.COUNTRY_CODE LIKE '%' || UPPER(#{keyword}) || '%' ESCAPE '\')
+			</if>
+			<if test="status != null">
+				AND cm.IS_DELETED = #{status}
+			</if>
+		</where>
+	</sql>
+
+	<select id="selectChats" parameterType="map" resultType="com.example.demo.admin.AdminChatDTO">
+		SELECT * FROM (
+			SELECT a.*, ROWNUM AS RN FROM (
+				SELECT cm.MSG_ID                            AS msgId,
+				       cm.COUNTRY_CODE                      AS countryCode,
+				       NVL(c.NAME_KO, cm.COUNTRY_CODE)      AS countryName,
+				       cm.MEMBER_ID                         AS memberId,
+				       NVL(m.LOGIN_ID, '-')                 AS loginId,
+				       NVL(m.NICKNAME, '알 수 없음')         AS nickname,
+				       cm.CONTENT                           AS content,
+				       cm.IS_DELETED                        AS isDeleted,
+				       TO_CHAR(cm.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS createdAt
+				FROM CHAT_MESSAGE cm
+				LEFT JOIN MEMBER m ON m.MEMBER_ID = cm.MEMBER_ID
+				LEFT JOIN COUNTRY c ON c.COUNTRY_CODE = cm.COUNTRY_CODE
+				<include refid="chatWhere"/>
+				ORDER BY cm.MSG_ID DESC
+			) a
+			WHERE ROWNUM &lt;= #{end}
+		)
+		WHERE RN &gt; #{start}
+	</select>
+
+	<select id="countChats" parameterType="map" resultType="int">
+		SELECT COUNT(*)
+		FROM CHAT_MESSAGE cm
+		LEFT JOIN MEMBER m ON m.MEMBER_ID = cm.MEMBER_ID
+		LEFT JOIN COUNTRY c ON c.COUNTRY_CODE = cm.COUNTRY_CODE
+		<include refid="chatWhere"/>
+	</select>
+
+	<update id="deleteChat" parameterType="int">
+		UPDATE CHAT_MESSAGE
+		SET IS_DELETED = 'Y'
+		WHERE MSG_ID = #{msgId} AND IS_DELETED = 'N'
+	</update>
+
+	<!-- ================= 3. 추모관 방명록 (MEMORIAL_COMMENT) ================= -->
+	<sql id="commentWhere">
+		<where>
+			<if test="keyword != null">
+				(mc.CONTENT LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR m.NICKNAME LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR m.LOGIN_ID LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR l.NAME LIKE '%' || #{keyword} || '%' ESCAPE '\')
+			</if>
+		</where>
+	</sql>
+
+	<select id="selectComments" parameterType="map" resultType="com.example.demo.admin.AdminCommentDTO">
+		SELECT * FROM (
+			SELECT a.*, ROWNUM AS RN FROM (
+				SELECT mc.COMMENT_ID                        AS commentId,
+				       mc.POST_ID                           AS postId,
+				       p.LIFE_ID                            AS lifeId,
+				       NVL(l.NAME, '알 수 없음')             AS lifeName,
+				       mc.MEMBER_ID                         AS memberId,
+				       NVL(m.LOGIN_ID, '-')                 AS loginId,
+				       NVL(m.NICKNAME, '알 수 없음')         AS nickname,
+				       mc.CONTENT                           AS content,
+				       TO_CHAR(mc.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS createdAt
+				FROM MEMORIAL_COMMENT mc
+				JOIN MEMORIAL_POST p ON p.POST_ID = mc.POST_ID
+				LEFT JOIN LIFE l ON l.LIFE_ID = p.LIFE_ID
+				LEFT JOIN MEMBER m ON m.MEMBER_ID = mc.MEMBER_ID
+				<include refid="commentWhere"/>
+				ORDER BY mc.COMMENT_ID DESC
+			) a
+			WHERE ROWNUM &lt;= #{end}
+		)
+		WHERE RN &gt; #{start}
+	</select>
+
+	<select id="countComments" parameterType="map" resultType="int">
+		SELECT COUNT(*)
+		FROM MEMORIAL_COMMENT mc
+		JOIN MEMORIAL_POST p ON p.POST_ID = mc.POST_ID
+		LEFT JOIN LIFE l ON l.LIFE_ID = p.LIFE_ID
+		LEFT JOIN MEMBER m ON m.MEMBER_ID = mc.MEMBER_ID
+		<include refid="commentWhere"/>
+	</select>
+
+	<delete id="deleteComment" parameterType="int">
+		DELETE FROM MEMORIAL_COMMENT WHERE COMMENT_ID = #{commentId}
+	</delete>
+
+	<!-- ================= 4. 추모관 글 (MEMORIAL_POST) ================= -->
+	<sql id="postWhere">
+		<where>
+			<if test="keyword != null">
+				(p.MESSAGE LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR m.NICKNAME LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR m.LOGIN_ID LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR l.NAME LIKE '%' || #{keyword} || '%' ESCAPE '\'
+				 OR c.NAME_KO LIKE '%' || #{keyword} || '%' ESCAPE '\')
+			</if>
+		</where>
+	</sql>
+
+	<select id="selectPosts" parameterType="map" resultType="com.example.demo.admin.AdminMemorialPostDTO">
+		SELECT * FROM (
+			SELECT a.*, ROWNUM AS RN FROM (
+				SELECT p.POST_ID                            AS postId,
+				       p.LIFE_ID                            AS lifeId,
+				       NVL(l.NAME, '알 수 없음')             AS lifeName,
+				       NVL(c.NAME_KO, '-')                  AS countryName,
+				       p.MEMBER_ID                          AS memberId,
+				       NVL(m.LOGIN_ID, '-')                 AS loginId,
+				       NVL(m.NICKNAME, '알 수 없음')         AS nickname,
+				       p.MESSAGE                            AS message,
+				       NVL(p.TRIBUTE_COUNT, 0)              AS tributeCount,
+				       NVL(p.VIEW_COUNT, 0)                 AS viewCount,
+				       (SELECT COUNT(*) FROM MEMORIAL_COMMENT mc WHERE mc.POST_ID = p.POST_ID) AS commentCount,
+				       TO_CHAR(p.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS createdAt
+				FROM MEMORIAL_POST p
+				LEFT JOIN LIFE l ON l.LIFE_ID = p.LIFE_ID
+				LEFT JOIN COUNTRY c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
+				LEFT JOIN MEMBER m ON m.MEMBER_ID = p.MEMBER_ID
+				<include refid="postWhere"/>
+				ORDER BY p.POST_ID DESC
+			) a
+			WHERE ROWNUM &lt;= #{end}
+		)
+		WHERE RN &gt; #{start}
+	</select>
+
+	<select id="countPosts" parameterType="map" resultType="int">
+		SELECT COUNT(*)
+		FROM MEMORIAL_POST p
+		LEFT JOIN LIFE l ON l.LIFE_ID = p.LIFE_ID
+		LEFT JOIN COUNTRY c ON c.COUNTRY_CODE = l.BIRTH_COUNTRY
+		LEFT JOIN MEMBER m ON m.MEMBER_ID = p.MEMBER_ID
+		<include refid="postWhere"/>
+	</select>
+
+	<delete id="deletePostComments" parameterType="int">
+		DELETE FROM MEMORIAL_COMMENT WHERE POST_ID = #{postId}
+	</delete>
+
+	<delete id="deletePostTributes" parameterType="int">
+		DELETE FROM MEMORIAL_TRIBUTE WHERE POST_ID = #{postId}
+	</delete>
+
+	<delete id="deletePost" parameterType="int">
+		DELETE FROM MEMORIAL_POST WHERE POST_ID = #{postId}
+	</delete>
+
+</mapper>
