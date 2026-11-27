@@ -215,13 +215,14 @@
 		                 WHERE EMAIL = #{email} AND PURPOSE = #{purpose})
 	</update>
 
-	<!-- 틀렸을 때 가장 최근 인증번호의 틀린 횟수 +1 (이미 쓴 번호는 그대로) -->
+	<!-- 틀렸을 때 가장 최근 인증번호의 틀린 횟수 +1 (이미 썼거나 5회 도달 시 더 이상 올리지 않음) -->
 	<update id="increaseAuthFail" parameterType="map">
 		UPDATE EMAIL_AUTH
 		SET FAIL_COUNT = FAIL_COUNT + 1
 		WHERE AUTH_ID = (SELECT MAX(AUTH_ID) FROM EMAIL_AUTH
 		                 WHERE EMAIL = #{email} AND PURPOSE = #{purpose})
 		  AND IS_USED = 'N'
+		  AND FAIL_COUNT &lt; 5
 	</update>
 
 	<!-- 비밀번호 바꾸기 (password 는 BCrypt 로 바꾼 값) -->
