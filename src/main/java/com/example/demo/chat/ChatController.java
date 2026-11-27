@@ -72,9 +72,15 @@ public class ChatController {
 
 	@MessageMapping("/chat/{countryCode}/move")
 	public void move(@DestinationVariable String countryCode, @Header("simpSessionId") String sessionId, ChatPlayerDTO dto) {
+		String prevPlace = service.placeOf(sessionId);
 		ChatPlayerDTO me = service.move(sessionId, countryCode, dto);
 		if (me != null) {
-			template.convertAndSend("/topic/chat/" + countryCode + "/move", me);
+			if (!me.getPlace().equals(prevPlace)) {
+				// 다른 장소로 이동하면 이전 장소의 10번째 대기자가 즉시 당겨지고 새 장소 순번도 반영되도록 명단 브로드캐스트
+				sendPlayers(countryCode);
+			} else {
+				template.convertAndSend("/topic/chat/" + countryCode + "/move", me);
+			}
 		}
 	}
 
