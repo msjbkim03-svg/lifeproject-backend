@@ -22,15 +22,34 @@ import com.example.demo.member.MemberDTO;
 public class ChatService {
 	
 	private static final int MAX_TEXT = 50; // 말풍선이라 짧게 (입력칸 maxLength 50 과 같게)
-	private static final int PLACE_LIMIT = 9; // 장소별 대화·표시 정원 (나 + 다른 사람 8명 = 선착순 9명)
+	private static final int PLACE_LIMIT = 10; // 장소별 대화 정원 (선착순 10명까지 말하기 가능, 11번째부터는 보이되 말하기 제한)
 	private static final long CHAT_COOLDOWN_MS = 3000L; // 도배 방지: 3초 내 연속 전송 제한
+	private static final long LISTEN_CACHE_MS = 5000L; // 입장 시 연속 구독(3개 토픽 + 초기 조회) DB 중복 조회 완화
+	private static final long BANNED_CACHE_MS = 10000L; // 금칙어 목록 단기 캐시 (10초)
 	
 	private ChatDAO dao;
 	private JwtUtil jwt;
 	private MemberDAO memberDAO;
 	private Map<String, ChatPlayerDTO> players = new ConcurrentHashMap<>();
 	private Map<Integer, Long> lastChatAt = new ConcurrentHashMap<>(); // 회원별 마지막 채팅 전송 시각(ms)
+	private Map<String, Long> listenCache = new ConcurrentHashMap<>(); // canListen 통과 결과 단기 캐시
 	private AtomicLong placeSeqGen = new AtomicLong(0); // 장소 입장 순번 발급기 (선착순 보장)
+	private volatile List<String> cachedBannedWords = List.of();
+	private volatile long bannedWordsLoadedAt = 0L;
+
+	// move 처리 결과 (장소 변경 여부를 원자적으로 판별해 명단 브로드캐스트 누락 방지)
+	public static class MoveResult {
+		private final ChatPlayerDTO player;
+		private final boolean placeChanged;
+
+		public MoveResult(ChatPlayerDTO player, boolean placeChanged) {
+			this.player = player;
+			this.placeChanged = placeChanged;
+		}
+
+		public ChatPlayerDTO getPlayer() { return player; }
+		public boolean isPlaceChanged() { return placeChanged; }
+	}
 	
 	public ChatService(ChatDAO dao,JwtUtil jwt, MemberDAO memberDAO) {
 		this.dao=dao;
@@ -78,7 +97,7 @@ public class ChatService {
 			return "집 안에서는 말할 수 없어요. 밖으로 나가 주세요.";
 		}
 
-		// 같은 장소 선착순 9명(나 + 8명) 안에 들지 못하면 말하기 차단 (10번째부터 대기)
+		// 같은 장소 선착순 10명 안에 들지 못하면 말하기 차단 (11번째부터 대기, 화면에는 계속 보임)
 		if (!isWithinPlaceLimit(me)) {
 			return "이 장소는 대화 인원(" + PLACE_LIMIT + "명)이 가득 차서 말할 수 없어요. 앞사람이 나가면 자동으로 참여돼요.";
 		}
@@ -99,7 +118,7 @@ public class ChatService {
 		
 		// 금칙어: 띄어쓰기·대소문자를 빼고 비교 ("바 보", "AD" 도 걸림)
 		String plain = content.replaceAll("\\s", "").toLowerCase();
-		for(String word : dao.selectBannedWords()) {
+		for(String word : getBannedWords()) {
 			String w = word.replaceAll("\\s", "").toLowerCase();
 			if (!w.isEmpty() && plain.contains(w)) return "쓸 수 없는 말이 들어 있어요.";
 		}
@@ -130,21 +149,25 @@ public class ChatService {
 	
 	// 마을 입장 → 명단을 다시 보내야 할 나라 코드 목록을 돌려줌 (입장 실패 시 빈 Set)
 	public Set<String> join(String sessionId, String countryCode, ChatPlayerDTO dto) {
-		Integer memberId = activeMemberId(dto.getToken());
-
-		// 같은 연결 · 같은 나라 · 같은 사람이면 나이 · 성별 · 위치만 바꿈
-		// ※ 비회원으로 놀다가 로그인하면 같은 연결인데 사람이 바뀜 → 아래에서 회원으로 다시 들어가게 함
+		// 이미 같은 연결·같은 나라에 입장한 같은 사람이 나이·코스튬만 갱신하는 경우 DB 재조회 없이 바로 반영
 		ChatPlayerDTO old = players.get(sessionId);
-		boolean samePerson = old != null
-				&& (memberId == null ? old.getMemberId() < 0 : old.getMemberId() == memberId);
-		if (samePerson && countryCode.equals(old.getCountryCode())) {
-			old.setAge(fixAge(dto.getAge()));
-			old.setGender(fixGender(dto.getGender()));
-			old.setCostume(dto.getCostume());
-			if (dto.getClientId() != null) old.setClientId(dto.getClientId());
-			setPosition(old, dto);
+		Integer tokenMemberId = jwt.memberIdOf(dto.getToken());
+		boolean sameExisting = old != null
+				&& countryCode.equals(old.getCountryCode())
+				&& (tokenMemberId == null ? old.getMemberId() < 0 : old.getMemberId() == tokenMemberId);
+		if (sameExisting) {
+			synchronized (old) {
+				old.setAge(fixAge(dto.getAge()));
+				old.setGender(fixGender(dto.getGender()));
+				old.setCostume(dto.getCostume());
+				if (dto.getClientId() != null) old.setClientId(dto.getClientId());
+				setPosition(old, dto);
+			}
 			return Set.of(countryCode);
 		}
+
+		// 최초 입장·나라 이동·비회원→회원 전환은 DB로 활성 회원·비밀번호 버전(pv)·인생 소속을 모두 검증
+		Integer memberId = activeMemberId(dto.getToken());
 
 		String nickname;
 		if(memberId != null) {
@@ -222,24 +245,47 @@ public class ChatService {
 	}
 
 	// 이 나라 채팅방을 들을 수 있는지 (지금 그 나라에서 살고 있는 회원·비회원만)
+	// 입장 시 3개 토픽 구독 + 초기 명단 조회가 연속 호출되므로 통과 결과만 5초간 캐시해 DB 커넥션 폭주를 방지
 	public boolean canListen(String countryCode, String token, String guestToken) {
-		Integer memberId = activeMemberId(token);
-		if (memberId != null && dao.countMemberLife(memberId, countryCode) > 0) {
+		if (countryCode == null || countryCode.isEmpty()) return false;
+		long now = System.currentTimeMillis();
+		String cacheKey = countryCode + "|" + (token == null ? "" : token) + "|" + (guestToken == null ? "" : guestToken);
+		Long exp = listenCache.get(cacheKey);
+		if (exp != null && exp > now) {
 			return true;
 		}
-		return guestToken != null && dao.countGuestLife(guestToken, countryCode) > 0;
+		Integer memberId = activeMemberId(token);
+		boolean ok = (memberId != null && dao.countMemberLife(memberId, countryCode) > 0)
+				|| (guestToken != null && dao.countGuestLife(guestToken, countryCode) > 0);
+		if (ok) {
+			if (listenCache.size() > 500) {
+				listenCache.entrySet().removeIf(e -> e.getValue() <= now);
+			}
+			listenCache.put(cacheKey, now + LISTEN_CACHE_MS);
+		}
+		return ok;
 	}
 
-	public String placeOf(String sessionId) {
-		ChatPlayerDTO me = players.get(sessionId);
-		return me == null ? null : me.getPlace();
+	private List<String> getBannedWords() {
+		long now = System.currentTimeMillis();
+		if (now - bannedWordsLoadedAt > BANNED_CACHE_MS) {
+			List<String> words = dao.selectBannedWords();
+			cachedBannedWords = words == null ? List.of() : words;
+			bannedWordsLoadedAt = now;
+		}
+		return cachedBannedWords;
 	}
 
-	public ChatPlayerDTO move(String sessionId, String countryCode, ChatPlayerDTO dto) {
+	public MoveResult move(String sessionId, String countryCode, ChatPlayerDTO dto) {
 		ChatPlayerDTO me = players.get(sessionId);
 		if (me == null || !countryCode.equals(me.getCountryCode())) return null;
-		setPosition(me, dto);
-		return me;
+		boolean placeChanged;
+		synchronized (me) {
+			String prevPlace = me.getPlace();
+			setPosition(me, dto);
+			placeChanged = !me.getPlace().equals(prevPlace);
+		}
+		return new MoveResult(me, placeChanged);
 	}
 
 	public String leave(String sessionId) {
@@ -262,7 +308,7 @@ public class ChatService {
 		return countries;
 	}
 
-	// 같은 나라 접속자 목록을 장소 입장 순번(placeSeq) 오름차순으로 정렬해 반환 (모든 화면이 같은 9명 순서를 보게 함)
+	// 같은 나라 접속자 목록을 장소 입장 순번(placeSeq) 오름차순으로 정렬해 반환 (모든 화면이 같은 선착순 10명 순서를 보게 함)
 	public List<ChatPlayerDTO> players(String countryCode) {
 		List<ChatPlayerDTO> list = new ArrayList<>();
 		for (ChatPlayerDTO p : players.values()) {
@@ -272,7 +318,7 @@ public class ChatService {
 		return list;
 	}
 
-	// 같은 나라·같은 장소에서 내 앞에 줄 선 인원이 PLACE_LIMIT(9)명 미만인지 확인
+	// 같은 나라·같은 장소에서 내 앞에 줄 선 인원이 PLACE_LIMIT(10)명 미만인지 확인
 	private boolean isWithinPlaceLimit(ChatPlayerDTO me) {
 		Set<Integer> aheadIds = new HashSet<>();
 		for (ChatPlayerDTO p : players.values()) {

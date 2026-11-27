@@ -577,10 +577,16 @@ public class MemberService {
 		return null;
 	}
 
+	// 인증번호 정리: 메일에서 "1 2 3 4 5 6" 을 복사·붙여넣기 해도 공백을 제거해 비교
+	private String cleanCode(String code) {
+		return code == null ? null : code.replaceAll("\\s+", "");
+	}
+
 	// ===== 인증번호 확인 (아이디 찾기·비밀번호 재설정이 같이 씀) =====
 	// 맞으면 true (그 번호는 '사용함'으로 바꿈), 틀리면 false (틀린 횟수 +1)
 	private boolean verifyCode(String email, String purpose, String code) {
-		if (email == null || code == null) return false;
+		code = cleanCode(code);
+		if (email == null || email.isEmpty() || code == null || code.isEmpty()) return false;
 
 		// 가장 최근 번호가 [같은 번호 · 안 씀 · 5분 안 지남 · 틀린 횟수 5번 미만] 이면 통과
 		if (dao.countValidAuth(email, purpose, code) > 0) {
@@ -592,10 +598,12 @@ public class MemberService {
 	}
 
 	// ===== 아이디 찾기 (M09) =====
-
 	@Transactional
 	public String findId(String email, String code) {
 		email = cleanEmail(email);
+		code = cleanCode(code);
+		if (email == null || email.isEmpty() || code == null || code.isEmpty()) return null;
+
 		// 1. 이메일로 일반 회원 찾기 (먼저 → 없거나 구글 계정이면 인증번호를 쓰지 않음)
 		MemberDTO member = dao.selectActiveByEmail(email);
 		if (member == null || isGoogleAccount(member)) return null;
@@ -603,8 +611,9 @@ public class MemberService {
 		// 2. 인증번호를 서버에서 다시 확인 (화면에서 확인했어도 한 번 더 → 이때 '사용함' 처리)
 		if (!verifyCode(email, "FIND_ID", code)) return null;
 
-		// 앞 3글자만 보여 주고 나머지는 *** (아이디는 4자 이상이라 안전)
-		return member.getLoginId().substring(0, 3) + "***";
+		// 앞 3글자만 보여 주고 나머지는 ***
+		String loginId = member.getLoginId();
+		return loginId.substring(0, Math.min(3, loginId.length())) + "***";
 	}
 
 	// ===== 아이디·비밀번호 찾기 - 인증번호 먼저 확인 (M09) =====
@@ -613,10 +622,12 @@ public class MemberService {
 	public String checkCode(MemberFindDTO dto) {
 		dto.setEmail(cleanEmail(dto.getEmail()));
 		if (dto.getLoginId() != null) dto.setLoginId(dto.getLoginId().trim());
+		String code = cleanCode(dto.getCode());
 		String fail = "인증번호가 맞지 않거나 시간이 지났어요.";
 		String purpose = dto.getPurpose();
 		if (!"FIND_ID".equals(purpose) && !"RESET_PW".equals(purpose)) return "잘못된 요청이에요.";
-		if (dto.getEmail() == null || dto.getCode() == null) return fail;
+		if (dto.getEmail() == null || dto.getEmail().isEmpty() || code == null || code.isEmpty()) return fail;
+		if ("RESET_PW".equals(purpose) && (dto.getLoginId() == null || dto.getLoginId().isEmpty())) return fail;
 
 		// 1. 맞는 일반 회원인지 먼저 (안 맞아도 똑같은 문구 → 가입 여부 안 드러남)
 		//    아이디 찾기: 이메일만 / 비밀번호 찾기: 아이디 + 이메일
@@ -624,8 +635,11 @@ public class MemberService {
 				? dao.selectActiveByEmail(dto.getEmail())
 				: dao.selectActiveByLoginIdAndEmail(dto.getLoginId(), dto.getEmail());
 
-		// 2. 회원이 없거나 구글 계정이거나 번호가 틀리면 틀린 횟수 +1 (5번 틀리면 그 번호는 못 씀)
-		if (member == null || isGoogleAccount(member) || dao.countValidAuth(dto.getEmail(), purpose, dto.getCode()) == 0) {
+		// 2. 회원이 없거나 구글 계정이면 틀린 횟수를 올리지 않고 실패 (남이 다른 사람 번호를 망가뜨리지 못하게)
+		if (member == null || isGoogleAccount(member)) return fail;
+
+		// 3. 번호가 틀리면 틀린 횟수 +1 (5번 틀리면 그 번호는 못 씀)
+		if (dao.countValidAuth(dto.getEmail(), purpose, code) == 0) {
 			dao.increaseAuthFail(dto.getEmail(), purpose);
 			return fail;
 		}
@@ -637,6 +651,7 @@ public class MemberService {
 	public String resetPassword(MemberFindDTO dto) {
 		dto.setEmail(cleanEmail(dto.getEmail()));
 		if (dto.getLoginId() != null) dto.setLoginId(dto.getLoginId().trim());
+		String code = cleanCode(dto.getCode());
 
 		// 1. 새 비밀번호 검사 (먼저 검사해야 형식 실수로 인증번호가 헛되이 쓰이지 않음)
 		String newPw = dto.getNewPassword();
@@ -649,15 +664,20 @@ public class MemberService {
 
 		// 2. 아이디와 이메일이 맞는 회원 찾기 (먼저 → 안 맞으면 인증번호를 쓰지 않음)
 		String fail = "인증번호가 맞지 않거나 시간이 지났어요.";
+		if (dto.getLoginId() == null || dto.getLoginId().isEmpty()
+				|| dto.getEmail() == null || dto.getEmail().isEmpty()) {
+			return fail;
+		}
 		MemberDTO member = dao.selectActiveByLoginIdAndEmail(dto.getLoginId(), dto.getEmail());
 		if (member == null) return fail;
 		if (isGoogleAccount(member)) return "Google 소셜 로그인 계정은 비밀번호를 재설정할 수 없어요.";
 
 		// 3. 인증번호를 서버에서 다시 확인 (화면에서 확인했어도 한 번 더 → 이때 '사용함' 처리)
-		if (!verifyCode(dto.getEmail(), "RESET_PW", dto.getCode())) return fail;
+		if (!verifyCode(dto.getEmail(), "RESET_PW", code)) return fail;
 
-		// 4. BCrypt 로 바꿔서 저장 (원래 비밀번호는 복원할 수 없음)
+		// 4. BCrypt 로 바꿔서 저장 + 기존 로그인 5회 실패 잠금 해제
 		dao.updatePassword(member.getMemberId(), encoder.encode(newPw));
+		loginAttempts.remove(member.getLoginId().toLowerCase());
 		return null;
 	}
 
