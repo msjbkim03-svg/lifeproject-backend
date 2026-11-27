@@ -3,11 +3,13 @@ package com.example.demo.chat;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.stereotype.Service;
 
@@ -20,6 +22,7 @@ import com.example.demo.member.MemberDTO;
 public class ChatService {
 	
 	private static final int MAX_TEXT = 50; // 말풍선이라 짧게 (입력칸 maxLength 50 과 같게)
+	private static final int PLACE_LIMIT = 9; // 장소별 대화·표시 정원 (나 + 다른 사람 8명 = 선착순 9명)
 	private static final long CHAT_COOLDOWN_MS = 3000L; // 도배 방지: 3초 내 연속 전송 제한
 	
 	private ChatDAO dao;
@@ -27,6 +30,7 @@ public class ChatService {
 	private MemberDAO memberDAO;
 	private Map<String, ChatPlayerDTO> players = new ConcurrentHashMap<>();
 	private Map<Integer, Long> lastChatAt = new ConcurrentHashMap<>(); // 회원별 마지막 채팅 전송 시각(ms)
+	private AtomicLong placeSeqGen = new AtomicLong(0); // 장소 입장 순번 발급기 (선착순 보장)
 	
 	public ChatService(ChatDAO dao,JwtUtil jwt, MemberDAO memberDAO) {
 		this.dao=dao;
@@ -72,6 +76,11 @@ public class ChatService {
 		// 집 안에서는 다른 사람이 안 보여서 말풍선도 못 봄 → 저장도 안 함
 		if ("home".equals(me.getPlace())) {
 			return "집 안에서는 말할 수 없어요. 밖으로 나가 주세요.";
+		}
+
+		// 같은 장소 선착순 9명(나 + 8명) 안에 들지 못하면 말하기 차단 (10번째부터 대기)
+		if (!isWithinPlaceLimit(me)) {
+			return "이 장소는 대화 인원(" + PLACE_LIMIT + "명)이 가득 차서 말할 수 없어요. 앞사람이 나가면 자동으로 참여돼요.";
 		}
 
 		// 인생이 끝났으면(엔딩 장면 등) 더 말할 수 없음
@@ -156,6 +165,15 @@ public class ChatService {
 		dto.setGender(fixGender(dto.getGender()));
 		dto.setToken(null);
 		dto.setGuestToken(null);
+		// 같은 나라·같은 장소에서 비회원→회원 전환처럼 재입장한 경우 기존 줄 선 순번 유지, 그 외엔 새 순번 발급
+		String nextPlace = fixPlace(dto.getPlace());
+		if (old != null && countryCode.equals(old.getCountryCode()) && nextPlace.equals(old.getPlace()) && old.getPlaceSeq() > 0) {
+			dto.setPlace(nextPlace);
+			dto.setPlaceSeq(old.getPlaceSeq());
+		} else {
+			dto.setPlace(null);
+			dto.setPlaceSeq(0);
+		}
 		setPosition(dto, dto);
 
 		Set<String> refresh = new HashSet<>();
@@ -212,6 +230,11 @@ public class ChatService {
 		return guestToken != null && dao.countGuestLife(guestToken, countryCode) > 0;
 	}
 
+	public String placeOf(String sessionId) {
+		ChatPlayerDTO me = players.get(sessionId);
+		return me == null ? null : me.getPlace();
+	}
+
 	public ChatPlayerDTO move(String sessionId, String countryCode, ChatPlayerDTO dto) {
 		ChatPlayerDTO me = players.get(sessionId);
 		if (me == null || !countryCode.equals(me.getCountryCode())) return null;
@@ -239,17 +262,42 @@ public class ChatService {
 		return countries;
 	}
 
+	// 같은 나라 접속자 목록을 장소 입장 순번(placeSeq) 오름차순으로 정렬해 반환 (모든 화면이 같은 9명 순서를 보게 함)
 	public List<ChatPlayerDTO> players(String countryCode) {
 		List<ChatPlayerDTO> list = new ArrayList<>();
 		for (ChatPlayerDTO p : players.values()) {
 			if (countryCode.equals(p.getCountryCode())) list.add(p);
 		}
+		list.sort(Comparator.comparingLong(ChatPlayerDTO::getPlaceSeq));
 		return list;
 	}
 
+	// 같은 나라·같은 장소에서 내 앞에 줄 선 인원이 PLACE_LIMIT(9)명 미만인지 확인
+	private boolean isWithinPlaceLimit(ChatPlayerDTO me) {
+		Set<Integer> aheadIds = new HashSet<>();
+		for (ChatPlayerDTO p : players.values()) {
+			if (p.getMemberId() == me.getMemberId()) continue;
+			if (me.getCountryCode().equals(p.getCountryCode())
+					&& me.getPlace().equals(p.getPlace())
+					&& p.getPlaceSeq() < me.getPlaceSeq()) {
+				aheadIds.add(p.getMemberId());
+			}
+		}
+		return aheadIds.size() < PLACE_LIMIT;
+	}
+
+	private String fixPlace(String place) {
+		return place == null || place.isEmpty() || place.length() > 20 ? "home" : place;
+	}
+
 	private void setPosition(ChatPlayerDTO me, ChatPlayerDTO pos) {
-		String place = pos.getPlace();
-		me.setPlace(place == null || place.length() > 20 ? "home" : place);
+		String prevPlace = me.getPlace();
+		String nextPlace = fixPlace(pos.getPlace());
+		// 처음 입장하거나 다른 장소로 이동하면 그 장소 맨 뒤 순번을 새로 부여 (갔다 오면 다시 줄 섬)
+		if (!nextPlace.equals(prevPlace) || me.getPlaceSeq() == 0) {
+			me.setPlaceSeq(placeSeqGen.incrementAndGet());
+		}
+		me.setPlace(nextPlace);
 		me.setX(Math.max(0, Math.min(100, pos.getX())));
 		me.setDir("left".equals(pos.getDir()) ? "left" : "right");
 		me.setWalking(pos.isWalking());

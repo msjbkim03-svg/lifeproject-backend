@@ -15,6 +15,7 @@ public class ChatPlayerDTO {
 	private double x;
 	private String dir;
 	private boolean walking;
+	private long placeSeq; // 현재 장소 입장 순번 (장소별 선착순 9명 정원 판정용)
 	private Map<String, String> costume;
 
 	@JsonIgnore
@@ -52,6 +53,9 @@ public class ChatPlayerDTO {
 
 	public boolean isWalking() { return walking; }
 	public void setWalking(boolean walking) { this.walking = walking; }
+
+	public long getPlaceSeq() { return placeSeq; }
+	public void setPlaceSeq(long placeSeq) { this.placeSeq = placeSeq; }
 
 	public Map<String, String> getCostume() { return costume; }
 	public void setCostume(Map<String, String> costume) { this.costume = costume; }
