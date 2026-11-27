@@ -21,7 +21,7 @@ public class CostumeService {
 
 	// 탈것 나이 제한 (화면 CostumeSheet 잠금 표시와 같은 기준)
 	private static final Map<String, Integer> MIN_AGE = Map.of(
-			"RIDE_01", 7, "RIDE_03", 15, "RIDE_02", 18, "RIDE_04", 19, "RIDE_05", 20);
+			"RIDE_01", 7, "RIDE_03", 15, "RIDE_02", 18, "RIDE_06", 19, "RIDE_04", 19, "RIDE_05", 20);
 
 	private CostumeDAO dao;
 
