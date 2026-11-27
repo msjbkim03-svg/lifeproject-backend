@@ -134,12 +134,13 @@ public class EngineController {
 		return ResponseEntity.ok(out);
 	}
 
-	// C03 나라 패널  GET /api/engine/country?lifeId=...&guestToken=...&view=cur|born
+	// C03 나라 패널  GET /api/engine/country?lifeId=...&guestToken=...&view=cur|born&era=cur|born
 	@GetMapping("/api/engine/country")
 	public ResponseEntity<?> country(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
 			@RequestParam(required = false) String view,
+			@RequestParam(required = false) String era,
 			@RequestHeader(value = "Authorization", required = false) String auth) {
-		CountryInfoDTO info = engineService.countryInfo(lifeId, loginMemberId(auth), guestToken, view);
+		CountryInfoDTO info = engineService.countryInfo(lifeId, loginMemberId(auth), guestToken, view, era);
 		if (info == null) {
 			return ResponseEntity.status(403).body("내 인생이 아니에요.");
 		}
@@ -147,13 +148,14 @@ public class EngineController {
 	}
 
 	// C22 엔딩 크레딧 재료  GET /api/engine/film?lifeId=...&guestToken=...
-	//   { life: 세상을 떠난 해의 모습(가족 포함), industry: { 나이: 산업 }, sources: [자료 이름] }
+	//   { life: 세상을 떠난 해의 모습(가족 포함), industry: { 나이: 산업 }, sources: [자료 이름], wear: { hair, top, hat, ride } }
+	//   끝난 인생은 공유 링크·추모관에서도 누구나 볼 수 있음 (11/27 동현님)
 	@GetMapping("/api/engine/film")
 	public ResponseEntity<?> film(@RequestParam int lifeId, @RequestParam(required = false) String guestToken,
 			@RequestHeader(value = "Authorization", required = false) String auth) {
 		java.util.Map<String, Object> out = engineService.filmData(lifeId, loginMemberId(auth), guestToken);
 		if (out == null) {
-			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+			return ResponseEntity.status(404).body("인생을 찾을 수 없어요.");
 		}
 		if (out.isEmpty()) {
 			return ResponseEntity.badRequest().body("아직 끝나지 않은 인생이에요.");

@@ -36,6 +36,7 @@ public class ResultDTO {
 	private int childCount;	// 자녀 수
 	private String startType;	// MEMBER, GUEST
 	private String status;	// PLAYING, ENDED, ABANDONED
+	private boolean mine;	// 내 인생인지 (추모관 올리기 등 주인 전용 버튼 표시용)
 	private Integer memorialPostId;	// 추모관에 올린 글 번호 (안 올렸으면 null, B01)
 	private int pointEarned;	// 이 인생으로 받은 포인트 (C12)
 	private Integer originClass;	// 태어난 집 형편 1~5 (ORIGIN_CLASS, 결과 화면 '태어난 집')
@@ -314,6 +315,14 @@ public class ResultDTO {
 
 	public void setStatus(String status) {
 		this.status = status;
+	}
+
+	public boolean isMine() {
+		return mine;
+	}
+
+	public void setMine(boolean mine) {
+		this.mine = mine;
 	}
 
 	public Integer getMemorialPostId() {

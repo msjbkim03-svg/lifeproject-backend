@@ -5,12 +5,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.example.demo.commons.JwtUtil;
-import com.example.demo.engine.EngineService;
 import com.example.demo.result.ResultDTO;
 import com.example.demo.result.ResultService;
 import com.example.demo.story.AiCaller;
@@ -20,50 +16,31 @@ public class QaController {
 
 	private final QaService qaService;
 	private final ResultService resultService;	// C18 결과(요약 + 인생 기록)를 근거로 씀
-	private final EngineService engineService;	// 내 인생인지 확인 (isMyLife)
-	private final JwtUtil jwtUtil;
 
-	public QaController(QaService qaService, ResultService resultService,
-			EngineService engineService, JwtUtil jwtUtil) {
+	public QaController(QaService qaService, ResultService resultService) {
 		this.qaService = qaService;
 		this.resultService = resultService;
-		this.engineService = engineService;
-		this.jwtUtil = jwtUtil;
 	}
 
-	// 로그인 토큰에서 회원 번호 꺼내기 (없거나 잘못된 토큰이면 null = 비회원)
-	private Integer loginMemberId(String auth) {
-		if (auth == null || !auth.startsWith("Bearer ")) {
-			return null;
-		}
-		try {
-			String id = jwtUtil.verifyToken(auth.substring(7)).getSubject();
-			return Integer.parseInt(id);
-		} catch (Exception e) {
-			return null;
-		}
-	}
-
-	// 지난 질문·답변 목록  GET /api/qa/{lifeId}?guestToken=...
+	// 지난 질문·답변 목록  GET /api/qa/{lifeId}
+	// 끝난 인생(ENDED)은 공유 링크에서도 누구나 볼 수 있음 (11/27 동현님)
 	@GetMapping("/api/qa/{lifeId}")
-	public ResponseEntity<?> list(@PathVariable int lifeId,
-			@RequestParam(required = false) String guestToken,
-			@RequestHeader(value = "Authorization", required = false) String auth) {
-		if (!engineService.isMyLife(lifeId, loginMemberId(auth), guestToken)) {
-			return ResponseEntity.status(403).body("내 인생이 아니에요.");
+	public ResponseEntity<?> list(@PathVariable int lifeId) {
+		ResultDTO result = resultService.getResult(lifeId);
+		if (result == null) {
+			return ResponseEntity.status(404).body("인생을 찾을 수 없어요.");
+		}
+		if (!"ENDED".equals(result.getStatus())) {
+			return ResponseEntity.badRequest().body("아직 끝나지 않은 인생이에요.");
 		}
 		return ResponseEntity.ok(qaService.list(lifeId));
 	}
 
-	// C20 질문하기  POST /api/qa/{lifeId}   { "question": "...", "guestToken": "..." }
+	// C20 질문하기  POST /api/qa/{lifeId}   { "question": "..." }
 	@PostMapping("/api/qa/{lifeId}")
-	public ResponseEntity<?> ask(@PathVariable int lifeId, @RequestBody QaRequestDTO req,
-			@RequestHeader(value = "Authorization", required = false) String auth) {
+	public ResponseEntity<?> ask(@PathVariable int lifeId, @RequestBody QaRequestDTO req) {
 
-		// 1. 내 인생, 끝난 인생인지
-		if (!engineService.isMyLife(lifeId, loginMemberId(auth), req.getGuestToken())) {
-			return ResponseEntity.status(403).body("내 인생이 아니에요.");
-		}
+		// 1. 끝난 인생인지 확인 (공유받은 끝난 인생에도 물어볼 수 있음)
 		ResultDTO result = resultService.getResult(lifeId);
 		if (result == null) {
 			return ResponseEntity.status(404).body("인생을 찾을 수 없어요.");

@@ -37,27 +37,25 @@ public class ResultController {
 	}
 
 	// C18 인생 결과  GET /api/result/{lifeId}?guestToken=...
-	// 회원: Authorization 헤더 / 비회원: guestToken
+	// 끝난 인생(ENDED)은 공유 링크·추모관에서도 누구나 볼 수 있게 공개 (주인 여부는 result.mine 으로 전달, 11/27 동현님)
 	@GetMapping("/api/result/{lifeId}")
 	public ResponseEntity<?> result(@PathVariable int lifeId,
 			@RequestParam(required = false) String guestToken,
 			@RequestHeader(value = "Authorization", required = false) String auth) {
 
-		// 1. 내 인생인지 확인 (다른 사람 인생 결과는 추모관(B01)에서만 봄)
-		if (!engineService.isMyLife(lifeId, loginMemberId(auth), guestToken)) {
-			return ResponseEntity.status(403).body("내 인생이 아니에요.");
-		}
-
-		// 2. 결과 모으기
+		// 1. 결과 모으기
 		ResultDTO result = resultService.getResult(lifeId);
 		if (result == null) {
 			return ResponseEntity.status(404).body("인생을 찾을 수 없어요.");
 		}
 
-		// 3. 아직 진행 중이면 결과 없음
+		// 2. 아직 진행 중이면 결과 없음
 		if (!"ENDED".equals(result.getStatus())) {
 			return ResponseEntity.badRequest().body("아직 끝나지 않은 인생이에요.");
 		}
+
+		// 3. 내 인생 여부 표시 (추모관에 올리기 등은 주인만 표시)
+		result.setMine(engineService.isMyLife(lifeId, loginMemberId(auth), guestToken));
 		return ResponseEntity.ok(result);
 	}
 }

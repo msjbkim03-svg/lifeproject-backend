@@ -1517,17 +1517,22 @@ public class EngineService {
 		return engineDao.selectYearLogs(lifeId);
 	}
 
-	// C03 나라 패널 (원작 나라 패널): 그해 사는 나라, view가 born이면 태어난 나라
+	// C03 나라 패널 (원작 나라 패널): 그해 사는 나라, view가 born이면 태어난 나라, era가 born이면 출생 시대(태어난 해 연대)
 	//   통계는 그해와 가장 가까운 연대 값 (나라·연대마다 한 번 읽으면 서버 메모리에 보관)
 	private final Map<String, CountryInfoDTO> countryInfoCache = new ConcurrentHashMap<>();
 
 	public CountryInfoDTO countryInfo(int lifeId, Integer memberId, String guestToken, String view) {
+		return countryInfo(lifeId, memberId, guestToken, view, null);
+	}
+
+	public CountryInfoDTO countryInfo(int lifeId, Integer memberId, String guestToken, String view, String era) {
 		LifeDTO life = loadMyLife(lifeId, memberId, guestToken);
 		if (life == null) {
 			return null;
 		}
 		String cc = "born".equals(view) ? life.getBirthCountry() : life.getCurrentCountry();
-		int year = life.getBirthYear() + life.getCurrentAge();
+		boolean bornEra = "born".equals(era);
+		int year = bornEra ? life.getBirthYear() : life.getBirthYear() + life.getCurrentAge();
 		String key = cc + "_" + year / 10 * 10;
 		CountryInfoDTO info = countryInfoCache.get(key);
 		if (info == null) {
@@ -1543,7 +1548,7 @@ public class EngineService {
 			LifeDTO at = new LifeDTO();
 			at.setCurrentCountry(cc);
 			at.setBirthYear(life.getBirthYear());
-			at.setCurrentAge(life.getCurrentAge());
+			at.setCurrentAge(bornEra ? 0 : life.getCurrentAge());
 			RegionStatDTO r = engineDao.selectRegionStat(at);
 			if (r != null) {
 				info.setEnrollElem(r.getEnrollElem());
@@ -1564,12 +1569,14 @@ public class EngineService {
 	}
 
 	// ================= C22 엔딩 크레딧 (원작 주마등 필름) =================
-	// 끝난 내 인생 하나의 필름 재료 (내 인생이 아니면 null, 아직 안 끝났으면 빈 Map)
+	// 끝난 인생 하나의 필름 재료 (없으면 null, 아직 안 끝났으면 빈 Map)
+	//   끝난 인생(ENDED)은 공유 링크·추모관에서도 누구나 볼 수 있게 공개 (주인 식별값 memberId·guestToken은 비워서 응답, 11/27 동현님)
 	//   life:     세상을 떠난 해의 모습 (가족과 삶 · 가진 것 · 사는 나라 …, 진행 화면과 같은 fillRegion)
 	//   industry: 나이 → 그해 하던 일의 산업 AGRI · INDUSTRY · SERVICE (마을 일터 그림)
 	//   sources:  이 이야기에 쓰인 자료 (겪은 역사 사건 · 태어난 나라 통계의 출처 이름, 최대 12개)
+	//   wear:     착용 중인 코스튬 { hair, top, hat, ride }
 	public Map<String, Object> filmData(int lifeId, Integer memberId, String guestToken) {
-		LifeDTO life = loadMyLife(lifeId, memberId, guestToken);
+		LifeDTO life = engineDao.selectLife(lifeId);
 		if (life == null) {
 			return null;
 		}
@@ -1579,6 +1586,9 @@ public class EngineService {
 		}
 		life.setHistName(engineDao.selectHistName(life));
 		fillRegion(life);
+		// 공개 응답이므로 주인을 알아낼 수 있는 회원 번호·비회원 토큰은 비움
+		life.setMemberId(null);
+		life.setGuestToken(null);
 		Map<Integer, String> industry = new java.util.TreeMap<>();
 		List<YearLogDTO> years = engineDao.selectYearLogs(lifeId);
 		if (years != null) {
@@ -1590,9 +1600,29 @@ public class EngineService {
 			}
 		}
 		List<String> sources = engineDao.selectFilmSources(lifeId);
+		Map<String, String> wear = new HashMap<>();
+		try {
+			List<Map<String, String>> equipped = engineDao.selectEquippedWear(lifeId);
+			if (equipped != null) {
+				for (Map<String, String> w : equipped) {
+					String part = w.get("part");
+					String look = w.get("look");
+					if (part == null || look == null) {
+						continue;
+					}
+					String key = "HAIR".equals(part) ? "hair" : "CLOTHES".equals(part) ? "top" : "HAT".equals(part) ? "hat" : "RIDE".equals(part) ? "ride" : null;
+					if (key != null) {
+						wear.put(key, look);
+					}
+				}
+			}
+		} catch (RuntimeException e) {
+			// 코스튬 표가 없어도 필름은 그대로
+		}
 		out.put("life", life);
 		out.put("industry", industry);
 		out.put("sources", sources == null ? new ArrayList<String>() : sources);
+		out.put("wear", wear);
 		return out;
 	}
 
@@ -2725,9 +2755,12 @@ public class EngineService {
 		Map<String, Integer> did = doneThisYear.getOrDefault(life.getLifeId(), Map.of());
 
 		List<ShopItemDTO> items = new ArrayList<>();
-		// 물건 사기
+		// 물건 사기 (탈것은 C21 옷 가게에서 살 수 있어서 여기서 뺌, 11/27 동현님)
 		for (Object[] it : ITEMS) {
 			String id = (String) it[0];
+			if ("BIKE".equals(id) || "MOTO".equals(id) || "CAR".equals(id)) {
+				continue;
+			}
 			int minAge = (Integer) it[3];
 			int from = (Integer) it[4];
 			if (age < minAge || year < from) {

@@ -62,6 +62,7 @@ public interface EngineDao {
 	List<Integer> selectChildBirthAges(int lifeId); // C03 가족: 아이가 태어난 해의 내 나이 (CHILD 이벤트 기록)
 	List<YearLogDTO> selectYearLogs(int lifeId); // C03 인생 지도: 한 해씩 남긴 기록
 	List<String> selectFilmSources(int lifeId); // C22 엔딩 크레딧: 이 이야기에 쓰인 자료 이름
+	List<Map<String, String>> selectEquippedWear(int lifeId); // C22 엔딩 크레딧·결과 공개 보기: 착용 중인 코스튬 (part, look)
 	CountryInfoDTO selectCountryInfo(Map<String, Object> cond); // C03 나라 패널 (countryCode, year)
 	int countPendingChosen(LifeDTO life); // C10: 선택 이벤트에서 이미 '떠난다'를 골랐는지 (목적지 기다리는 중)
 
