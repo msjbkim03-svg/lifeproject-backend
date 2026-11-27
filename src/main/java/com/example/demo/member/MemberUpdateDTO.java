@@ -12,6 +12,7 @@ public class MemberUpdateDTO {
 	private String newPassword;      // 새 비밀번호 (비워 두면 안 바뀜)
 	private String newPasswordCheck; // 새 비밀번호 확인
 	private String emailCode;        // 이메일을 바꿀 때 새 이메일로 받은 인증번호 6자리
+	private String googleCredential; // 구글 소셜 계정 탈퇴 시 재인증용 Google 토큰
 
 	public int getMemberId() { return memberId; }
 	public void setMemberId(int memberId) { this.memberId = memberId; }
@@ -36,4 +37,7 @@ public class MemberUpdateDTO {
 
 	public String getEmailCode() { return emailCode; }
 	public void setEmailCode(String emailCode) { this.emailCode = emailCode; }
+
+	public String getGoogleCredential() { return googleCredential; }
+	public void setGoogleCredential(String googleCredential) { this.googleCredential = googleCredential; }
 }

@@ -70,9 +70,18 @@ public class MemberController {
 	// 로그인 (M02)  POST /api/members/login
 	@PostMapping("/login")
 	public ResponseEntity<Map<String, Object>> login(@RequestBody MemberLoginDTO dto) {
+		if (service.isLoginLocked(dto.getLoginId())) {
+			return ResponseEntity.status(429)
+					.body(Map.of("message", "로그인 시도가 너무 많아요. 5분 뒤에 다시 시도해 주세요."));
+		}
+
 		MemberDTO member = service.login(dto.getLoginId(), dto.getPassword());
 
 		if (member == null) {
+			if (service.isLoginLocked(dto.getLoginId())) {
+				return ResponseEntity.status(429)
+						.body(Map.of("message", "로그인을 5번 틀려 5분간 잠겼어요. 잠시 후 다시 시도해 주세요."));
+			}
 			return ResponseEntity.status(401)
 					.body(Map.of("message", "아이디 또는 비밀번호가 맞지 않아요."));
 		}
@@ -123,7 +132,13 @@ public class MemberController {
 					"suggestedNickname", gInfo.getOrDefault("suggestedNickname", "")));
 		}
 
-		// 이미 가입된 회원 → 일반 로그인과 동일하게 비회원 인생 전환 + JWT 발급
+		// 일반 회원가입으로 이미 등록된 이메일이면 구글 로그인 자동 연결 차단 (선가입 계정 탈취 방지)
+		if (!service.isGoogleAccount(member)) {
+			return ResponseEntity.status(409)
+					.body(Map.of("message", "이미 일반 회원가입으로 등록된 이메일이에요. 아이디와 비밀번호로 로그인해 주세요."));
+		}
+
+		// 이미 가입된 구글 회원 → 일반 로그인과 동일하게 비회원 인생 전환 + JWT 발급
 		boolean converted = service.convertGuestLife(member.getMemberId(), guestToken);
 		String token = jwtUtil.createToken(String.valueOf(member.getMemberId()), member.getMemberRole(),
 				JwtUtil.passwordVersion(member.getPassword()));
@@ -223,9 +238,13 @@ public class MemberController {
 	@PostMapping("/me/withdraw")
 	public ResponseEntity<Map<String, Object>> withdraw(@RequestAttribute("memberId") String memberId,
 			@RequestBody MemberUpdateDTO dto) {
-		boolean ok = service.withdraw(Integer.parseInt(memberId), dto.getCurrentPassword());
+		int id = Integer.parseInt(memberId);
+		boolean ok = service.withdraw(id, dto.getCurrentPassword(), dto.getGoogleCredential());
 		if (!ok) {
-			return ResponseEntity.badRequest().body(Map.of("message", "비밀번호가 맞지 않아요."));
+			String msg = service.isGoogleMemberId(id)
+					? "Google 본인 확인에 실패했어요. 연동된 계정으로 다시 인증해 주세요."
+					: "비밀번호가 맞지 않아요.";
+			return ResponseEntity.badRequest().body(Map.of("message", msg));
 		}
 		return ResponseEntity.ok(Map.of("message", "탈퇴했어요."));
 	}

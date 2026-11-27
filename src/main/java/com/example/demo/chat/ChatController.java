@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.context.event.EventListener;
+import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -13,7 +14,9 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
@@ -47,9 +50,16 @@ public class ChatController {
 		return null;
 	}
 	
+	// 지금 그 나라에서 살고 있는 회원·비회원만 접속자 명단 조회 가능 (ChatSubscribeGuard 와 같은 기준)
 	@GetMapping("/{countryCode}/players")
-	public List<ChatPlayerDTO> players(@PathVariable String countryCode) {
-		return service.players(countryCode);
+	public ResponseEntity<List<ChatPlayerDTO>> players(@PathVariable String countryCode,
+			@RequestParam(required = false) String guestToken,
+			@RequestHeader(value = "Authorization", required = false) String auth) {
+		String token = (auth != null && auth.startsWith("Bearer ")) ? auth.substring(7) : null;
+		if (!service.canListen(countryCode, token, guestToken)) {
+			return ResponseEntity.status(403).build();
+		}
+		return ResponseEntity.ok(service.players(countryCode));
 	}
 
 	@MessageMapping("/chat/{countryCode}/join")

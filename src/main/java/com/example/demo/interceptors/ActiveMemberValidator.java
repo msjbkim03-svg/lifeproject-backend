@@ -59,15 +59,18 @@ public class ActiveMemberValidator implements HandlerInterceptor {
 			return false;
 		}
 
-		// 5. 토큰을 받은 뒤 비밀번호가 바뀌었으면 401 (pv 가 없는 예전 토큰은 그대로 통과)
-		if (pv != null && !pv.equals(JwtUtil.passwordVersion(member.getPassword()))) {
-			response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-			return false;
+		// 5. pv 가 없거나 토큰을 받은 뒤 비밀번호가 바뀌었으면 401
+		if (pv == null || !pv.equals(JwtUtil.passwordVersion(member.getPassword()))) {
+		    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+		    return false;
 		}
 
 		// 6. 남은 시간이 1시간보다 적으면 새 토큰을 응답 헤더(New-Token)로 줌 → 게임하는 동안 로그인 자동 연장
+		//    ※ 메인 화면 자동 폴링(/api/engine/live)은 사용자 조작이 아니므로 자동 연장에서 제외
+		String uri = request.getRequestURI();
+		boolean isBackgroundPoll = "/api/engine/live".equals(uri);
 		long left = token.getExpiresAt().getTime() - System.currentTimeMillis();
-		if (left < 60 * 60 * 1000) {
+		if (!isBackgroundPoll && left < 60 * 60 * 1000) {
 			String newToken = jwt.createToken(token.getSubject(), token.getClaim("role").asString(),
 					JwtUtil.passwordVersion(member.getPassword()));
 			response.setHeader("New-Token", newToken);
