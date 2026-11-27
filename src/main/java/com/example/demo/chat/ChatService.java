@@ -20,11 +20,13 @@ import com.example.demo.member.MemberDTO;
 public class ChatService {
 	
 	private static final int MAX_TEXT = 50; // 말풍선이라 짧게 (입력칸 maxLength 50 과 같게)
+	private static final long CHAT_COOLDOWN_MS = 3000L; // 도배 방지: 3초 내 연속 전송 제한
 	
 	private ChatDAO dao;
 	private JwtUtil jwt;
 	private MemberDAO memberDAO;
 	private Map<String, ChatPlayerDTO> players = new ConcurrentHashMap<>();
+	private Map<Integer, Long> lastChatAt = new ConcurrentHashMap<>(); // 회원별 마지막 채팅 전송 시각(ms)
 	
 	public ChatService(ChatDAO dao,JwtUtil jwt, MemberDAO memberDAO) {
 		this.dao=dao;
@@ -47,7 +49,7 @@ public class ChatService {
 		MemberDTO member = memberDAO.selectById(memberId);
 		if (member == null || !"ACTIVE".equals(member.getStatus())) return null;
 		String pv = t.getClaim("pv").asString();
-		if (pv != null && !pv.equals(JwtUtil.passwordVersion(member.getPassword()))) return null;
+		if (pv == null || !pv.equals(JwtUtil.passwordVersion(member.getPassword()))) return null;
 		return memberId;
 	}
 	
@@ -91,6 +93,20 @@ public class ChatService {
 		for(String word : dao.selectBannedWords()) {
 			String w = word.replaceAll("\\s", "").toLowerCase();
 			if (!w.isEmpty() && plain.contains(w)) return "쓸 수 없는 말이 들어 있어요.";
+		}
+
+		// 도배 방지: 같은 회원이 3초 안에 연속 전송하면 거절 (원자적 검사·갱신)
+		long now = System.currentTimeMillis();
+		boolean[] blocked = { false };
+		lastChatAt.compute(memberId, (k, prev) -> {
+			if (prev != null && now - prev < CHAT_COOLDOWN_MS) {
+				blocked[0] = true;
+				return prev;
+			}
+			return now;
+		});
+		if (blocked[0]) {
+			return "잠시 뒤에 다시 말해 주세요. (3초 제한)";
 		}
 		
 		dto.setCountryCode(countryCode);

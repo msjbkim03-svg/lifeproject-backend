@@ -3,6 +3,7 @@ package com.example.demo.member;
 import java.security.SecureRandom;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -26,6 +27,19 @@ public class MemberService {
 
 	// 인증 메일은 이 일꾼 2명이 차례로 보냄 (요청마다 새 스레드를 만들지 않게 → 한꺼번에 몰려도 서버가 버팀)
 	private static final ExecutorService MAIL_WORKERS = Executors.newFixedThreadPool(2);
+
+	// 로그인 무차별 대입 방지: 같은 아이디 15분 내 5회 연속 실패 시 5분간 잠금
+	private static final int MAX_LOGIN_FAIL = 5;
+	private static final long LOGIN_LOCK_MS = 5 * 60 * 1000L;
+	private static final long LOGIN_FAIL_WINDOW_MS = 15 * 60 * 1000L;
+
+	private static class LoginAttempt {
+		int failCount;
+		long lastFailAt;
+		long lockedUntil;
+	}
+
+	private final Map<String, LoginAttempt> loginAttempts = new ConcurrentHashMap<>();
 
 	private MemberDAO dao;
 	private ChatDAO chatDAO;           // 금칙어 목록 (BANNED_WORD, 닉네임에도 금칙어 막기)
@@ -170,6 +184,52 @@ public class MemberService {
 		}
 	}
 
+	// 구글 소셜 로그인 계정 여부 판별
+	public boolean isGoogleAccount(MemberDTO member) {
+		return member != null && member.getLoginId() != null && member.getLoginId().startsWith("g_");
+	}
+
+	public boolean isGoogleMemberId(int memberId) {
+		return isGoogleAccount(dao.selectById(memberId));
+	}
+
+	// 로그인 잠금 여부 확인 (5회 연속 실패 시 5분간 잠금)
+	public boolean isLoginLocked(String loginId) {
+		if (loginId == null || loginId.isBlank()) return false;
+		String key = loginId.trim().toLowerCase();
+		LoginAttempt attempt = loginAttempts.get(key);
+		if (attempt == null) return false;
+		long now = System.currentTimeMillis();
+		if (attempt.lockedUntil > now) return true;
+		if (attempt.lockedUntil > 0) {
+			loginAttempts.remove(key, attempt);
+		}
+		return false;
+	}
+
+	private void recordLoginFail(String key) {
+		long now = System.currentTimeMillis();
+		if (loginAttempts.size() > 1000) {
+			loginAttempts.entrySet().removeIf(e -> {
+				LoginAttempt v = e.getValue();
+				return (v.lockedUntil > 0 && v.lockedUntil <= now)
+						|| (v.lockedUntil == 0 && now - v.lastFailAt > LOGIN_FAIL_WINDOW_MS);
+			});
+		}
+		loginAttempts.compute(key, (k, prev) -> {
+			boolean expired = prev == null
+					|| (prev.lockedUntil > 0 && prev.lockedUntil <= now)
+					|| (prev.lockedUntil == 0 && now - prev.lastFailAt > LOGIN_FAIL_WINDOW_MS);
+			LoginAttempt a = expired ? new LoginAttempt() : prev;
+			a.failCount++;
+			a.lastFailAt = now;
+			if (a.failCount >= MAX_LOGIN_FAIL) {
+				a.lockedUntil = now + LOGIN_LOCK_MS;
+			}
+			return a;
+		});
+	}
+
 	// ===== 로그인 (M02) =====
 	// 아이디·비밀번호가 맞으면 회원 정보를, 틀리면 null 을 돌려준다
 	public MemberDTO login(String loginId, String password) {
@@ -177,17 +237,31 @@ public class MemberService {
 		// 0. 빈 값이면 바로 실패
 		if (loginId == null || password == null) return null;
 		loginId = loginId.trim();
+		if (loginId.isEmpty()) return null;
+
+		String key = loginId.toLowerCase();
+		if (isLoginLocked(loginId)) return null;
 
 		// 1. 아이디로 회원 찾기
 		MemberDTO member = dao.selectByLoginId(loginId);
-		if (member == null) return null; // 없는 아이디
+		if (member == null) {
+			recordLoginFail(key);
+			return null; // 없는 아이디
+		}
 
 		// 2. 탈퇴한 회원은 로그인 불가
-		if ("WITHDRAWN".equals(member.getStatus())) return null;
+		if ("WITHDRAWN".equals(member.getStatus())) {
+			recordLoginFail(key);
+			return null;
+		}
 
 		// 3. 입력한 비밀번호를 DB의 BCrypt 값과 비교
-		if (!encoder.matches(password, member.getPassword())) return null;
+		if (!encoder.matches(password, member.getPassword())) {
+			recordLoginFail(key);
+			return null;
+		}
 
+		loginAttempts.remove(key);
 		return member;
 	}
 
@@ -427,14 +501,20 @@ public class MemberService {
 	}
 
 	// ===== 회원 탈퇴 (M06) =====
-	// 비밀번호가 맞으면 STATUS 를 'WITHDRAWN' 으로 바꾸고 true
+	// 일반 회원: 비밀번호 확인 / 구글 회원: Google 토큰 재인증 후 연동 이메일 일치 확인
 	// (회원 줄은 지우지 않음 → 인생·추모관 글과 외래키 오류 방지)
 	@Transactional // 탈퇴 + 진행 중 인생 포기를 한 묶음으로
-	public boolean withdraw(int memberId, String password) {
+	public boolean withdraw(int memberId, String password, String googleCredential) {
 		MemberDTO me = dao.selectById(memberId);
 		if (me == null || "WITHDRAWN".equals(me.getStatus())) return false;
-		boolean isGoogle = me.getLoginId() != null && me.getLoginId().startsWith("g_");
-		if (!isGoogle && (password == null || !encoder.matches(password, me.getPassword()))) return false;
+		if (isGoogleAccount(me)) {
+			Map<String, Object> gInfo = verifyGoogleToken(googleCredential);
+			if (gInfo == null) return false;
+			String verifiedEmail = cleanEmail((String) gInfo.get("email"));
+			if (verifiedEmail == null || !verifiedEmail.equals(cleanEmail(me.getEmail()))) return false;
+		} else {
+			if (password == null || !encoder.matches(password, me.getPassword())) return false;
+		}
 
 		if (dao.updateWithdrawn(memberId) == 0) return false;
 		// 하던 인생이 '진행 중'으로 영원히 남지 않게 포기 처리 (끝난 인생 · 추모관은 그대로)
@@ -460,6 +540,9 @@ public class MemberService {
 		if ("RESET_PW".equals(purpose) && (dto.getLoginId() == null || dto.getLoginId().isBlank())) {
 			return "아이디를 입력해 주세요.";
 		}
+		if ("RESET_PW".equals(purpose) && dto.getLoginId().startsWith("g_")) {
+			return "Google 소셜 로그인 계정은 비밀번호 찾기를 이용할 수 없어요. Google 로그인을 이용해 주세요.";
+		}
 
 		// 2. 재발송은 1분 뒤부터 (EMAIL_AUTH 에 1분 안에 만든 번호가 있으면 막기)
 		if (dao.countRecentAuth(dto.getEmail(), purpose) > 0) {
@@ -474,13 +557,13 @@ public class MemberService {
 		dao.deleteOldAuth();
 		dao.insertEmailAuth(dto.getEmail(), code, purpose);
 
-		// 5. 일치하는 회원이 있을 때만 메일 발송
+		// 5. 일치하는 일반 회원이 있을 때만 메일 발송 (구글 소셜 계정은 찾기 대상 제외)
 		MemberDTO member = "FIND_ID".equals(purpose)
 				? dao.selectActiveByEmail(dto.getEmail())
 				: dao.selectActiveByLoginIdAndEmail(dto.getLoginId(), dto.getEmail());
 
 		// Gmail 보내기는 몇 초 걸려서, 메일은 일꾼(MAIL_WORKERS)에게 맡기고 화면에는 바로 대답함
-		if (member != null) {
+		if (member != null && !isGoogleAccount(member)) {
 			String email = dto.getEmail();
 			MAIL_WORKERS.execute(() -> {
 				try {
@@ -513,9 +596,9 @@ public class MemberService {
 	@Transactional
 	public String findId(String email, String code) {
 		email = cleanEmail(email);
-		// 1. 이메일로 회원 찾기 (먼저 → 없으면 인증번호를 쓰지 않음)
+		// 1. 이메일로 일반 회원 찾기 (먼저 → 없거나 구글 계정이면 인증번호를 쓰지 않음)
 		MemberDTO member = dao.selectActiveByEmail(email);
-		if (member == null) return null;
+		if (member == null || isGoogleAccount(member)) return null;
 
 		// 2. 인증번호를 서버에서 다시 확인 (화면에서 확인했어도 한 번 더 → 이때 '사용함' 처리)
 		if (!verifyCode(email, "FIND_ID", code)) return null;
@@ -535,14 +618,14 @@ public class MemberService {
 		if (!"FIND_ID".equals(purpose) && !"RESET_PW".equals(purpose)) return "잘못된 요청이에요.";
 		if (dto.getEmail() == null || dto.getCode() == null) return fail;
 
-		// 1. 맞는 회원인지 먼저 (안 맞아도 똑같은 문구 → 가입 여부 안 드러남)
+		// 1. 맞는 일반 회원인지 먼저 (안 맞아도 똑같은 문구 → 가입 여부 안 드러남)
 		//    아이디 찾기: 이메일만 / 비밀번호 찾기: 아이디 + 이메일
 		MemberDTO member = "FIND_ID".equals(purpose)
 				? dao.selectActiveByEmail(dto.getEmail())
 				: dao.selectActiveByLoginIdAndEmail(dto.getLoginId(), dto.getEmail());
 
-		// 2. 회원이 없거나 번호가 틀리면 틀린 횟수 +1 (5번 틀리면 그 번호는 못 씀)
-		if (member == null || dao.countValidAuth(dto.getEmail(), purpose, dto.getCode()) == 0) {
+		// 2. 회원이 없거나 구글 계정이거나 번호가 틀리면 틀린 횟수 +1 (5번 틀리면 그 번호는 못 씀)
+		if (member == null || isGoogleAccount(member) || dao.countValidAuth(dto.getEmail(), purpose, dto.getCode()) == 0) {
 			dao.increaseAuthFail(dto.getEmail(), purpose);
 			return fail;
 		}
@@ -568,6 +651,7 @@ public class MemberService {
 		String fail = "인증번호가 맞지 않거나 시간이 지났어요.";
 		MemberDTO member = dao.selectActiveByLoginIdAndEmail(dto.getLoginId(), dto.getEmail());
 		if (member == null) return fail;
+		if (isGoogleAccount(member)) return "Google 소셜 로그인 계정은 비밀번호를 재설정할 수 없어요.";
 
 		// 3. 인증번호를 서버에서 다시 확인 (화면에서 확인했어도 한 번 더 → 이때 '사용함' 처리)
 		if (!verifyCode(dto.getEmail(), "RESET_PW", dto.getCode())) return fail;
