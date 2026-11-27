@@ -754,6 +754,16 @@
 		WHERE ROWNUM &lt;= 8
 	</select>
 
+	<!-- C22 엔딩 크레딧: 착용 중인 코스튬 (다른 사람 결과 공개 보기에서도 입은 옷이 보이게) -->
+	<select id="selectEquippedWear" parameterType="int" resultType="map">
+		SELECT c.PART       AS "part",
+		       c.IMAGE_PATH AS "look"
+		FROM LIFE_COSTUME lc
+		JOIN COSTUME c ON c.COSTUME_ID = lc.COSTUME_ID
+		WHERE lc.LIFE_ID = #{lifeId}
+		  AND lc.IS_EQUIPPED = 'Y'
+	</select>
+
 	<!-- 삶을 마감: 인생에 딸린 기록부터 지우고 인생 지움 (한 번에, 하나라도 실패하면 전부 취소)
 	     포인트 내역은 지우지 않고 인생 번호만 비움 (회원 포인트 기록은 남김) -->
 	<delete id="deleteLife" parameterType="int">
